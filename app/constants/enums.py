@@ -135,3 +135,18 @@ class MediaAssetOrientation:
     PORTRAIT = 1 # 縦
     LANDSCAPE = 2 # 横
     SQUARE = 3 # 正方形
+
+# アイテムの種類
+class ItemType:
+    POST = 1 # 投稿
+    PLAN = 2 # プラン
+
+# 視聴権利のスコープ
+class EntitlementScope:
+    POST = 1 # 投稿
+    CREATOR_ALL = 2 # プラン
+
+# 視聴権利の付与元の種類
+class GrantedByType:
+    PURCHASE = 1  #単品購入
+    SUBSCRIPTION= 2 #サブスクリプション

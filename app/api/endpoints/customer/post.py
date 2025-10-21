@@ -1,9 +1,11 @@
+import re
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
+from app.schemas import post
 from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse
-from app.constants.enums import PostVisibility, PostType, PlanStatus, PriceType
+from app.constants.enums import PostVisibility, PostType, PlanStatus, PriceType, MediaAssetKind
 from app.crud.post_crud import create_post, get_post_detail_by_id
 from app.crud.plan_crud import create_plan
 from app.crud.price_crud import create_price
@@ -12,6 +14,7 @@ from app.crud.tags_crud import exit_tag, create_tag
 from app.crud.post_tags_crud import create_post_tag
 from app.crud.post_categories_crud import create_post_category
 from app.crud.post_crud import get_recent_posts
+from app.crud.entitlements_crud import check_entitlement
 from app.models.tags import Tags
 from typing import List
 import os
@@ -29,6 +32,8 @@ POST_TYPE_MAPPING = {
 
 
 BASE_URL = getenv("CDN_BASE_URL")
+MEDIA_CDN_URL = os.getenv("MEDIA_CDN_URL")
+CDN_BASE_URL = os.getenv("CDN_BASE_URL")
 
 @router.post("/create", response_model=PostResponse)
 async def create_post_endpoint(
@@ -90,63 +95,35 @@ async def get_post_detail(
     try:
         # CRUD関数を使用して投稿詳細を取得
         user_id = user.id if user else None
+
         post_data = get_post_detail_by_id(db, post_id, user_id)
-        
+
+                
         if not post_data:
             raise HTTPException(status_code=404, detail="投稿が見つかりません")
-        
-        # 環境変数から設定を取得
-        media_cdn_url = os.getenv("MEDIA_CDN_URL", "")
-        cdn_base_url = os.getenv("CDN_BASE_URL", "")
-        
-        # レスポンス用のデータを構築
-        video_url = None
-        if post_data["video_rendition"]:
-            video_url = f"{media_cdn_url}/{post_data['video_rendition']}"
-        
-        thumbnail_url = None
-        if post_data["thumbnail_key"]:
-            thumbnail_url = f"{cdn_base_url}/{post_data['thumbnail_key']}"
-        
-        creator_avatar = None
-        if post_data["creator_profile"] and post_data["creator_profile"].avatar_url:
-            creator_avatar = f"{cdn_base_url}/{post_data['creator_profile'].avatar_url}"
-        
-        
+
+        # クリエイター情報を整形
+        creator_info = _format_creator_info(post_data["creator"], post_data["creator_profile"])
+
+        # メディア情報を整形
+        media_info, thumbnail_key = _format_media_info(post_data["media_assets"], post_data["is_entitlement"])
+
         # カテゴリ情報を整形
-        categories_data = []
-        if post_data["categories"]:
-            categories_data = [
-                {
-                    "id": str(category.id),
-                    "name": category.name,
-                    "slug": category.slug
-                }
-                for category in post_data["categories"]
-            ]
-        
+        categories_data = _format_categories_info(post_data["categories"])
+
+        # 販売情報を整形
+        sale_info = _format_sale_info(post_data["price"], post_data["plans"])
+
+        # 投稿詳細を整形
         post_detail = {
             "id": str(post_data["post"].id),
-            "title": post_data["post"].description or "無題",
+            "post_type": post_data["post"].post_type,
             "description": post_data["post"].description,
-            "purchased": post_data["purchased"],
-            "video_url": video_url,
-            "thumbnail": thumbnail_url,
-            "main_video_duration": post_data["main_video_duration"],
-            "sample_video_duration": post_data["sample_video_duration"],
-            "views": 0,
-            "likes": post_data["likes_count"],
-            "creator": {
-                "name": post_data["creator_profile"].username if post_data["creator_profile"] else post_data["creator"].email,
-                "profile_name": post_data["creator"].profile_name if post_data["creator_profile"] else post_data["creator"].email,
-                "avatar": creator_avatar,
-                "verified": True
-            },
-            "single": post_data["single"],
-            "subscription": post_data["subscription"],
+            "thumbnail_key": thumbnail_key,
+            "creator": creator_info,
             "categories": categories_data,
-            "created_at": post_data["post"].created_at.isoformat(),
-            "updated_at": post_data["post"].updated_at.isoformat()
+            "media_info": media_info,
+            "sale_info": sale_info,
         }
         
         return post_detail
@@ -188,38 +165,6 @@ def _determine_visibility(single: bool, plan: bool) -> int:
         return PostVisibility.PLAN
     else:
         return PostVisibility.SINGLE  # デフォルト
-
-def _create_individual_plan(db: Session, user_id: str, price: int):
-    """単品販売用のプランと価格を作成する"""
-    plan_data = {
-        "creator_user_id": user_id,
-        "name": "単品販売",
-        "description": "単品販売",
-        "type": PlanStatus.SINGLE,
-    }
-    plan = create_plan(db, plan_data)
-    
-    price_data = {
-        "plan_id": plan.id,
-        "type": PriceType.SINGLE,
-        "currency": "JPY",
-        "price": price,
-    }
-    price_obj = create_price(db, price_data)
-    
-    return plan, price_obj
-
-def _link_plans_to_post(db: Session, post_id: str, plan_ids: list, individual_plan_id: str = None):
-    """投稿にプランを紐づける"""
-    if individual_plan_id:
-        plan_ids.append(individual_plan_id)
-    
-    for plan_id in plan_ids:
-        plan_post_data = {
-            "post_id": post_id,
-            "plan_id": plan_id,
-        }
-        create_post_plan(db, plan_post_data)
 
 def _create_post(db: Session, post_data: dict, user_id: str, visibility: int):
     """投稿を作成する"""
@@ -315,3 +260,67 @@ def _create_plan(db: Session, post_id: str, plan_ids: list):
         }
         plan_post.append(create_post_plan(db, plan_post_data))
     return plan_post
+
+def _format_media_info(media_assets: list, is_entitlement: bool):
+    """メディア情報を整形する"""
+    set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
+    set_file_name = "_1080w.webp" if is_entitlement else "_mosaic.webp"
+    
+    media_info = []
+    for media_asset in media_assets:
+        if media_asset.kind == MediaAssetKind.THUMBNAIL:
+            thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
+        elif media_asset.kind == MediaAssetKind.IMAGES:
+            media_info.append({
+                "kind": media_asset.kind,
+                "duration": media_asset.duration_sec,
+                "media_assets_id": media_asset.id,
+                "orientation": media_asset.orientation,
+                "post_id": media_asset.post_id,
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{set_file_name}"
+            })
+        elif media_asset.kind == set_media_kind:
+            media_info.append({
+                "kind": media_asset.kind,
+                "duration": media_asset.duration_sec,
+                "media_assets_id": media_asset.id,
+                "orientation": media_asset.orientation,
+                "post_id": media_asset.post_id,
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
+            })
+
+    return media_info, thumbnail_key
+
+def _format_creator_info(creator: dict, creator_profile: dict):
+    """クリエイター情報を整形する"""
+    return {
+        "username": creator_profile.username if creator_profile else creator.email,
+        "profile_name": creator.profile_name if creator_profile else creator.email,
+        "avatar": f"{BASE_URL}/{creator_profile.avatar_url}" if creator_profile else None,
+    }
+
+def _format_categories_info(categories: list):
+    """カテゴリ情報を整形する"""
+    return [
+        {
+            "id": str(category.id),
+            "name": category.name,
+            "slug": category.slug
+        }
+        for category in categories
+    ]
+
+def _format_sale_info(price: dict, plans: list):
+    """販売情報を整形する"""
+    return {
+        "price": price.price if price else None,
+        "plans": [
+            {
+                "id": str(plan.id),
+                "name": plan.name,
+                "description": plan.description,
+                "price": plan.price
+            }
+            for plan in plans
+        ]
+    }

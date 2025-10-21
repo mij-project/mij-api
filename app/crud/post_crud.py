@@ -1,3 +1,5 @@
+import os
+import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, desc, exists
@@ -16,6 +18,7 @@ from app.models.media_assets import MediaAssets
 from app.models.plans import Plans, PostPlans   
 from app.models.prices import Prices
 from app.models.media_renditions import MediaRenditions
+from app.crud.entitlements_crud import check_entitlement
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PlanStatus
 from app.models.purchases import Purchases
@@ -25,6 +28,9 @@ from datetime import datetime, timedelta
 ThumbnailAssets = aliased(MediaAssets)
 VideoAssets = aliased(MediaAssets)
 # ========== 投稿管理 ==========
+
+MEDIA_CDN_URL = os.getenv("MEDIA_CDN_URL")
+CDN_BASE_URL = os.getenv("CDN_BASE_URL")
 
 
 # ========== 取得系 ==========
@@ -253,21 +259,20 @@ def get_post_detail_by_id(db: Session, post_id: str, user_id: str | None) -> dic
     post, creator, creator_profile = _get_post_and_creator_info(db, post_id)
     if not post:
         return None
-    
+        
     # 各種情報を取得
     categories = _get_post_categories(db, post_id)
-    likes_count = _get_likes_count(db, post_id)
     sale_info = _get_sale_info(db, post_id)
     media_info = _get_media_info(db, post_id, user_id)
-    
+
     # 結果を統合して返却
     return {
         "post": post,
         "creator": creator,
         "creator_profile": creator_profile,
         "categories": categories,
-        "likes_count": likes_count,
-        **sale_info,
+        "price": sale_info["price"],
+        "plans": sale_info["plans"],
         **media_info
     }
 
@@ -448,6 +453,8 @@ def get_ranking_posts(db: Session, limit: int = 5):
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
+        # post_plansテーブルとの結合
+        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
         # サムネイル用のMediaAssets（kind=2）
         .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
         # メインビデオ用のMediaAssets（kind=4）
@@ -482,6 +489,8 @@ def get_recent_posts(db: Session, limit: int = 5):
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
+        # post_plansテーブルとの結合
+        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
         # サムネイル用のMediaAssets（kind=2）
         .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
         # メインビデオ用のMediaAssets（kind=4）
@@ -697,7 +706,12 @@ def _get_post_and_creator_info(db: Session, post_id: str) -> tuple:
     if not post:
         return None, None, None
     
-    creator = db.query(Users).filter(Users.id == post.creator_user_id).first()
+    creator = (
+        db.query(
+            Users
+        )
+        .filter(
+            Users.id == post.creator_user_id).first())
     creator_profile = db.query(Profiles).filter(Profiles.user_id == post.creator_user_id).first()
     
     return post, creator, creator_profile
@@ -717,92 +731,64 @@ def _get_likes_count(db: Session, post_id: str) -> int:
     return db.query(func.count(Likes.post_id)).filter(Likes.post_id == post_id).scalar() or 0
 
 def _get_sale_info(db: Session, post_id: str) -> dict:
-    """販売情報を取得・判定"""
-    post_plans = (
-        db.query(PostPlans, Plans, Prices)
-        .join(Plans, PostPlans.plan_id == Plans.id)
-        .join(Prices, Plans.id == Prices.plan_id)
+    """投稿に紐づく単品情報とプラン金額を取得
+
+    Args:
+        db (Session): データベースセッション
+        post_id (str): 投稿ID
+
+    Returns:
+        dict: 単品売上情報
+    """
+    
+    # Priceテーブルから金額を取得
+    price = db.query(Prices).filter(Prices.post_id == post_id).first()
+    
+    #Planテーブルからプラン金額を取得（post_plansテーブルを経由）
+    plans = (
+        db.query(Plans)
+        .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(PostPlans.post_id == post_id)
-        .filter(Plans.status == 1)
-        .filter(Prices.status == 1)
         .all()
     )
     
-    sale_type = "free"
-    single = None
-    subscription = None
-    
-    if post_plans:
-        has_single = any(plan.type == PlanStatus.SINGLE for _, plan, _ in post_plans)
-        has_subscription = any(plan.type == PlanStatus.PLAN for _, plan, _ in post_plans)
-        
-        if has_single and has_subscription:
-            sale_type = "both"
-        elif has_single:
-            sale_type = "single"
-        elif has_subscription:
-            sale_type = "subscription"
-        
-        # 金額を取得
-        for _, plan, price in post_plans:
-            if plan.type == PlanStatus.SINGLE and single is None:
-                single = {
-                    "id": plan.id,
-                    "amount": price.price,
-                    "currency": price.currency
-                }
-            elif plan.type == PlanStatus.PLAN and subscription is None:
-                subscription = {
-                    "id": plan.id,
-                    "amount": price.price,
-                    "currency": price.currency,
-                    "interval": price.interval,
-                    "plan_name": plan.name,
-                    "plan_description": plan.description,
-                }
-    
     return {
-        "sale_type": sale_type,
-        "single": single,
-        "subscription": subscription
+        "price": price,
+        "plans": plans
     }
 
 def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     """メディア情報を取得・処理"""
     media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
-    purchased = _is_purchased(db, user_id, post_id) if user_id else False
+    is_entitlement = check_entitlement(db, user_id, post_id) if user_id else False
+
+    set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
+    set_file_name = "_1080w.webp" if is_entitlement else "_mosaic.webp"
     
-    video_rendition = None
-    thumbnail_key = None
-    main_video_duration = None
-    sample_video_duration = None
-    
+    media_info = []
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
-            thumbnail_key = media_asset.storage_key
-        elif media_asset.kind in [MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
-            renditions = db.query(MediaRenditions).filter(
-                MediaRenditions.asset_id == media_asset.id
-            ).first()
-            
-            if renditions:
-                # 購入状況に応じて適切な動画を設定
-                if purchased and media_asset.kind == MediaAssetKind.MAIN_VIDEO:
-                    video_rendition = renditions.storage_key
-                elif not purchased and media_asset.kind == MediaAssetKind.SAMPLE_VIDEO:
-                    video_rendition = renditions.storage_key
-                
-                # 動画の種類に応じてdurationを設定
-                if media_asset.kind == MediaAssetKind.MAIN_VIDEO:
-                    main_video_duration = get_video_duration(renditions.duration_sec)
-                elif media_asset.kind == MediaAssetKind.SAMPLE_VIDEO:
-                    sample_video_duration = get_video_duration(renditions.duration_sec)
+            thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
+        elif media_asset.kind == MediaAssetKind.IMAGES:
+            media_info.append({
+                "kind": media_asset.kind,
+                "duration": media_asset.duration_sec,
+                "media_assets_id": media_asset.id,
+                "orientation": media_asset.orientation,
+                "post_id": media_asset.post_id,
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{set_file_name}"
+            })
+        elif media_asset.kind == set_media_kind:
+            media_info.append({
+                "kind": media_asset.kind,
+                "duration": media_asset.duration_sec,
+                "media_assets_id": media_asset.id,
+                "orientation": media_asset.orientation,
+                "post_id": media_asset.post_id,
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
+            })
     
     return {
-        "video_rendition": video_rendition,
-        "thumbnail_key": thumbnail_key,
-        "main_video_duration": main_video_duration,
-        "sample_video_duration": sample_video_duration,
-        "purchased": purchased,
-        "media_assets": media_assets
+        "media_assets": media_assets,
+        "is_entitlement": is_entitlement,
     }
