@@ -12,7 +12,6 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from .user import Users
     from .subscriptions import Subscriptions
-    from .purchases import Purchases
     from .posts import Posts
     from .prices import Prices
 
@@ -33,7 +32,6 @@ class Plans(Base):
     creator: Mapped["Users"] = relationship("Users", back_populates="plans")
     subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="plan")
     post_plans: Mapped[List["PostPlans"]] = relationship("PostPlans", back_populates="plan")
-    pure_purchases: Mapped[List["Purchases"]] = relationship("Purchases", back_populates="plan")
 
 class PostPlans(Base):
     __tablename__ = "post_plans"

@@ -136,6 +136,11 @@ class MediaAssetOrientation:
     LANDSCAPE = 2 # 横
     SQUARE = 3 # 正方形
 
+class OrderStatus:
+    PENDING = 1 # 未承認
+    REJECTED = 2 # 拒否
+    PAID = 3 # 支払い済み
+
 # アイテムの種類
 class ItemType:
     POST = 1 # 投稿
@@ -150,3 +155,17 @@ class EntitlementScope:
 class GrantedByType:
     PURCHASE = 1  #単品購入
     SUBSCRIPTION= 2 #サブスクリプション
+
+# サブスクリプションの種類
+class SubscriptionStatus:
+    ACTIVE = 1 # 有効
+    INACTIVE = 2 # 無効
+    CANCELLED = 3 # キャンセル
+    EXPIRED = 4 # 期限切れ
+    PENDING = 5 # 保留
+    FAILED = 6 # 失敗
+    REFUNDED = 7 # 返金
+    REFUND_FAILED = 8 # 返金失敗
+    REFUND_PENDING = 9 # 返金保留
+    REFUND_PROCESSING = 10 # 返金処理中
+    REFUND_COMPLETED = 11 # 返金完了

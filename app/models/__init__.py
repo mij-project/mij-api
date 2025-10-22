@@ -11,7 +11,7 @@ from .plans import Plans
 from .prices import Prices
 from .subscriptions import Subscriptions
 from .orders import Orders, OrderItems
-from .payments import Payments, Refunds
+from .payments import Payments, Refunds, PaymentEvents
 from .entitlements import Entitlements
 from .social import Follows, Likes, Comments, Bookmarks
 from .notifications import Notifications
@@ -21,7 +21,6 @@ from .tags import Tags, PostTags
 from .i18n import I18nLanguages, I18nTexts
 from .creator_type import CreatorType
 from .gender import Gender
-from .purchases import Purchases
 from .media_rendition_jobs import MediaRenditionJobs
 from .preregistrations import Preregistrations
 from .email_verification_tokens import EmailVerificationTokens
@@ -36,7 +35,7 @@ __all__ = [
     "Orders", "OrderItems", "Payments", "Refunds", "Entitlements", "Follows", "Likes", "Comments",
     "Bookmarks", "Notifications", "IdentityVerifications", "IdentityDocuments",
     "AuditLogs", "Tags", "PostTags", "I18nLanguages", "I18nTexts",
-    "CreatorType", "Gender", "Purchases", "MediaRenditionJobs", "Preregistrations",
+    "CreatorType", "Gender", "MediaRenditionJobs", "Preregistrations",
     "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants", 
-    "Admins"
+    "Admins", "PaymentEvents"
 ]

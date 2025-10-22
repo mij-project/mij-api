@@ -26,6 +26,3 @@ class Purchases(Base):
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     
     # Relationships
-    user: Mapped["Users"] = relationship("Users", back_populates="pure_purchases")
-    post: Mapped["Posts"] = relationship("Posts", back_populates="pure_purchases")
-    plan: Mapped["Plans"] = relationship("Plans", back_populates="pure_purchases")

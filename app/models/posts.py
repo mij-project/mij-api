@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from .post_categories import PostCategories
     from .media_assets import MediaAssets
     from .plans import PostPlans
-    from .purchases import Purchases
     from .prices import Prices
 
 class Posts(Base):
@@ -36,5 +35,4 @@ class Posts(Base):
     post_categories: Mapped[List["PostCategories"]] = relationship("PostCategories", back_populates="post")
     media_assets: Mapped[List["MediaAssets"]] = relationship("MediaAssets", back_populates="post")
     post_plans: Mapped[List["PostPlans"]] = relationship("PostPlans", back_populates="post")
-    pure_purchases: Mapped[List["Purchases"]] = relationship("Purchases", back_populates="post")
     prices: Mapped[List["Prices"]] = relationship("Prices", back_populates="post")

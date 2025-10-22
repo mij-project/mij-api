@@ -7,7 +7,7 @@ from app.api.endpoints.customer import (
     creater, gender, plans, categories, post,
     transcode_mc, top, category, ranking, social,
     purchases, preregistrations, account, auth_email_verify,
-    conversations
+    conversations, order
 )
 
 # Admin routes
@@ -51,6 +51,7 @@ api_router.include_router(purchases.router, prefix="/purchases", tags=["Purchase
 api_router.include_router(preregistrations.router, prefix="/preregistrations", tags=["Preregistrations"])
 api_router.include_router(auth_email_verify.router, prefix="/auth/email", tags=["Auth Email"])
 api_router.include_router(conversations.router, prefix="/conversations", tags=["Conversations"])
+api_router.include_router(order.router, prefix="/orders", tags=["Orders"])
 
 
 # Admin routes

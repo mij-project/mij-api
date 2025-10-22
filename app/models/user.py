@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from .orders import Orders
     from .creator_type import CreatorType
     from .gender import Gender
-    from .purchases import Purchases
     from .email_verification_tokens import EmailVerificationTokens
     from .conversation_messages import ConversationMessages
     from .conversation_participants import ConversationParticipants
@@ -47,7 +46,6 @@ class Users(Base):
     orders: Mapped[List["Orders"]] = relationship("Orders", back_populates="user")
     creator_type: Mapped[List["CreatorType"]] = relationship("CreatorType", back_populates="user", cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
     genders: Mapped[List["Gender"]] = relationship("Gender", secondary="creator_type", viewonly=True, lazy="selectin")
-    pure_purchases: Mapped[List["Purchases"]] = relationship("Purchases", back_populates="user")
     email_verification_tokens: Mapped[List["EmailVerificationTokens"]] = relationship("EmailVerificationTokens", back_populates="user")
     conversations: Mapped[List["ConversationMessages"]] = relationship("ConversationMessages", back_populates="sender")
     participants: Mapped[List["ConversationParticipants"]] = relationship("ConversationParticipants", back_populates="user")

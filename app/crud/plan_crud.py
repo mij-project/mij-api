@@ -166,63 +166,8 @@ def get_user_plans(db: Session, user_id: UUID) -> List[PlanResponse]:
 
     return plans_response
 
-def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tuple]:
+def get_plan_by_id(db: Session, plan_id: UUID) -> Plans:
     """
-    プランに紐づく投稿一覧を取得
-    ユーザーがそのプランを購入しているか確認してから返す
+    プランをIDで取得
     """
-    from app.models.social import Likes, Comments
-    from sqlalchemy.orm import aliased
-
-    ThumbnailAssets = aliased(MediaAssets)
-
-    # ユーザーがこのプランを購入しているか確認
-    purchase = (
-        db.query(Purchases)
-        .filter(
-            Purchases.user_id == user_id,
-            Purchases.plan_id == plan_id,
-            Purchases.deleted_at.is_(None)
-        )
-        .first()
-    )
-
-    if not purchase:
-        return []
-
-    # プランに紐づく投稿を取得
-    return (
-        db.query(
-            Posts,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
-            ThumbnailAssets.duration_sec,
-            func.count(func.distinct(Likes.user_id)).label('likes_count'),
-            func.count(func.distinct(Comments.id)).label('comments_count'),
-            Posts.created_at
-        )
-        .join(PostPlans, Posts.id == PostPlans.post_id)
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .outerjoin(Comments, Posts.id == Comments.post_id)
-        .filter(
-            PostPlans.plan_id == plan_id,
-            Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
-        )
-        .group_by(
-            Posts.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            ThumbnailAssets.storage_key,
-            ThumbnailAssets.duration_sec,
-            Posts.created_at
-        )
-        .order_by(Posts.created_at.desc())
-        .all()
-    )
+    return db.query(Plans).filter(Plans.id == plan_id).first()

@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.prices import Prices
+from uuid import UUID
 
 def create_price(db: Session, price_data) -> Prices:
     """
@@ -9,3 +10,9 @@ def create_price(db: Session, price_data) -> Prices:
     db.add(db_price)
     db.flush()
     return db_price
+
+def get_price_by_id(db: Session, price_id: UUID) -> Prices:
+    """
+    価格を取得
+    """
+    return db.query(Prices).filter(Prices.id == price_id).first()

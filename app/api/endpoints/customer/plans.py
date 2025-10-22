@@ -4,7 +4,8 @@ from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
 from app.schemas.plan import PlanCreateRequest, PlanResponse, PlanListResponse, PlanPostsResponse, PlanPostResponse
-from app.crud.plan_crud import create_plan, get_user_plans, get_posts_by_plan_id
+from app.crud.plan_crud import create_plan, get_user_plans
+from app.crud.post_crud import get_posts_by_plan_id
 from app.constants.enums import PlanStatus, PriceType
 from app.crud.price_crud import create_price
 from uuid import UUID
