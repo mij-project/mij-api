@@ -53,7 +53,7 @@ def get_sms_verification_by_phone_e164_and_purpose(db: Session, phone_e164: str,
     ).order_by(SMSVerifications.created_at.desc()).first()
 
 
-def update_sms_verification_status(db: Session, sms_verification_id: str, status: int) -> SMSVerifications:
+def update_sms_verification_status(db: Session, sms_verification_id: str, status: int, attempts: int = 0) -> SMSVerifications:
     """
     SMS認証を更新する
     """
@@ -62,6 +62,7 @@ def update_sms_verification_status(db: Session, sms_verification_id: str, status
         SMSVerifications.id == sms_verification_id
     ).update({
         "status": status,
+        "attempts": attempts,
         "updated_at": datetime.now()
     })
     

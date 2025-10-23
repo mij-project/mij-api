@@ -20,6 +20,7 @@ class SMSVerifications(Base):
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     phone_e164: Mapped[str] = mapped_column(Text, nullable=False)
     code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0) # 認証試行回数
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     purpose: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     expires_at: Mapped[datetime] = mapped_column(nullable=False)

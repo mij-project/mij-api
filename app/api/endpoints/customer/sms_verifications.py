@@ -24,6 +24,7 @@ router = APIRouter()
 
 RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
 SMS_TTL = int(os.getenv("SMS_CODE_TTL_SECONDS", "300"))
+MAX_ATTEMPTS = int(os.getenv("SMS_MAX_ATTEMPTS", "3"))
 
 @router.post("/send")
 def send_sms_verification(
@@ -99,14 +100,18 @@ def verify_sms_verification(
 
         db_sms_verification = get_sms_verification_by_phone_e164_and_purpose(db, sms_verification_request.phone_e164, sms_verification_request.purpose)
 
-        # if not db_sms_verification:
-        #     raise HTTPException(status_code=400, detail="コードが見つかりません。再送してください。")
+        if not db_sms_verification:
+            raise HTTPException(status_code=400, detail="コードが見つかりません。再送してください。")
 
-        # if db_sms_verification.expires_at < now:
-        #     raise HTTPException(status_code=400, detail="コードの有効期限が切れています。再送してください。")
+        if db_sms_verification.expires_at < now:
+            raise HTTPException(status_code=400, detail="コードの有効期限が切れています。再送してください。")
+
+        if db_sms_verification.attempts >= MAX_ATTEMPTS:
+            raise HTTPException(status_code=400, detail="認証試行回数が最大値を超えました。再送してください。")
 
         if check_sms_verify(sms_verification_request.code, db_sms_verification.code_hash):
-            sms_verification = update_sms_verification_status(db, db_sms_verification.id, SMSStatus.VERIFIED)
+            db_sms_verification.attempts += 1
+            sms_verification = update_sms_verification_status(db, db_sms_verification.id, SMSStatus.VERIFIED, db_sms_verification.attempts)
 
             # クリエイター情報を作成
             creator = _insert_creator(db, db_sms_verification.user_id, sms_verification_request.phone_e164)
@@ -119,6 +124,9 @@ def verify_sms_verification(
             db.commit()
             return True
         else:
+            db_sms_verification.attempts += 1
+            sms_verification = update_sms_verification_status(db, db_sms_verification.id, SMSStatus.FAILED, db_sms_verification.attempts)
+            db.commit()
             raise HTTPException(status_code=400, detail="コードが間違っています。再送してください。")
     except Exception as e:
         db.rollback()

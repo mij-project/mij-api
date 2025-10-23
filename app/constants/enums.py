@@ -178,6 +178,7 @@ class SMSStatus:
     VERIFIED = 2 # 使用済み
     EXPIRED = 3 # 期限切れ
     INVALIDATED = 9 # 無効化
+    FAILED = 10 # 認証失敗
 
 # SMS認証の目的
 class SMSPurpose:

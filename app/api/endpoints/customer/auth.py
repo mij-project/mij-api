@@ -258,7 +258,12 @@ def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
         user.last_login_at = datetime.utcnow()
         db.commit()
         
-        return {"id": str(user.id), "email": user.email, "role": user.role}
+        return {
+            "id": str(user.id), 
+            "email": user.email, 
+            "role": user.role, 
+            "is_phone_verified": user.is_phone_verified,
+        }
     except HTTPException:
         raise
     except Exception as e:
