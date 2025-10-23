@@ -17,11 +17,7 @@ import os
 
 CDN_URL = os.getenv("CDN_BASE_URL")
 
-
-
 """管理機能用のCRUD操作クラス"""
-
-
 def get_dashboard_info(db: Session) -> Dict[str, Any]:
     """
     ダッシュボード統計情報を取得
@@ -238,15 +234,15 @@ def get_identity_verifications_paginated(
     
     # ソート処理
     if sort == "created_at_desc":
-        query = query.order_by(desc(IdentityVerifications.created_at))
+        query = query.order_by(desc(IdentityVerifications.checked_at))
     elif sort == "created_at_asc":
-        query = query.order_by(asc(IdentityVerifications.created_at))
+        query = query.order_by(asc(IdentityVerifications.checked_at))
     elif sort == "user_name_asc":
         query = query.join(Profiles).order_by(asc(Profiles.username))
     elif sort == "user_name_desc":
         query = query.join(Profiles).order_by(desc(Profiles.username))
     else:
-        query = query.order_by(desc(IdentityVerifications.created_at))
+        query = query.order_by(desc(IdentityVerifications.checked_at))
     
     total = query.count()
     verifications = query.offset(skip).limit(limit).all()

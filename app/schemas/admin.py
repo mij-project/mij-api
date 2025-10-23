@@ -80,15 +80,23 @@ class CreatorApplicationReview(BaseModel):
     status: str  # "approved" or "rejected"
     notes: Optional[str]
 
+class IdentityDocumentResponse(BaseModel):
+    id: str
+    kind: int
+    storage_key: str
+    created_at: datetime
+    presigned_url: Optional[str] = None
+
 class AdminIdentityVerificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: str
     user_id: str
     user: AdminUserResponse
     status: int
     checked_at: Optional[datetime]
     notes: Optional[str]
+    documents: List['IdentityDocumentResponse'] = []
 
     @classmethod
     def from_orm(cls, verification):
@@ -99,6 +107,7 @@ class AdminIdentityVerificationResponse(BaseModel):
             "status": verification.status,
             "checked_at": verification.checked_at,
             "notes": verification.notes,
+            "documents": [],
         }
         return cls(**data)
 

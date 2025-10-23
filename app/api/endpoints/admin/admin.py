@@ -9,19 +9,17 @@ from app.deps.auth import get_current_admin_user
 from app.schemas.admin import (
     AdminDashboardStats,
     AdminCreatorApplicationResponse,
-    AdminIdentityVerificationResponse,
     AdminPostResponse,
     AdminUserResponse,
     AdminSalesData,
     CreatorApplicationReview,
-    IdentityVerificationReview,
     PaginatedResponse,
     CreateUserRequest,
-    AdminPostDetailResponse
+    AdminPostDetailResponse,
 )
 from app.models.user import Users
 from app.models.creators import Creators
-from app.models.identity import IdentityVerifications
+from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.models.posts import Posts
 from app.models.profiles import Profiles
 from app.core.security import hash_password
@@ -31,8 +29,6 @@ from app.crud.admin_crud import (
     update_user_status,
     get_creator_applications_paginated,
     update_creator_application_status,
-    get_identity_verifications_paginated,
-    update_identity_verification_status,
     get_posts_paginated,
     update_post_status,
     get_post_by_id,
@@ -264,63 +260,6 @@ def review_creator_application(
     
     return {"message": "申請審査を完了しました"}
 
-@router.get("/identity-verifications", response_model=PaginatedResponse[AdminIdentityVerificationResponse])
-def get_identity_verifications(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    search: Optional[str] = None,
-    status: Optional[str] = None,
-    sort: Optional[str] = "created_at_desc",
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """身分証明審査一覧を取得"""
-    
-    verifications, total = get_identity_verifications_paginated(
-        db=db,
-        page=page,
-        limit=limit,
-        search=search,
-        status=status,
-        sort=sort
-    )
-    
-    return PaginatedResponse(
-        data=[AdminIdentityVerificationResponse.from_orm(v) for v in verifications],
-        total=total,
-        page=page,
-        limit=limit,
-        total_pages=(total + limit - 1) // limit if total > 0 else 1
-    )
-
-@router.get("/identity-verifications/{verification_id}", response_model=AdminIdentityVerificationResponse)
-def get_identity_verification(
-    verification_id: str,
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """身分証明審査詳細を取得"""
-    
-    verification = db.query(IdentityVerifications).filter(IdentityVerifications.id == verification_id).first()
-    if not verification:
-        raise HTTPException(status_code=404, detail="審査が見つかりません")
-    
-    return AdminIdentityVerificationResponse.from_orm(verification)
-
-@router.patch("/identity-verifications/{verification_id}/review")
-def review_identity_verification(
-    verification_id: str,
-    review: IdentityVerificationReview,
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """身分証明を審査"""
-    
-    success = update_identity_verification_status(db, verification_id, review.status)
-    if not success:
-        raise HTTPException(status_code=404, detail="審査が見つかりませんまたは既に完了済みです")
-    
-    return {"message": "身分証明審査を完了しました"}
 
 @router.get("/posts", response_model=PaginatedResponse[AdminPostResponse])
 def get_posts(

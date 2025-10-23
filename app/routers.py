@@ -13,7 +13,8 @@ from app.api.endpoints.customer import (
 # Admin routes
 from app.api.endpoints.admin import (
     admin, admin_auth, conversations as admin_conversations,
-    preregistrations as admin_preregistrations
+    preregistrations as admin_preregistrations,
+    identity as admin_identity
 )
 
 # Debug routes
@@ -59,6 +60,6 @@ api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin 
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(admin_conversations.router, prefix="/admin", tags=["Admin Conversations"])
 api_router.include_router(admin_preregistrations.router, prefix="/admin", tags=["Admin Preregistrations"])
-
+api_router.include_router(admin_identity.router, prefix="/admin", tags=["Identity"])
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])

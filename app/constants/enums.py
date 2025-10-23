@@ -25,14 +25,9 @@ class CreatorStatus:
 # 本人確認ステータス
 class VerificationStatus:
     PENDING = 0 # 未承認
-    APPROVED = 1 # 承認
+    WAITING = 1 #承認待ち
     REJECTED = 2 # 拒否
-
-# 本人確認ステータス
-class IdentityStatus:
-    PENDING = 0 # 未承認
-    APPROVED = 1 # 承認
-    REJECTED = 2 # 拒否
+    APPROVED = 3 # 承認
 
 # 本人確認書類の種類
 class IdentityKind:
