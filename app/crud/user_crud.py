@@ -231,6 +231,16 @@ def update_user_phone_verified_at(db: Session, user_id: str) -> Users:
     # 更新されたオブジェクトを取得して返す
     return db.query(Users).filter(Users.id==user_id).first()
 
+def update_user_identity_verified_at(db: Session, user_id: str) -> Users:
+    """
+    ユーザーの身分証明を検証済みに更新
+    """
+    db.query(Users).filter(Users.id==user_id).update({
+        "is_identity_verified": True,
+        "identity_verified_at": datetime.now()
+    })
+    return db.query(Users).filter(Users.id==user_id).first()
+
 def update_user_email_verified_at(db: Session, user_id: str) -> Users:
     """
     ユーザーのメールアドレスを検証済みに更新

@@ -263,6 +263,7 @@ def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
             "email": user.email, 
             "role": user.role, 
             "is_phone_verified": user.is_phone_verified,
+            "is_identity_verified": user.is_identity_verified,
         }
     except HTTPException:
         raise
