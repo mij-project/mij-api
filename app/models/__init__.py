@@ -27,6 +27,7 @@ from .email_verification_tokens import EmailVerificationTokens
 from .conversations import Conversations
 from .conversation_messages import ConversationMessages
 from .conversation_participants import ConversationParticipants
+from .sms_verifications import SMSVerifications
 from .admins import Admins
 
 __all__ = [
@@ -37,5 +38,5 @@ __all__ = [
     "AuditLogs", "Tags", "PostTags", "I18nLanguages", "I18nTexts",
     "CreatorType", "Gender", "MediaRenditionJobs", "Preregistrations",
     "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants", 
-    "Admins", "PaymentEvents"
+    "Admins", "PaymentEvents", "SMSVerifications"
 ]

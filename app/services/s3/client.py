@@ -9,6 +9,7 @@ Resource = Literal["identity"]
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
 
+
 def s3_client():
     return boto3.client(
         "s3",
@@ -45,6 +46,13 @@ def bucket_exit_check(resource: Resource, key: str):
         return False
     return True
 
+def sms_client():
+    return boto3.client(
+        "sns",
+        region_name=AWS_REGION,
+    )
+
+
 @lru_cache(maxsize=1)
 def s3_client_for_mc():
     base = boto3.client("mediaconvert", region_name=AWS_REGION)
@@ -71,3 +79,10 @@ KMS_ALIAS_MEDIA = os.environ.get("KMS_ALIAS_MEDIA")
 
 MEDIACONVERT_ROLE_ARN = os.environ.get("MEDIACONVERT_ROLE_ARN")
 OUTPUT_COVERT_KMS_ARN = os.environ.get("OUTPUT_KMS_ARN")
+
+# SMS認証
+SMS_TTL = int(os.getenv("SMS_CODE_TTL_SECONDS", "300"))
+RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
+MAX_ATTEMPTS = int(os.getenv("SMS_MAX_ATTEMPTS", "5"))
+SNS_SENDER_ID = os.getenv("SNS_SENDER_ID", "mijfans")
+SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")

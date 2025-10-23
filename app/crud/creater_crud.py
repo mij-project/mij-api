@@ -12,25 +12,11 @@ from app.models.profiles import Profiles
 from sqlalchemy import desc
 from app.models.social import Follows
 
-def create_creator(db: Session, creator_create: CreatorCreate, user_id: UUID) -> Creators:
-    db_creator = Creators(
-        user_id=user_id,
-        name=creator_create.name,
-        first_name_kana=creator_create.first_name_kana,
-        last_name_kana=creator_create.last_name_kana,
-        address=creator_create.address,
-        phone_number=creator_create.phone_number,
-        birth_date=creator_create.birth_date,
-        status=CreatorStatus.ENTERED,
-        tos_accepted_at=datetime.utcnow()
-    )
+def create_creator(db: Session, creator_create: dict) -> Creators:
+    db_creator = Creators(**creator_create)
     db.add(db_creator)
-
-    # ユーザーのロール更新
-    user = db.get(Users, user_id)
-    if user:
-        user.role = AccountType.CREATOR
-
+    db.commit()
+    db.refresh(db_creator)
     return db_creator
 
 def update_creator_status(db: Session, user_id: UUID, status: CreatorStatus) -> Creators:

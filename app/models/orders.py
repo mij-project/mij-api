@@ -11,7 +11,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from .user import Users
-    from .posts import Posts
+    from .posts import Posts 
     from .plans import Plans
 
 class Orders(Base):

@@ -19,6 +19,8 @@ class CreatorStatus:
     VERIFIED = 3 # 本人確認済み
     REJECTED = 4 # 拒否
     SUSPENDED = 5 # 停止
+    PHONE_NUMBER_ENTERED = 6 # 電話番号入力済み
+    INFORMATION_ENTERED = 7 # 個人情報登録済み
 
 # 本人確認ステータス
 class VerificationStatus:
@@ -169,3 +171,18 @@ class SubscriptionStatus:
     REFUND_PENDING = 9 # 返金保留
     REFUND_PROCESSING = 10 # 返金処理中
     REFUND_COMPLETED = 11 # 返金完了
+
+# SMS認証の目的
+class SMSStatus:
+    PENDING = 1 # 未使用
+    VERIFIED = 2 # 使用済み
+    EXPIRED = 3 # 期限切れ
+    INVALIDATED = 9 # 無効化
+
+# SMS認証の目的
+class SMSPurpose:
+    CREATE_ACCOUNT = 1 # アカウント作成
+    LOGIN = 2 # ログイン
+    PASSWORD_RESET = 3 # パスワードリセット
+    PAYMENT = 4 # 支払い
+    OTHER = 9 # その他

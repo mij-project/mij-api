@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .email_verification_tokens import EmailVerificationTokens
     from .conversation_messages import ConversationMessages
     from .conversation_participants import ConversationParticipants
-
+    from .sms_verifications import SMSVerifications
 class Users(Base):
     __tablename__ = "users"
 
@@ -29,6 +29,8 @@ class Users(Base):
     profile_name: Mapped[Optional[str]] = mapped_column(CITEXT, unique=True, nullable=True)
     email: Mapped[Optional[str]] = mapped_column(CITEXT, unique=True, nullable=True)
     is_email_verified: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
+    is_phone_verified: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
+    phone_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     role: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
@@ -49,3 +51,4 @@ class Users(Base):
     email_verification_tokens: Mapped[List["EmailVerificationTokens"]] = relationship("EmailVerificationTokens", back_populates="user")
     conversations: Mapped[List["ConversationMessages"]] = relationship("ConversationMessages", back_populates="sender")
     participants: Mapped[List["ConversationParticipants"]] = relationship("ConversationParticipants", back_populates="user")
+    sms_verifications: Mapped[List["SMSVerifications"]] = relationship("SMSVerifications", back_populates="user")

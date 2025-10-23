@@ -218,6 +218,19 @@ def update_user(db: Session, user_id: str, profile_name: str) -> Users:
     db.flush()
     return user
 
+def update_user_phone_verified_at(db: Session, user_id: str) -> Users:
+    """
+    ユーザーの電話番号を検証済みに更新
+    """
+    # まず更新を実行
+    db.query(Users).filter(Users.id==user_id).update({
+        "is_phone_verified": True, 
+        "phone_verified_at": datetime.now()
+    })
+    
+    # 更新されたオブジェクトを取得して返す
+    return db.query(Users).filter(Users.id==user_id).first()
+
 def update_user_email_verified_at(db: Session, user_id: str) -> Users:
     """
     ユーザーのメールアドレスを検証済みに更新
