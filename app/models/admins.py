@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, List
 from uuid import UUID
 from datetime import datetime
 
@@ -9,6 +9,8 @@ from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from app.db.base import Base
 
+if TYPE_CHECKING:
+    from .identity import IdentityVerifications
 class Admins(Base):
     """管理者"""
     __tablename__ = "admins"
@@ -22,3 +24,5 @@ class Admins(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    identity_verifications: Mapped[List["IdentityVerifications"]] = relationship("IdentityVerifications", back_populates="approver")

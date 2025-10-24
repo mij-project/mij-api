@@ -11,6 +11,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from .user import Users
+    from .admins import Admins
 
 class IdentityVerifications(Base):
     """身元確認"""
@@ -18,11 +19,13 @@ class IdentityVerifications(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    approved_by: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("admins.id"), nullable=True)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     user: Mapped["Users"] = relationship("Users")
+    approver: Mapped[Optional["Admins"]] = relationship("Admins", foreign_keys=[approved_by])
     documents: Mapped[list["IdentityDocuments"]] = relationship("IdentityDocuments", back_populates="verification")
 
 class IdentityDocuments(Base):

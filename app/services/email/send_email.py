@@ -186,6 +186,45 @@ def send_email_verification(to: str, verify_url: str, display_name: str | None =
         tags={"category": "verify"},
     )
 
+def send_identity_approval_email(to: str, display_name: str | None = None) -> None:
+    """身分証明承認完了メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】身分証明書の審査が完了しました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="approval_complete.html",
+        ctx=ctx,
+        tags={"category": "identity_approval"},
+    )
+
+def send_identity_rejection_email(to: str, display_name: str | None = None, notes: str | None = None) -> None:
+    """身分証明拒否通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】身分証明書の審査結果について"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "notes": notes or "申請内容を再度ご確認ください。",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="approval_complete.html",
+        ctx=ctx,
+        tags={"category": "identity_rejection"},
+    )
+
 # --------------------------
 # 実体：バックエンド切替
 # --------------------------

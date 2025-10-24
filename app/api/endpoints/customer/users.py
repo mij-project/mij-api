@@ -121,7 +121,6 @@ def get_user_profile_by_username_endpoint(
                 name=plan.name,
                 description=plan.description,
                 price=plan.price,
-                currency=plan.currency
             ))
         
         profile_purchases = []

@@ -58,7 +58,7 @@ def get_profile_info_by_user_id(db: Session, user_id: UUID) -> Dict[str, Optiona
         .filter(Users.id == user_id)
         .first()
     )
-    
+
     if result:
         profile_name, username, avatar_url, cover_url = result
         return {
@@ -67,6 +67,36 @@ def get_profile_info_by_user_id(db: Session, user_id: UUID) -> Dict[str, Optiona
             "avatar_url": avatar_url if avatar_url else None,
             "cover_url": cover_url if cover_url else None
         }
+
+def get_profile_edit_info_by_user_id(db: Session, user_id: UUID) -> Dict:
+    """
+    プロフィール編集用の情報を取得（profile_name, username, avatar_url, cover_url, bio, links）
+    """
+    result = (
+        db.query(
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            Profiles.bio,
+            Profiles.links
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .filter(Users.id == user_id)
+        .first()
+    )
+
+    if result:
+        profile_name, username, avatar_url, cover_url, bio, links = result
+        return {
+            "profile_name": profile_name,
+            "username": username,
+            "avatar_url": avatar_url,
+            "cover_url": cover_url,
+            "bio": bio,
+            "links": links if links else {}
+        }
+    return None
 
 def update_profile(db: Session, user_id: UUID, update_data: AccountUpdateRequest) -> Profiles:
     """

@@ -152,12 +152,12 @@ def get_identity_verifications_paginated(
 def update_identity_verification_status(db: Session, verification_id: str, status: str) -> bool:
     """
     身分証明のステータスを更新
-    
+
     Args:
         db: データベースセッション
         verification_id: 審査ID
         status: 新しいステータス (approved/rejected)
-        
+
     Returns:
         bool: 更新成功フラグ
     """
@@ -167,15 +167,106 @@ def update_identity_verification_status(db: Session, verification_id: str, statu
         ).first()
         if not verification or verification.status != 1:  # 1 = pending
             return False
-        
+
         # 審査ステータス更新
         status_map = {"approved": 2, "rejected": 3}
         verification.status = status_map[status]
         verification.updated_at = datetime.utcnow()
-        
+
         db.commit()
         return True
     except Exception as e:
         print(f"Update identity verification status error: {e}")
         db.rollback()
         return False
+
+
+def approve_identity_verification(
+    db: Session,
+    verification_id: str,
+    admin_id: str,
+    notes: Optional[str] = None
+) -> Optional[IdentityVerifications]:
+    """
+    身分証明を承認する
+
+    Args:
+        db: データベースセッション
+        verification_id: 審査ID
+        admin_id: 承認した管理者のID
+        notes: 審査メモ
+
+    Returns:
+        IdentityVerifications: 更新された審査情報、失敗時はNone
+    """
+    try:
+        verification = db.query(IdentityVerifications).filter(
+            IdentityVerifications.id == verification_id
+        ).first()
+
+        if not verification or verification.status != 1:  # 1 = WAITING (承認待ち)
+            return None
+
+        # ユーザーのroleを2 (creator)に更新
+        user = db.query(Users).filter(Users.id == verification.user_id).first()
+        if user:
+            user.role = 2
+            user.is_identity_verified = True
+            user.identity_verified_at = datetime.utcnow()
+
+        # 審査情報を更新
+        verification.status = 3  # APPROVED
+        verification.approved_by = admin_id
+        verification.checked_at = datetime.utcnow()
+        if notes:
+            verification.notes = notes
+
+        db.commit()
+        db.refresh(verification)
+        return verification
+    except Exception as e:
+        print(f"Approve identity verification error: {e}")
+        db.rollback()
+        return None
+
+
+def reject_identity_verification(
+    db: Session,
+    verification_id: str,
+    admin_id: str,
+    notes: Optional[str] = None
+) -> Optional[IdentityVerifications]:
+    """
+    身分証明を拒否する
+
+    Args:
+        db: データベースセッション
+        verification_id: 審査ID
+        admin_id: 拒否した管理者のID
+        notes: 拒否理由
+
+    Returns:
+        IdentityVerifications: 更新された審査情報、失敗時はNone
+    """
+    try:
+        verification = db.query(IdentityVerifications).filter(
+            IdentityVerifications.id == verification_id
+        ).first()
+
+        if not verification or verification.status != 1:  # 1 = WAITING (承認待ち)
+            return None
+
+        # 審査情報を更新
+        verification.status = 2  # REJECTED
+        verification.approved_by = admin_id
+        verification.checked_at = datetime.utcnow()
+        if notes:
+            verification.notes = notes
+
+        db.commit()
+        db.refresh(verification)
+        return verification
+    except Exception as e:
+        print(f"Reject identity verification error: {e}")
+        db.rollback()
+        return None

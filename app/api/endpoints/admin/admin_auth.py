@@ -6,11 +6,10 @@ from datetime import datetime
 from app.db.base import get_db
 from app.core.security import verify_password, create_access_token, create_refresh_token, new_csrf_token
 from app.core.cookies import set_auth_cookies
-from app.crud.user_crud import get_user_by_email
-from app.schemas.admin import AdminLoginRequest, AdminLoginResponse, AdminUserResponse
+from app.crud.admin_crud import get_admin_by_email
+from app.schemas.admin import AdminLoginRequest, AdminLoginResponse, AdminResponse
 from app.deps.auth import get_current_admin_user
-from app.models.user import Users
-from app.constants.enums import AccountType
+from app.models.admins import Admins
 
 router = APIRouter()
 security = HTTPBearer()
@@ -21,37 +20,37 @@ async def admin_login(
     response: Response,
     db: Session = Depends(get_db)
 ):
-    """管理者ログイン"""
+    """管理者ログイン - adminsテーブルを使用"""
 
-    # ユーザー取得
-    user = get_user_by_email(db, email=credentials.email)
-    if not user:
+    # 管理者を取得
+    admin = get_admin_by_email(db, email=credentials.email)
+    if not admin:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials"
         )
 
     # パスワード確認
-    if not verify_password(credentials.password, user.password_hash):
+    if not verify_password(credentials.password, admin.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials"
         )
 
-    # 管理者権限確認 (roleは数値: 1=user, 2=creator, 3=admin)
-    if user.role != AccountType.ADMIN:
+    # ステータス確認 (1=有効)
+    if admin.status != 1:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
+            detail="Admin account is not active"
         )
 
     # ログイン時刻を更新
-    user.last_login_at = datetime.utcnow()
+    admin.last_login_at = datetime.utcnow()
     db.commit()
 
     # JWTトークン生成
-    access_token = create_access_token(sub=str(user.id))
-    refresh_token = create_refresh_token(sub=str(user.id))
+    access_token = create_access_token(sub=str(admin.id))
+    refresh_token = create_refresh_token(sub=str(admin.id))
     csrf_token = new_csrf_token()
 
     # Cookieに認証情報を設定
@@ -59,13 +58,13 @@ async def admin_login(
 
     return AdminLoginResponse(
         token=access_token,
-        user=AdminUserResponse.from_orm(user)
+        admin=AdminResponse.from_orm(admin)
     )
 
 @router.post("/logout")
 async def admin_logout(
     response: Response,
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """管理者ログアウト"""
     from app.core.cookies import clear_auth_cookies
@@ -74,9 +73,9 @@ async def admin_logout(
     clear_auth_cookies(response)
     return {"message": "Successfully logged out"}
 
-@router.get("/me", response_model=AdminUserResponse)
+@router.get("/me", response_model=AdminResponse)
 async def get_current_admin(
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """現在の管理者情報を取得"""
-    return AdminUserResponse.from_orm(current_admin)
+    return AdminResponse.from_orm(current_admin)

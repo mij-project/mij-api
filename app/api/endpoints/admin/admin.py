@@ -16,12 +16,14 @@ from app.schemas.admin import (
     PaginatedResponse,
     CreateUserRequest,
     AdminPostDetailResponse,
+    CreateAdminRequest,
+    AdminResponse,
 )
 from app.models.user import Users
 from app.models.creators import Creators
-from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.models.posts import Posts
 from app.models.profiles import Profiles
+from app.models.admins import Admins
 from app.core.security import hash_password
 from app.crud.admin_crud import (
     get_dashboard_info,
@@ -32,6 +34,7 @@ from app.crud.admin_crud import (
     get_posts_paginated,
     update_post_status,
     get_post_by_id,
+    create_admin,
 )
 from app.services.s3.presign import presign_get
 from app.constants.enums import MediaAssetKind
@@ -41,7 +44,7 @@ router = APIRouter()
 @router.get("/dashboard/stats", response_model=AdminDashboardStats)
 def get_dashboard_stats(
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """管理者ダッシュボード統計情報を取得"""
     
@@ -66,7 +69,7 @@ def get_users(
     role: Optional[str] = None,
     sort: Optional[str] = "created_at_desc",
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """ユーザー一覧を取得"""
     
@@ -92,7 +95,7 @@ def update_user_status(
     user_id: str,
     status: str,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """ユーザーのステータスを更新"""
     
@@ -102,54 +105,37 @@ def update_user_status(
     
     return {"message": "ユーザーステータスを更新しました"}
 
-@router.post("/users", response_model=AdminUserResponse)
-def create_user(
-    user_data: CreateUserRequest,
+@router.post("/create-admin", response_model=AdminResponse)
+def create_admin_user(
+    admin_data: CreateAdminRequest,
     db: Session = Depends(get_db),
 ):
-    """新しいユーザーを作成"""
+    """新しい管理者を作成 - adminsテーブルを使用"""
 
     try:
-    
-    # メールアドレスの重複チェック
-        existing_user = db.query(Users).filter(Users.email == user_data.email).first()
-        if existing_user:
-            raise HTTPException(status_code=400, detail="このメールアドレスは既に使用されています")
-        
-        # ユーザー作成
-        hashed_password = hash_password(user_data.password)
-        
-        # role の文字列を数値に変換
-        role_map = {"user": 1, "creator": 2, "admin": 3}
-        role_value = role_map.get(user_data.role, 1)
-        
-        new_user = Users(
-            email=user_data.email,
-            profile_name=user_data.username,
+        # パスワードをハッシュ化
+        hashed_password = hash_password(admin_data.password)
+
+        # 管理者作成
+        new_admin = create_admin(
+            db=db,
+            email=admin_data.email,
             password_hash=hashed_password,
-            role=role_value,
-            status=1,  # active
-            email_verified_at=datetime.utcnow()  # 管理者作成ユーザーは確認済み
+            role=admin_data.role,
+            status=admin_data.status
         )
-        
-        db.add(new_user)
-        db.flush()  # ユーザーIDを取得するためにflush
-        
-        # プロフィール作成
-        new_profile = Profiles(
-            user_id=new_user.id,
-            username=user_data.username,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        
-        db.add(new_profile)
-        db.commit()
-        db.refresh(new_user)
-        
-        return AdminUserResponse.from_orm(new_user)
+
+        if not new_admin:
+            raise HTTPException(
+                status_code=400,
+                detail="このメールアドレスは既に使用されています"
+            )
+
+        return AdminResponse.from_orm(new_admin)
+    except HTTPException:
+        raise
     except Exception as e:
-        print("エラーが発生しました", e)
+        print("管理者作成エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/create-test-admin")
@@ -210,7 +196,7 @@ def get_creator_applications(
     status: Optional[str] = None,
     sort: Optional[str] = "created_at_desc",
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """クリエイター申請一覧を取得"""
     
@@ -235,7 +221,7 @@ def get_creator_applications(
 def get_creator_application(
     application_id: str,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """クリエイター申請詳細を取得"""
     
@@ -250,7 +236,7 @@ def review_creator_application(
     application_id: str,
     review: CreatorApplicationReview,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """クリエイター申請を審査"""
     
@@ -269,7 +255,7 @@ def get_posts(
     status: Optional[str] = None,
     sort: Optional[str] = "created_at_desc",
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """投稿一覧を取得"""
     
@@ -295,7 +281,7 @@ def update_post_status(
     post_id: str,
     status: str,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """投稿のステータスを更新"""
     
@@ -336,7 +322,7 @@ def get_sales_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """売上データを取得"""
     
@@ -366,7 +352,7 @@ def get_sales_report(
     end_date: str,
     format: str = Query("csv", regex="^(csv|json)$"),
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """売上レポートを出力"""
     

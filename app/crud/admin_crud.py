@@ -13,11 +13,104 @@ from app.models.orders import Orders
 from app.models.subscriptions import Subscriptions
 from app.models.media_assets import MediaAssets
 from app.models.media_rendition_jobs import MediaRenditionJobs
+from app.models.admins import Admins
 import os
 
 CDN_URL = os.getenv("CDN_BASE_URL")
 
 """管理機能用のCRUD操作クラス"""
+
+
+# ==================== Admin CRUD Functions ====================
+
+def get_admin_by_id(db: Session, admin_id: str) -> Optional[Admins]:
+    """
+    IDで管理者を取得
+
+    Args:
+        db: データベースセッション
+        admin_id: 管理者ID
+
+    Returns:
+        Optional[Admins]: 管理者情報
+    """
+    try:
+        admin = db.query(Admins).filter(
+            Admins.id == admin_id,
+            Admins.deleted_at.is_(None)
+        ).first()
+        return admin
+    except Exception as e:
+        print(f"Get admin by id error: {e}")
+        return None
+
+
+def get_admin_by_email(db: Session, email: str) -> Optional[Admins]:
+    """
+    メールアドレスで管理者を取得
+
+    Args:
+        db: データベースセッション
+        email: メールアドレス
+
+    Returns:
+        Optional[Admins]: 管理者情報
+    """
+    try:
+        admin = db.query(Admins).filter(
+            Admins.email == email,
+            Admins.deleted_at.is_(None)
+        ).first()
+        return admin
+    except Exception as e:
+        print(f"Get admin by email error: {e}")
+        return None
+
+
+def create_admin(
+    db: Session,
+    email: str,
+    password_hash: str,
+    role: int = 1,
+    status: int = 1
+) -> Optional[Admins]:
+    """
+    新しい管理者を作成
+
+    Args:
+        db: データベースセッション
+        email: メールアドレス
+        password_hash: ハッシュ化されたパスワード
+        role: 役割（デフォルト: 1）
+        status: ステータス（デフォルト: 1=有効）
+
+    Returns:
+        Optional[Admins]: 作成された管理者情報
+    """
+    try:
+        # メールアドレスの重複チェック
+        existing_admin = get_admin_by_email(db, email)
+        if existing_admin:
+            return None
+
+        new_admin = Admins(
+            email=email,
+            password_hash=password_hash,
+            role=role,
+            status=status,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+
+        db.add(new_admin)
+        db.commit()
+        db.refresh(new_admin)
+
+        return new_admin
+    except Exception as e:
+        print(f"Create admin error: {e}")
+        db.rollback()
+        return None
 def get_dashboard_info(db: Session) -> Dict[str, Any]:
     """
     ダッシュボード統計情報を取得

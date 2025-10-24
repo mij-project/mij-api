@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -17,8 +18,15 @@ from app.services.s3.presign import presign_get
 from app.crud.identity_crud import (
     get_identity_verifications_paginated,
     update_identity_verification_status,
+    approve_identity_verification,
+    reject_identity_verification,
 )
-
+from app.services.email.send_email import (
+    send_identity_approval_email,
+    send_identity_rejection_email,
+)
+from app.models.admins import Admins
+from app.crud.user_crud import update_user_identity_verified_at
 router = APIRouter()
 
 
@@ -30,10 +38,10 @@ def get_identity_verifications(
     status: Optional[str] = None,
     sort: Optional[str] = "created_at_desc",
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """身分証明審査一覧を取得"""
-    
+
     verifications, total = get_identity_verifications_paginated(
         db=db,
         page=page,
@@ -42,7 +50,7 @@ def get_identity_verifications(
         status=status,
         sort=sort
     )
-    
+
     return PaginatedResponse(
         data=[AdminIdentityVerificationResponse.from_orm(v) for v in verifications],
         total=total,
@@ -55,7 +63,7 @@ def get_identity_verifications(
 def get_identity_verification(
     verification_id: str,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """身分証明審査詳細を取得"""
 
@@ -89,12 +97,83 @@ def review_identity_verification(
     verification_id: str,
     review: IdentityVerificationReview,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
-    """身分証明を審査"""
-    
-    success = update_identity_verification_status(db, verification_id, review.status)
-    if not success:
-        raise HTTPException(status_code=404, detail="審査が見つかりませんまたは既に完了済みです")
-    
-    return {"message": "身分証明審査を完了しました"}
+    """身分証明を審査（承認または拒否）"""
+
+    try:
+        # 審査情報を取得
+        verification = db.query(IdentityVerifications).filter(
+            IdentityVerifications.id == verification_id
+        ).first()
+
+        if not verification:
+            raise HTTPException(status_code=404, detail="審査が見つかりません")
+
+        if verification.status != 1:  # 1 = WAITING
+            raise HTTPException(status_code=400, detail="この審査は既に処理済みです")
+
+        # ユーザー情報を取得
+        user = db.query(Users).filter(Users.id == verification.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
+
+        # 承認または拒否処理
+        if review.status == "approved":
+            updated_verification = approve_identity_verification(
+                db=db,
+                verification_id=verification_id,
+                admin_id=str(current_admin.id),
+                notes=review.notes
+            )
+
+            if not updated_verification:
+                raise HTTPException(status_code=500, detail="承認処理に失敗しました")
+
+            # 承認メール送信
+            try:
+                send_identity_approval_email(
+                    to=user.email,
+                    display_name=user.profile.username if user.profile else user.profile_name
+                )
+            except Exception as e:
+                print(f"Email sending failed: {e}")
+
+            return {"message": "身分証明を承認しました", "status": "approved"}
+
+        elif review.status == "rejected":
+            updated_verification = reject_identity_verification(
+                db=db,
+                verification_id=verification_id,
+                admin_id=str(current_admin.id),
+                notes=review.notes
+            )
+
+            if not updated_verification:
+                raise HTTPException(status_code=500, detail="拒否処理に失敗しました")
+
+            # 拒否メール送信
+            try:
+                send_identity_rejection_email(
+                    to=user.email,
+                    display_name=user.profile.username if user.profile else user.profile_name,
+                    notes=review.notes
+                )
+
+                users = update_user_identity_verified_at(db, user.id, False, datetime.now())
+                if not users:
+                    raise HTTPException(500, "身分証明の更新に失敗しました。")
+            except Exception as e:
+                print(f"Email sending failed: {e}")
+
+            return {"message": "身分証明を拒否しました", "status": "rejected"}
+
+        else:
+            raise HTTPException(status_code=400, detail="無効なステータスです")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Identity verification review error: {e}")
+        raise HTTPException(status_code=500, detail="審査処理中にエラーが発生しました")
+

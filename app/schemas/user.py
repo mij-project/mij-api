@@ -27,7 +27,6 @@ class ProfilePlanResponse(BaseModel):
     name: str
     description: Optional[str] = None
     price: int
-    currency: str
 
 class ProfilePurchaseResponse(BaseModel):
     id: UUID

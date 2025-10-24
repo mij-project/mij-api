@@ -35,6 +35,15 @@ class ProfileInfo(BaseModel):
     avatar_url: Optional[str] = None
     cover_url: Optional[str] = None
 
+class ProfileEditInfo(BaseModel):
+    """プロフィール編集用の情報"""
+    profile_name: str
+    username: str
+    avatar_url: Optional[str] = None
+    cover_url: Optional[str] = None
+    bio: Optional[str] = None
+    links: Optional[dict] = None
+
 class SocialInfo(BaseModel):
     followers_count: int
     following_count: int

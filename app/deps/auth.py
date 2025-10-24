@@ -5,7 +5,9 @@ from app.db.base import get_db
 from app.core.security import decode_token
 from app.core.cookies import ACCESS_COOKIE
 from app.models.user import Users
+from app.models.admins import Admins
 from app.crud.user_crud import get_user_by_id
+from app.crud.admin_crud import get_admin_by_id
 import time, os, jwt
 
 def get_current_user(
@@ -46,17 +48,17 @@ def get_current_user_optional(
 def get_current_admin_user(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
-):
-    """管理者用認証 - Bearerトークンを使用"""
+) -> Admins:
+    """管理者用認証 - Bearerトークンを使用してadminsテーブルから管理者を取得"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authorization header",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     token = authorization.split(" ")[1]
-    
+
     try:
         payload = decode_token(token)
     except Exception:
@@ -65,32 +67,32 @@ def get_current_admin_user(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if payload.get("type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    user_id = payload.get("sub")
-    user = get_user_by_id(db, user_id)
-    
-    if not user:
+
+    admin_id = payload.get("sub")
+    admin = get_admin_by_id(db, admin_id)
+
+    if not admin:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="Admin not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # 管理者権限確認 (roleは数値: 1=user, 2=creator, 3=admin)
-    if user.role != 3:
+
+    # ステータス確認 (1=有効)
+    if admin.status != 1:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
+            detail="Admin account is not active"
         )
-    
-    return user
+
+    return admin
 
 def issue_app_jwt_for(x_user_id: str, handle: str|None, name: str|None):
     payload = {

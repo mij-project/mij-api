@@ -99,14 +99,12 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
             Plans.id.label('id'),
             Plans.name.label('name'),
             Plans.description.label('description'),
-            Prices.price.label('price'),
-            Prices.currency.label('currency')
+            Plans.price.label('price')
         )
-        .join(Prices, Plans.id == Prices.plan_id)
         .filter(Plans.creator_user_id == user.id)
         .filter(Plans.type == PlanStatus.PLAN)
         .filter(Plans.deleted_at.is_(None))
-        .group_by(Plans.id, Prices.price, Prices.currency)
+        .group_by(Plans.id, Plans.price)
         .all()
     )
     
@@ -231,14 +229,15 @@ def update_user_phone_verified_at(db: Session, user_id: str) -> Users:
     # 更新されたオブジェクトを取得して返す
     return db.query(Users).filter(Users.id==user_id).first()
 
-def update_user_identity_verified_at(db: Session, user_id: str) -> Users:
+def update_user_identity_verified_at(db: Session, user_id: str, is_identity_verified: bool, identity_verified_at: datetime) -> Users:
     """
     ユーザーの身分証明を検証済みに更新
     """
     db.query(Users).filter(Users.id==user_id).update({
-        "is_identity_verified": True,
-        "identity_verified_at": datetime.now()
+        "is_identity_verified": is_identity_verified,
+        "identity_verified_at": identity_verified_at
     })
+    db.commit()
     return db.query(Users).filter(Users.id==user_id).first()
 
 def update_user_email_verified_at(db: Session, user_id: str) -> Users:

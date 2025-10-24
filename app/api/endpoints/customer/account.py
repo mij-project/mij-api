@@ -15,6 +15,7 @@ from app.schemas.account import (
     AccountPostResponse,
     LikedPostResponse,
     ProfileInfo,
+    ProfileEditInfo,
     SocialInfo,
     PostsInfo,
     SalesInfo,
@@ -40,7 +41,7 @@ from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id
 from app.crud.purchases_crud import get_single_purchases_count_by_user_id, get_single_purchases_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
-from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, update_profile
+from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile
 from app.services.s3.keygen import account_asset_key
 from app.services.s3.presign import presign_put_public
 import os
@@ -190,6 +191,44 @@ def get_account_info(
                 single_purchases_data=[],
             ),
         )
+
+@router.get("/profile", response_model=ProfileEditInfo)
+def get_profile_edit_info(
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    プロフィール編集用の情報を取得（軽量版）
+
+    Args:
+        current_user (Users): 現在のユーザー
+        db (Session): データベースセッション
+
+    Returns:
+        ProfileEditInfo: プロフィール編集用の情報
+
+    Raises:
+        HTTPException: エラーが発生した場合
+    """
+    try:
+        profile_data = get_profile_edit_info_by_user_id(db, current_user.id)
+
+        if not profile_data:
+            raise HTTPException(status_code=404, detail="プロフィール情報が見つかりませんでした")
+
+        return ProfileEditInfo(
+            profile_name=profile_data["profile_name"] or "",
+            username=profile_data["username"] or "",
+            avatar_url=f"{BASE_URL}/{profile_data['avatar_url']}" if profile_data.get("avatar_url") else None,
+            cover_url=f"{BASE_URL}/{profile_data['cover_url']}" if profile_data.get("cover_url") else None,
+            bio=profile_data.get("bio"),
+            links=profile_data.get("links", {})
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("プロフィール編集情報取得エラー:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/update", response_model=AccountUpdateResponse)
 def update_account_info(

@@ -78,7 +78,7 @@ class AdminCreatorApplicationResponse(BaseModel):
 
 class CreatorApplicationReview(BaseModel):
     status: str  # "approved" or "rejected"
-    notes: Optional[str]
+    notes: Optional[str] = None
 
 class IdentityDocumentResponse(BaseModel):
     id: str
@@ -113,7 +113,7 @@ class AdminIdentityVerificationResponse(BaseModel):
 
 class IdentityVerificationReview(BaseModel):
     status: str  # "approved" or "rejected"
-    notes: Optional[str]
+    notes: Optional[str] = None
 
 class AdminPostResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -167,9 +167,39 @@ class AdminLoginRequest(BaseModel):
     email: str
     password: str
 
+class AdminResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    role: int
+    status: int
+    last_login_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_orm(cls, admin):
+        data = {
+            "id": str(admin.id),
+            "email": admin.email,
+            "role": admin.role,
+            "status": admin.status,
+            "last_login_at": admin.last_login_at,
+            "created_at": admin.created_at,
+            "updated_at": admin.updated_at,
+        }
+        return cls(**data)
+
 class AdminLoginResponse(BaseModel):
     token: str
-    user: AdminUserResponse
+    admin: AdminResponse
+
+class CreateAdminRequest(BaseModel):
+    email: str
+    password: str
+    role: int = 1
+    status: int = 1
 
 class CreateUserRequest(BaseModel):
     email: str
