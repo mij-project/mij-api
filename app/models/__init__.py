@@ -16,6 +16,7 @@ from .entitlements import Entitlements
 from .social import Follows, Likes, Comments, Bookmarks
 from .notifications import Notifications
 from .identity import IdentityVerifications, IdentityDocuments
+from .profile_image_submissions import ProfileImageSubmissions
 from .audit import AuditLogs
 from .tags import Tags, PostTags
 from .i18n import I18nLanguages, I18nTexts
@@ -34,9 +35,9 @@ __all__ = [
     "Users", "Profiles", "Creators", "Genres", "Categories", "Posts", "PostCategories",
     "MediaAssets", "MediaRenditions", "Plans", "Prices", "Subscriptions",
     "Orders", "OrderItems", "Payments", "Refunds", "Entitlements", "Follows", "Likes", "Comments",
-    "Bookmarks", "Notifications", "IdentityVerifications", "IdentityDocuments",
+    "Bookmarks", "Notifications", "IdentityVerifications", "IdentityDocuments", "ProfileImageSubmissions",
     "AuditLogs", "Tags", "PostTags", "I18nLanguages", "I18nTexts",
     "CreatorType", "Gender", "MediaRenditionJobs", "Preregistrations",
-    "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants", 
+    "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants",
     "Admins", "PaymentEvents", "SMSVerifications"
 ]

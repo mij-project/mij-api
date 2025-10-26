@@ -14,7 +14,8 @@ from app.api.endpoints.customer import (
 from app.api.endpoints.admin import (
     admin, admin_auth, conversations as admin_conversations,
     preregistrations as admin_preregistrations,
-    identity as admin_identity
+    identity as admin_identity,
+    profile_images as admin_profile_images
 )
 
 # Debug routes
@@ -61,5 +62,6 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(admin_conversations.router, prefix="/admin", tags=["Admin Conversations"])
 api_router.include_router(admin_preregistrations.router, prefix="/admin", tags=["Admin Preregistrations"])
 api_router.include_router(admin_identity.router, prefix="/admin", tags=["Identity"])
+api_router.include_router(admin_profile_images.router, prefix="/admin/profile-images", tags=["Admin Profile Images"])
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])

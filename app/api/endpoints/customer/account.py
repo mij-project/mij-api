@@ -26,6 +26,11 @@ from app.schemas.account import (
     LikedPostsListResponse,
     BoughtPostsResponse,
 )
+from app.schemas.profile_image import (
+    ProfileImageSubmissionCreate,
+    ProfileImageSubmissionResponse,
+    ProfileImageStatusResponse
+)
 from app.schemas.commons import UploadItem, PresignResponseItem
 from app.crud.followes_crud import get_follower_count
 from app.crud.post_crud import (
@@ -42,6 +47,7 @@ from app.crud.plan_crud import get_plan_by_user_id
 from app.crud.purchases_crud import get_single_purchases_count_by_user_id, get_single_purchases_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
 from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile
+from app.crud import profile_image_crud
 from app.services.s3.keygen import account_asset_key
 from app.services.s3.presign import presign_put_public
 import os
@@ -503,4 +509,71 @@ def get_bought(
     except Exception as e:
         print("購入済み一覧取得エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+@router.post("/profile-image/submit", response_model=ProfileImageSubmissionResponse)
+def submit_profile_image(
+    submission: ProfileImageSubmissionCreate,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    プロフィール画像を申請
+
+    アップロード完了後に申請を作成します。
+    管理者による承認後、プロフィールに反映されます。
+
+    - **image_type**: 1=avatar, 2=cover
+    - **storage_key**: S3にアップロードした画像のキー
+    """
+    try:
+        # 同じタイプで申請中のものがあるかチェック
+        existing_submission = profile_image_crud.get_pending_submission_by_user_and_type(
+            db, current_user.id, submission.image_type
+        )
+
+        if existing_submission:
+            raise HTTPException(
+                status_code=400,
+                detail="既に申請中の画像があります。承認または却下後に再申請してください。"
+            )
+
+        # 新規申請作成
+        new_submission = profile_image_crud.create_submission(
+            db=db,
+            user_id=current_user.id,
+            image_type=submission.image_type,
+            storage_key=submission.storage_key
+        )
+
+        db.commit()
+        db.refresh(new_submission)
+
+        return ProfileImageSubmissionResponse.from_orm(new_submission)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("プロフィール画像申請エラー:", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/profile-image/status", response_model=ProfileImageStatusResponse)
+def get_profile_image_status(
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    プロフィール画像の申請状況を取得
+
+    アバターとカバー画像それぞれの最新申請状況を返します。
+    """
+    try:
+        submissions = profile_image_crud.get_user_submissions(db, current_user.id)
+
+        return ProfileImageStatusResponse(
+            avatar_submission=submissions["avatar_submission"],
+            cover_submission=submissions["cover_submission"]
+        )
+    except Exception as e:
+        print("申請状況取得エラー:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+

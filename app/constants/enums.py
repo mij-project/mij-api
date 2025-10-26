@@ -59,6 +59,15 @@ class PlanStatus:
     SINGLE = 1 # 単品
     PLAN = 2 # プラン
 
+class ProfileImage:
+    AVATAR = 1 # アバター
+    COVER = 2 # カバー
+
+class ProfileImageStatus:
+    PENDING = 1 # 申請中
+    APPROVED = 2 # 承認済み
+    REJECTED = 3 # 却下
+
 # プランの種類
 class PriceType:
     SINGLE = 1 # 単品
