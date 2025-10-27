@@ -1,13 +1,11 @@
 from sqlalchemy.orm import Session
 from app.models.plans import Plans
 from app.models.subscriptions import Subscriptions
-from app.models.prices import Prices
 from uuid import UUID
 from typing import List
 from app.schemas.plan import PlanCreateRequest, PlanResponse, SubscribedPlanResponse
 from app.constants.enums import PlanStatus
 from datetime import datetime
-from app.models.purchases import Purchases
 from app.models.profiles import Profiles
 from app.models.plans import PostPlans
 from app.models.posts import Posts
@@ -25,34 +23,29 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
     ユーザーが加入中のプラン数と詳細を取得
     """
 
-    # 購入したサブスクリプションプラン（type=2）を取得
-    subscribed_purchases = (
-        db.query(Purchases)
-        .join(Plans, Purchases.plan_id == Plans.id)
-        .join(Prices, Plans.id == Prices.plan_id)
+    # サブスクリプション中のプラン（type=2）を取得
+    subscribed_subscriptions = (
+        db.query(Subscriptions)
+        .join(Plans, Subscriptions.plan_id == Plans.id)
         .filter(
-            Purchases.user_id == user_id,
+            Subscriptions.user_id == user_id,
             Plans.type == PlanStatus.PLAN,  # サブスクリプションプラン（type=2）
             Plans.deleted_at.is_(None),  # 削除されていないプラン
-            Purchases.deleted_at.is_(None)  # 削除されていない購入
+            Subscriptions.status == 1,  # アクティブなサブスクリプション
+            Subscriptions.canceled_at.is_(None)  # キャンセルされていないサブスクリプション
         )
         .all()
     )
 
-    subscribed_plan_count = len(subscribed_purchases)
+    subscribed_plan_count = len(subscribed_subscriptions)
     subscribed_total_price = 0
     subscribed_plan_names = []
     subscribed_plan_details = []
 
     # 加入中のプランの詳細情報を取得
-    for purchase in subscribed_purchases:
-        price = (
-            db.query(
-                Prices
-            )
-            .filter(Prices.plan_id == purchase.plan_id)
-            .first()
-        )
+    for subscription in subscribed_subscriptions:
+        # プランから価格情報を取得（Pricesテーブルではなくplansテーブルから）
+        plan_price = subscription.plan.price
 
         # クリエイター情報を取得
         creator_profile = (
@@ -63,8 +56,8 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             )
             .join(Users, Profiles.user_id == Users.id)
             .filter(
-                Users.id == purchase.plan.creator_user_id,
-                Profiles.user_id == purchase.plan.creator_user_id,
+                Users.id == subscription.plan.creator_user_id,
+                Profiles.user_id == subscription.plan.creator_user_id,
                 Users.deleted_at.is_(None)
             )
             .first()
@@ -77,7 +70,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             )
             .join(Posts, PostPlans.post_id == Posts.id)
             .filter(
-                PostPlans.plan_id == purchase.plan_id,
+                PostPlans.plan_id == subscription.plan_id,
                 Posts.deleted_at.is_(None),
                 Posts.status == PostStatus.APPROVED
             ).scalar()
@@ -89,7 +82,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             .join(Posts, MediaAssets.post_id == Posts.id)
             .join(PostPlans, Posts.id == PostPlans.post_id)
             .filter(
-                PostPlans.plan_id == purchase.plan_id,
+                PostPlans.plan_id == subscription.plan_id,
                 MediaAssets.kind == MediaAssetKind.THUMBNAIL,
                 Posts.deleted_at.is_(None),
                 Posts.status == PostStatus.APPROVED
@@ -101,24 +94,25 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
 
         thumbnail_keys = [thumb.storage_key for thumb in thumbnails]
 
-        if price:
-            subscribed_total_price += price.price
-            subscribed_plan_names.append(purchase.plan.name)
+        subscribed_total_price += plan_price
+        subscribed_plan_names.append(subscription.plan.name)
 
-            # 詳細情報を追加
-            subscribed_plan_details.append({
-                "purchase_id": str(purchase.id),
-                "plan_id": str(purchase.plan.id),
-                "plan_name": purchase.plan.name,
-                "plan_description": purchase.plan.description,
-                "price": price.price,
-                "purchase_created_at": purchase.created_at,
-                "creator_avatar_url": creator_profile.avatar_url if creator_profile and creator_profile.avatar_url else None,
-                "creator_username": creator_profile.username if creator_profile else None,
-                "creator_profile_name": creator_profile.profile_name if creator_profile else None,
-                "post_count": post_count or 0,
-                "thumbnail_keys": thumbnail_keys
-            })
+        # 詳細情報を追加
+        subscribed_plan_details.append({
+            "subscription_id": str(subscription.id),
+            "plan_id": str(subscription.plan.id),
+            "plan_name": subscription.plan.name,
+            "plan_description": subscription.plan.description,
+            "price": plan_price,
+            "subscription_created_at": subscription.created_at,
+            "current_period_start": subscription.current_period_start,
+            "current_period_end": subscription.current_period_end,
+            "creator_avatar_url": creator_profile.avatar_url if creator_profile and creator_profile.avatar_url else None,
+            "creator_username": creator_profile.username if creator_profile else None,
+            "creator_profile_name": creator_profile.profile_name if creator_profile else None,
+            "post_count": post_count or 0,
+            "thumbnail_keys": thumbnail_keys
+        })
 
     return {
         "plan_count": subscribed_plan_count,

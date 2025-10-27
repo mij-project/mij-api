@@ -30,7 +30,7 @@ def create_user_plan(
             "creator_user_id": current_user.id,
             "name": plan_data.name,
             "description": plan_data.description,
-            "type": PlanStatus.PLAN,
+            "type": PlanStatus.NORMAL,
             "price": plan_data.price,
         }   
         plan = create_plan(db, plan_create_data)

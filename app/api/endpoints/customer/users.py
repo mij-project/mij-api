@@ -6,7 +6,8 @@ from app.crud.user_crud import (
     create_user,
     check_email_exists,
     check_profile_name_exists,
-    get_user_profile_by_username
+    get_user_profile_by_username,
+    get_plan_details
 )
 from app.api.commons.utils import generate_code
 from app.deps.auth import get_current_user
@@ -101,45 +102,83 @@ def get_user_profile_by_username_endpoint(
                 post = post_data.Posts
                 likes_count = post_data.likes_count
                 thumbnail_key = post_data.thumbnail_key
+                duration_sec = post_data.duration_sec
+                price = post_data.price
+                currency = post_data.currency
             else:
-                post = post_data
-                likes_count = None
-                thumbnail_key = None
-            
+                # タプル形式の場合
+                post = post_data[0]
+                likes_count = post_data[1] if len(post_data) > 1 else None
+                thumbnail_key = post_data[2] if len(post_data) > 2 else None
+                duration_sec = post_data[3] if len(post_data) > 3 else None
+                price = post_data[4] if len(post_data) > 4 else None
+                currency = post_data[5] if len(post_data) > 5 else "JPY"
+
+            # duration_secを整数秒に変換（Decimal型の場合があるため）
+            video_duration_int = None
+            if duration_sec is not None:
+                video_duration_int = int(round(float(duration_sec)))
+
             profile_posts.append(ProfilePostResponse(
                 id=post.id,
+                post_type=post.post_type,
                 likes_count=likes_count,
                 created_at=post.created_at,
                 description=post.description,
-                thumbnail_url=f"{BASE_URL}/{thumbnail_key}" if thumbnail_key else None
+                thumbnail_url=f"{BASE_URL}/{thumbnail_key}" if thumbnail_key else None,
+                video_duration=video_duration_int,
+                price=price,
+                currency=currency
             ))
-        
+
         profile_plans = []
         for plan in profile_data["plans"]:
+            # プランの詳細情報を取得
+            plan_details = get_plan_details(db, plan.id)
+
             profile_plans.append(ProfilePlanResponse(
                 id=plan.id,
                 name=plan.name,
                 description=plan.description,
                 price=plan.price,
+                currency="JPY",  # 通貨は固定（必要に応じてDBから取得）
+                type=plan.type,
+                post_count=plan_details["post_count"],
+                thumbnails=plan_details["thumbnails"]
             ))
-        
+
         profile_purchases = []
-        for purchase in profile_data["individual_purchases"]:
-            if hasattr(purchase, 'Posts'):
-                post = purchase.Posts
-                likes_count = purchase.likes_count
-                thumbnail_key = purchase.thumbnail_key
+        for purchase_data in profile_data["individual_purchases"]:
+            # 修正：purchase_dataはタプル形式 (Posts, likes_count, thumbnail_key, price, currency, duration_sec)
+            if hasattr(purchase_data, 'Posts'):
+                post = purchase_data.Posts
+                likes_count = purchase_data.likes_count
+                thumbnail_key = purchase_data.thumbnail_key
+                price = purchase_data.price
+                currency = purchase_data.currency
+                duration_sec = purchase_data.duration_sec
             else:
-                post = purchase
-                likes_count = None
-                thumbnail_key = None
+                post = purchase_data[0]
+                likes_count = purchase_data[1]
+                thumbnail_key = purchase_data[2]
+                price = purchase_data[3] if len(purchase_data) > 3 else None
+                currency = purchase_data[4] if len(purchase_data) > 4 else "JPY"
+                duration_sec = purchase_data[5] if len(purchase_data) > 5 else None
+
+            # duration_secを整数秒に変換
+            video_duration_int = None
+            if duration_sec is not None:
+                video_duration_int = int(round(float(duration_sec)))
 
             profile_purchases.append(ProfilePurchaseResponse(
                 id=post.id,
                 likes_count=likes_count,
                 created_at=post.created_at,
                 description=post.description,
-                thumbnail_url=f"{BASE_URL}/{thumbnail_key}" if thumbnail_key else None
+                thumbnail_url=f"{BASE_URL}/{thumbnail_key}" if thumbnail_key else None,
+                video_duration=video_duration_int,
+                price=price,
+                currency=currency
             ))
         
         profile_gacha_items = [] 

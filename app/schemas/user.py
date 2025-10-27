@@ -17,16 +17,24 @@ class UserOut(BaseModel):
 
 class ProfilePostResponse(BaseModel):
     id: UUID
+    post_type: int  # 1: 動画, 2: 画像
     likes_count: int
     created_at: datetime
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    video_duration: Optional[int] = None
+    price: Optional[int] = None
+    currency: Optional[str] = "JPY"
 
 class ProfilePlanResponse(BaseModel):
     id: UUID
     name: str
     description: Optional[str] = None
     price: int
+    currency: str = "JPY"
+    type: Optional[int] = 1  # 1: 通常プラン, 2: おすすめプラン
+    post_count: Optional[int] = 0
+    thumbnails: Optional[List[str]] = []
 
 class ProfilePurchaseResponse(BaseModel):
     id: UUID
@@ -34,7 +42,9 @@ class ProfilePurchaseResponse(BaseModel):
     created_at: datetime
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
-    created_at: datetime
+    video_duration: Optional[int] = None
+    price: Optional[int] = None
+    currency: Optional[str] = "JPY"
 
 class ProfileGachaResponse(BaseModel):
     id: UUID

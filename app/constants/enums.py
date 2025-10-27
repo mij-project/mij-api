@@ -56,8 +56,8 @@ class PostVisibility:
 
 # プランステータス
 class PlanStatus:
-    SINGLE = 1 # 単品
-    PLAN = 2 # プラン
+    NORMAL = 1 # 普通
+    RECOMMENDED = 2 # おすすめプラン
 
 class ProfileImage:
     AVATAR = 1 # アバター
