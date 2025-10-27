@@ -3,8 +3,21 @@ from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
-from app.schemas.plan import PlanCreateRequest, PlanResponse, PlanListResponse, PlanPostsResponse, PlanPostResponse
-from app.crud.plan_crud import create_plan, get_user_plans
+from app.schemas.plan import (
+    PlanCreateRequest,
+    PlanResponse,
+    PlanListResponse,
+    PlanPostsResponse,
+    PlanPostResponse,
+    PlanDetailResponse,
+    PlanPostsPaginatedResponse
+)
+from app.crud.plan_crud import (
+    create_plan,
+    get_user_plans,
+    get_plan_detail,
+    get_plan_posts_paginated
+)
 from app.crud.post_crud import get_posts_by_plan_id
 from app.constants.enums import PlanStatus, PriceType
 from app.crud.price_crud import create_price
@@ -104,6 +117,63 @@ def get_plan_posts(
             posts.append(post_response)
 
         return PlanPostsResponse(posts=posts)
+    except Exception as e:
+        print("プラン投稿一覧取得エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{plan_id}", response_model=PlanDetailResponse)
+def get_plan_detail_endpoint(
+    plan_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    プラン詳細情報を取得
+    """
+    try:
+        plan_detail = get_plan_detail(db, plan_id, current_user.id)
+
+        if not plan_detail:
+            raise HTTPException(status_code=404, detail="プランが見つかりません")
+
+        return PlanDetailResponse(**plan_detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("プラン詳細取得エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{plan_id}/posts-paginated", response_model=PlanPostsPaginatedResponse)
+def get_plan_posts_paginated_endpoint(
+    plan_id: UUID,
+    page: int = 1,
+    per_page: int = 20,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    プランに紐づく投稿一覧をページネーション付きで取得
+    """
+    try:
+        if page < 1:
+            raise HTTPException(status_code=400, detail="ページ番号は1以上である必要があります")
+        if per_page < 1 or per_page > 100:
+            raise HTTPException(status_code=400, detail="1ページあたりの件数は1〜100である必要があります")
+
+        result = get_plan_posts_paginated(db, plan_id, current_user.id, page, per_page)
+
+        # スキーマに合わせて変換
+        posts = [PlanPostResponse(**post) for post in result["posts"]]
+
+        return PlanPostsPaginatedResponse(
+            posts=posts,
+            total=result["total"],
+            page=result["page"],
+            per_page=result["per_page"],
+            has_next=result["has_next"]
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         print("プラン投稿一覧取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))

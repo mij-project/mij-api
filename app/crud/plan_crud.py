@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from app.models.plans import Plans
 from app.models.subscriptions import Subscriptions
 from uuid import UUID
@@ -10,7 +10,10 @@ from app.models.profiles import Profiles
 from app.models.plans import PostPlans
 from app.models.posts import Posts
 from app.models.media_assets import MediaAssets
+from app.models.social import Likes, Comments
+from app.models.prices import Prices
 from app.constants.enums import MediaAssetKind
+from app.api.commons.utils import get_video_duration
 from app.models.user import Users
 from sqlalchemy import func
 import os
@@ -165,3 +168,173 @@ def get_plan_by_id(db: Session, plan_id: UUID) -> Plans:
     プランをIDで取得
     """
     return db.query(Plans).filter(Plans.id == plan_id).first()
+
+def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
+    """
+    プラン詳細情報を取得
+    """
+    # プラン情報を取得
+    plan = (
+        db.query(Plans)
+        .filter(
+            Plans.id == plan_id,
+            Plans.deleted_at.is_(None)
+        )
+        .first()
+    )
+
+    if not plan:
+        return None
+
+    # クリエイター情報を取得
+    creator_info = (
+        db.query(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .filter(Users.id == plan.creator_user_id)
+        .first()
+    )
+
+    # プランの投稿数を取得
+    post_count = (
+        db.query(func.count(PostPlans.post_id))
+        .join(Posts, PostPlans.post_id == Posts.id)
+        .filter(
+            PostPlans.plan_id == plan_id,
+            Posts.deleted_at.is_(None),
+            Posts.status == PostStatus.APPROVED
+        )
+        .scalar()
+    )
+
+    # サブスクリプション状態を確認
+    is_subscribed = (
+        db.query(Subscriptions)
+        .filter(
+            Subscriptions.user_id == current_user_id,
+            Subscriptions.plan_id == plan_id,
+            Subscriptions.status == 1,
+            Subscriptions.canceled_at.is_(None)
+        )
+        .first() is not None
+    )
+
+    return {
+        "id": plan.id,
+        "name": plan.name,
+        "description": plan.description,
+        "price": plan.price,
+        "creator_id": creator_info.id if creator_info else None,
+        "creator_name": creator_info.profile_name if creator_info else "",
+        "creator_username": creator_info.username if creator_info else "",
+        "creator_avatar_url": f"{BASE_URL}/{creator_info.avatar_url}" if creator_info and creator_info.avatar_url else None,
+        "creator_cover_url": f"{BASE_URL}/{creator_info.cover_url}" if creator_info and creator_info.cover_url else None,
+        "post_count": post_count or 0,
+        "is_subscribed": is_subscribed
+    }
+
+def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, page: int = 1, per_page: int = 20):
+    """
+    プランの投稿を ページネーション付きで取得
+    """
+    offset = (page - 1) * per_page
+
+    # サムネイルと動画用のエイリアスを作成
+    ThumbnailAssets = aliased(MediaAssets)
+    VideoAssets = aliased(MediaAssets)
+
+    # 投稿の総数を取得
+    total = (
+        db.query(func.count(Posts.id))
+        .join(PostPlans, Posts.id == PostPlans.post_id)
+        .filter(
+            PostPlans.plan_id == plan_id,
+            Posts.deleted_at.is_(None),
+            Posts.status == PostStatus.APPROVED
+        )
+        .scalar()
+    )
+
+    # 投稿データを取得
+    posts_query = (
+        db.query(
+            Posts,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec,
+            func.count(func.distinct(Likes.user_id)).label("likes_count"),
+            func.count(func.distinct(Comments.id)).label("comments_count"),
+            Posts.created_at,
+            Prices.price,
+            Prices.currency
+        )
+        .join(PostPlans, Posts.id == PostPlans.post_id)
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            ThumbnailAssets,
+            (ThumbnailAssets.post_id == Posts.id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL)
+        )
+        .outerjoin(
+            VideoAssets,
+            (VideoAssets.post_id == Posts.id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO)
+        )
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .outerjoin(Comments, Posts.id == Comments.post_id)
+        .outerjoin(Prices, Posts.id == Prices.post_id)
+        .filter(
+            PostPlans.plan_id == plan_id,
+            Posts.deleted_at.is_(None),
+            Posts.status == PostStatus.APPROVED
+        )
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            ThumbnailAssets.storage_key,
+            VideoAssets.duration_sec,
+            Posts.created_at,
+            Prices.price,
+            Prices.currency
+        )
+        .order_by(Posts.created_at.desc())
+        .offset(offset)
+        .limit(per_page)
+        .all()
+    )
+
+    posts = []
+    for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, created_at, price, currency in posts_query:
+        posts.append({
+            "id": post.id,
+            "thumbnail_url": f"{BASE_URL}/{thumbnail_key}" if thumbnail_key else None,
+            "title": post.description or "",
+            "creator_avatar": f"{BASE_URL}/{avatar_url}" if avatar_url else None,
+            "creator_name": profile_name,
+            "creator_username": username,
+            "likes_count": likes_count or 0,
+            "comments_count": comments_count or 0,
+            "duration": get_video_duration(duration_sec) if duration_sec else None,
+            "is_video": (post.post_type == 1),
+            "created_at": created_at,
+            "price": price,
+            "currency": currency
+        })
+
+    has_next = (offset + per_page) < total
+
+    return {
+        "posts": posts,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "has_next": has_next
+    }

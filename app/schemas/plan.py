@@ -51,9 +51,34 @@ class PlanPostResponse(BaseModel):
     duration: Optional[str] = None
     is_video: bool
     created_at: datetime
+    price: Optional[int] = None
+    currency: Optional[str] = None
 
     class Config:
         from_attributes = True
 
 class PlanPostsResponse(BaseModel):
     posts: List[PlanPostResponse] = []
+
+class PlanDetailResponse(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    price: int
+    creator_id: UUID
+    creator_name: str
+    creator_username: str
+    creator_avatar_url: Optional[str] = None
+    creator_cover_url: Optional[str] = None
+    post_count: int
+    is_subscribed: bool
+
+    class Config:
+        from_attributes = True
+
+class PlanPostsPaginatedResponse(BaseModel):
+    posts: List[PlanPostResponse] = []
+    total: int
+    page: int
+    per_page: int
+    has_next: bool
