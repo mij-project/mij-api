@@ -4,7 +4,7 @@ from app.models.user import Users
 from app.models.profiles import Profiles
 from app.schemas.user import UserCreate
 from app.core.security import hash_password
-from sqlalchemy import select, desc, func, update
+from sqlalchemy import select, desc, func, update, asc
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone
 from uuid import UUID
@@ -161,7 +161,8 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         db.query(Plans)
         .filter(Plans.creator_user_id == user.id)
         .filter(Plans.deleted_at.is_(None))
-        .order_by(desc(Plans.created_at))
+        .order_by(asc(Plans.display_order))
+        .order_by(asc(Plans.created_at))
         .all()
     )
     

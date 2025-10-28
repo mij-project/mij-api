@@ -59,6 +59,12 @@ class PlanStatus:
     NORMAL = 1 # 普通
     RECOMMENDED = 2 # おすすめプラン
 
+# プランライフサイクルステータス
+class PlanLifecycleStatus:
+    ACTIVE = 1 # アクティブ
+    DELETE_REQUESTED = 2 # 削除申請中
+    DELETED = 3 # 削除済み
+
 class ProfileImage:
     AVATAR = 1 # アバター
     COVER = 2 # カバー

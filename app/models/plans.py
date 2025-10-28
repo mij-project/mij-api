@@ -3,7 +3,7 @@ from typing import List, Optional, TYPE_CHECKING
 from uuid import UUID
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, SmallInteger, BigInteger, func
+from sqlalchemy import ForeignKey, Text, SmallInteger, BigInteger, Integer, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
@@ -25,6 +25,8 @@ class Plans(Base):
     price: Mapped[int] = mapped_column(BigInteger, nullable=False)
     type: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    display_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    welcome_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
