@@ -14,6 +14,7 @@ from app.models.categories import Categories
 from typing import List
 from app.models.user import Users
 from app.models.profiles import Profiles
+from app.models.post_categories import PostCategories
 from app.models.media_assets import MediaAssets
 from app.models.plans import Plans, PostPlans   
 from app.models.prices import Prices
@@ -22,6 +23,8 @@ from app.crud.entitlements_crud import check_entitlement
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PlanStatus
 from app.models.purchases import Purchases
+from app.models.orders import Orders, OrderItems
+from app.constants.enums import PostType
 from datetime import datetime, timedelta
 
 # エイリアスを定義
@@ -103,145 +106,60 @@ def get_posts_by_category_slug(db: Session, slug: str) -> List[Posts]:
         .all()
     )
 
+def _build_post_status_query(db: Session, user_id: UUID, post_status: PostStatus):
+    """
+    投稿ステータス取得クエリの共通部分
+    """
+    VideoAsset = aliased(MediaAssets)
+
+    return (
+        db.query(
+            Posts,
+            func.count(func.distinct(Likes.user_id)).label('likes_count'),
+            func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.count(func.distinct(OrderItems.id)).label('purchase_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            func.min(Prices.price).label('post_price'),
+            func.min(Prices.currency).label('post_currency'),
+            MediaAssets.storage_key.label('thumbnail_key'),
+            VideoAsset.duration_sec
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(VideoAsset, (Posts.id == VideoAsset.post_id) & (VideoAsset.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .outerjoin(Comments, Posts.id == Comments.post_id)
+        .outerjoin(OrderItems, Posts.id == OrderItems.post_id)
+        .outerjoin(Prices, Posts.id == Prices.post_id)
+        .filter(Posts.creator_user_id == user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == post_status)
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAsset.duration_sec)
+        .order_by(desc(Posts.created_at))
+    )
+
 def get_post_status_by_user_id(db: Session, user_id: UUID) -> dict:
     """
     ユーザーの投稿ステータスを取得
     """
-    
+
     # 審査中の投稿を取得
-    pending_posts = (
-        db.query(
-            Posts,
-            func.count(Likes.post_id).label('likes_count'),
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            func.min(Prices.price).label('post_price'),  # 最安値を取得
-            func.min(Prices.currency).label('post_currency'),  # 最安値の通貨を取得
-            MediaAssets.storage_key.label('thumbnail_key')
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        .outerjoin(Plans, PostPlans.plan_id == Plans.id)
-        .outerjoin(Prices, Plans.id == Prices.plan_id)
-        .filter(Posts.creator_user_id == user_id)
-        .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.PENDING)
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
-        .order_by(desc(Posts.created_at))
-        .all()
-    )
+    pending_posts = _build_post_status_query(db, user_id, PostStatus.PENDING).all()
 
     # 拒否された投稿を取得
-    rejected_posts = (
-        db.query(
-            Posts,
-            func.count(Likes.post_id).label('likes_count'),
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            func.min(Prices.price).label('post_price'),  # 最安値を取得
-            func.min(Prices.currency).label('post_currency'),  # 最安値の通貨を取得
-            MediaAssets.storage_key.label('thumbnail_key')
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        .outerjoin(Plans, PostPlans.plan_id == Plans.id)
-        .outerjoin(Prices, Plans.id == Prices.plan_id)
-        .filter(Posts.creator_user_id == user_id)
-        .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.REJECTED)
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
-        .order_by(desc(Posts.created_at))
-        .all()
-    )
+    rejected_posts = _build_post_status_query(db, user_id, PostStatus.REJECTED).all()
 
     # 非公開の投稿を取得
-    unpublished_posts = (
-        db.query(
-            Posts,
-            func.count(Likes.post_id).label('likes_count'),
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            func.min(Prices.price).label('post_price'),  # 最安値を取得
-            func.min(Prices.currency).label('post_currency'),  # 最安値の通貨を取得
-            MediaAssets.storage_key.label('thumbnail_key')
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        .outerjoin(Plans, PostPlans.plan_id == Plans.id)
-        .outerjoin(Prices, Plans.id == Prices.plan_id)
-        .filter(Posts.creator_user_id == user_id)
-        .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.UNPUBLISHED)
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
-        .order_by(desc(Posts.created_at))
-        .all()
-    )
+    unpublished_posts = _build_post_status_query(db, user_id, PostStatus.UNPUBLISHED).all()
 
     # 削除された投稿を取得
-    deleted_posts = (
-        db.query(
-            Posts,
-            func.count(Likes.post_id).label('likes_count'),
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            func.min(Prices.price).label('post_price'),  # 最安値を取得
-            func.min(Prices.currency).label('post_currency'),  # 最安値の通貨を取得
-            MediaAssets.storage_key.label('thumbnail_key')
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        .outerjoin(Plans, PostPlans.plan_id == Plans.id)
-        .outerjoin(Prices, Plans.id == Prices.plan_id)
-        .filter(Posts.creator_user_id == user_id)
-        .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.DELETED)
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
-        .order_by(desc(Posts.created_at))
-        .all()
-    )
+    deleted_posts = _build_post_status_query(db, user_id, PostStatus.DELETED).all()
 
     # 公開された投稿を取得
-    approved_posts = (
-        db.query(
-            Posts,
-            func.count(Likes.post_id).label('likes_count'),
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            func.min(Prices.price).label('post_price'),  # 最安値を取得
-            func.min(Prices.currency).label('post_currency'),  # 最安値の通貨を取得
-            MediaAssets.storage_key.label('thumbnail_key')
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        .outerjoin(Plans, PostPlans.plan_id == Plans.id)
-        .outerjoin(Prices, Plans.id == Prices.plan_id)
-        .filter(Posts.creator_user_id == user_id)
-        .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.APPROVED)
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
-        .order_by(desc(Posts.created_at))
-        .all()
-    )
+    approved_posts = _build_post_status_query(db, user_id, PostStatus.APPROVED).all()
 
     return {
         "pending_posts": pending_posts,
@@ -852,3 +770,180 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
         "media_assets": media_assets,
         "is_entitlement": is_entitlement,
     }
+
+
+# ========== クリエイター投稿管理用 ==========
+
+def _get_media_info_for_creator(db: Session, post_id: str) -> dict:
+    """クリエイター用メディア情報を取得（視聴権限チェックなし、全メディア取得）"""
+    media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
+
+    sample_video = None
+    main_video = None
+    thumbnail = None
+    images = []
+
+    for media_asset in media_assets:
+        if media_asset.kind == MediaAssetKind.THUMBNAIL:
+            thumbnail = {
+                "kind": media_asset.kind,
+                "storage_key": media_asset.storage_key,
+                "url": f"{CDN_BASE_URL}/{media_asset.storage_key}"
+            }
+        elif media_asset.kind == MediaAssetKind.SAMPLE_VIDEO:
+            sample_video = {
+                "kind": media_asset.kind,
+                "storage_key": media_asset.storage_key,
+                "url": f"{MEDIA_CDN_URL}/{media_asset.storage_key}",
+                "duration": media_asset.duration_sec
+            }
+        elif media_asset.kind == MediaAssetKind.MAIN_VIDEO:
+            main_video = {
+                "kind": media_asset.kind,
+                "storage_key": media_asset.storage_key,
+                "url": f"{MEDIA_CDN_URL}/{media_asset.storage_key}",
+                "duration": media_asset.duration_sec
+            }
+        elif media_asset.kind == MediaAssetKind.IMAGES:
+            images.append({
+                "kind": media_asset.kind,
+                "storage_key": media_asset.storage_key,
+                "url": f"{MEDIA_CDN_URL}/{media_asset.storage_key}_1080w.webp",  # モザイクなし
+                "duration": media_asset.duration_sec,
+                "orientation": media_asset.orientation
+            })
+        elif media_asset.kind == MediaAssetKind.OGP:
+            ogp_image = {
+                "kind": media_asset.kind,
+                "storage_key": media_asset.storage_key,
+                "url": f"{CDN_BASE_URL}/{media_asset.storage_key}"
+            }
+
+    return {
+        "thumbnail": thumbnail,
+        "sample_video": sample_video,
+        "main_video": main_video,
+        "images": images,
+        "ogp_image": ogp_image,
+        "media_assets": media_assets
+    }
+
+def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUID) -> dict | None:
+    """
+    クリエイター自身の投稿詳細を取得（統計情報含む）
+    """
+    VideoAsset = aliased(MediaAssets)
+    ThumbnailAsset = aliased(MediaAssets)
+    OGPAsset = aliased(MediaAssets)
+
+    result = (
+        db.query(
+            Posts,
+            func.count(func.distinct(Likes.user_id)).label('likes_count'),
+            func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.count(func.distinct(OrderItems.id)).label('purchase_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            func.min(Prices.price).label('post_price'),
+            func.min(Prices.currency).label('post_currency'),
+            ThumbnailAsset.storage_key.label('thumbnail_key'),
+            VideoAsset.duration_sec
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(ThumbnailAsset, (Posts.id == ThumbnailAsset.post_id) & (ThumbnailAsset.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(VideoAsset, (Posts.id == VideoAsset.post_id) & (VideoAsset.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .outerjoin(Comments, Posts.id == Comments.post_id)
+        .outerjoin(OrderItems, Posts.id == OrderItems.post_id)
+        .outerjoin(Prices, Posts.id == Prices.post_id)
+        .filter(Posts.id == post_id)
+        .filter(Posts.creator_user_id == creator_user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            ThumbnailAsset.storage_key,
+            VideoAsset.duration_sec
+        )
+        .first()
+    )
+
+    if not result:
+        return None
+
+    # 動画時間をフォーマット
+    duration = None
+    if result.duration_sec:
+        minutes = int(result.duration_sec // 60)
+        seconds = int(result.duration_sec % 60)
+        duration = f"{minutes:02d}:{seconds:02d}"
+
+    # 投稿タイプを判定
+    is_video = result.Posts.post_type == PostType.VIDEO  # PostType.VIDEO = 1
+
+    # メディア情報を取得
+    media_info = _get_media_info_for_creator(db, str(post_id))
+
+    # カテゴリー情報を取得
+    category_records = db.query(PostCategories).filter(PostCategories.post_id == post_id).all()
+    category_ids = [str(rec.category_id) for rec in category_records]
+
+    # プラン情報を取得
+    plan_records = db.query(PostPlans).filter(PostPlans.post_id == post_id).all()
+    plan_ids = [str(rec.plan_id) for rec in plan_records]
+
+    return {
+        "post": result.Posts,
+        "likes_count": result.likes_count or 0,
+        "comments_count": result.comments_count or 0,
+        "purchase_count": result.purchase_count or 0,
+        "creator_name": result.profile_name,
+        "username": result.username,
+        "creator_avatar_url": result.avatar_url,
+        "price": result.post_price or 0,
+        "currency": result.post_currency or "JPY",
+        "thumbnail_key": result.thumbnail_key,
+        "duration": duration,
+        "is_video": is_video,
+        "media_info": media_info,
+        "category_ids": category_ids,
+        "tags": None,  # タグ実装はまだしていない
+        "plan_ids": plan_ids
+    }
+
+
+def update_post_by_creator(
+    db: Session,
+    post_id: UUID,
+    creator_user_id: UUID,
+    update_data: dict
+) -> Posts | None:
+    """
+    クリエイターが自分の投稿を更新
+    """
+    post = (
+        db.query(Posts)
+        .filter(Posts.id == post_id)
+        .filter(Posts.creator_user_id == creator_user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .first()
+    )
+
+    if not post:
+        return None
+
+    # 更新可能なフィールド
+    allowed_fields = ['description', 'status', 'visibility', 'scheduled_at', 'expiration_at']
+
+    for field, value in update_data.items():
+        if field in allowed_fields and value is not None:
+            setattr(post, field, value)
+
+    post.updated_at = datetime.now()
+    db.flush()
+
+    return post

@@ -13,6 +13,9 @@ from app.schemas.account import (
     AccountPresignResponse,
     AccountPostStatusResponse,
     AccountPostResponse,
+    AccountPostDetailResponse,
+    AccountPostUpdateRequest,
+    AccountPostUpdateResponse,
     LikedPostResponse,
     ProfileInfo,
     ProfileEditInfo,
@@ -40,7 +43,9 @@ from app.crud.post_crud import (
     get_liked_posts_by_user_id,
     get_bookmarked_posts_by_user_id,
     get_liked_posts_list_by_user_id,
-    get_bought_posts_by_user_id
+    get_bought_posts_by_user_id,
+    get_post_detail_for_creator,
+    update_post_by_creator
 )
 from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id
@@ -332,20 +337,38 @@ def get_post_status(
         
         # データ変換用のヘルパー関数
         def convert_posts(posts_list):
-            return [
-                AccountPostResponse(
-                    id=str(post.Posts.id),
-                    description=post.Posts.description,
-                    thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}" if post.thumbnail_key else None,
-                    likes_count=post.likes_count,
-                    creator_name=post.profile_name,
-                    username=post.username,
-                    creator_avatar_url=f"{BASE_URL}/{post.avatar_url}" if post.avatar_url else None,
-                    price=post.post_price,
-                    currency=post.post_currency
-                )
-                for post in posts_list
-            ]
+            result = []
+            for row in posts_list:
+                # タプルの最初の要素がPostsオブジェクト
+                post_obj = row[0]
+                
+                # 動画時間をフォーマット
+                duration = None
+                if row.duration_sec:
+                    minutes = int(row.duration_sec // 60)
+                    seconds = int(row.duration_sec % 60)
+                    duration = f"{minutes:02d}:{seconds:02d}"
+
+                # 投稿タイプを判定
+                is_video = post_obj.post_type == 1 if post_obj.post_type else False  # PostType.VIDEO = 1
+
+                result.append(AccountPostResponse(
+                    id=str(post_obj.id),
+                    description=post_obj.description,
+                    thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}" if row.thumbnail_key else None,
+                    likes_count=row.likes_count or 0,
+                    comments_count=row.comments_count or 0,
+                    purchase_count=row.purchase_count or 0,
+                    creator_name=row.profile_name,
+                    username=row.username,
+                    creator_avatar_url=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
+                    price=row.post_price or 0,
+                    currency=row.post_currency or "JPY",
+                    created_at=post_obj.created_at.isoformat() if post_obj.created_at else None,
+                    duration=duration,
+                    is_video=is_video
+                ))
+            return result
         
         return AccountPostStatusResponse(
             pending_posts=convert_posts(posts_data["pending_posts"]),
@@ -357,7 +380,110 @@ def get_post_status(
     except Exception as e:
         print("投稿ステータス取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+@router.get("/post/{post_id}", response_model=AccountPostDetailResponse)
+def get_account_post_detail(
+    post_id: str,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    クリエイター自身の投稿詳細を取得（編集・管理用）
+    """
+    try:
+        from uuid import UUID
+
+        post_data = get_post_detail_for_creator(db, UUID(post_id), current_user.id)
+
+        if not post_data:
+            raise HTTPException(status_code=404, detail="投稿が見つかりません")
+
+        # メディア情報を取得
+        media_info = post_data.get("media_info", {})
+        sample_video_url = media_info.get("sample_video", {}).get("url") if media_info.get("sample_video") else None
+        main_video_url = media_info.get("main_video", {}).get("url") if media_info.get("main_video") else None
+        ogp_image_url = media_info.get("ogp_image", {}).get("url") if media_info.get("ogp_image") else None
+        image_urls = [img.get("url") for img in media_info.get("images", []) if img.get("url")]
+
+        return AccountPostDetailResponse(
+            id=str(post_data["post"].id),
+            description=post_data["post"].description,
+            thumbnail_url=f"{BASE_URL}/{post_data['thumbnail_key']}" if post_data.get('thumbnail_key') else None,
+            ogp_image_url=ogp_image_url if ogp_image_url else None,
+            likes_count=post_data["likes_count"],
+            comments_count=post_data["comments_count"],
+            purchase_count=post_data["purchase_count"],
+            creator_name=post_data["creator_name"],
+            username=post_data["username"],
+            creator_avatar_url=f"{BASE_URL}/{post_data['creator_avatar_url']}" if post_data.get('creator_avatar_url') else None,
+            price=post_data["price"],
+            currency=post_data["currency"],
+            created_at=post_data["post"].created_at.isoformat(),
+            updated_at=post_data["post"].updated_at.isoformat(),
+            duration=post_data.get("duration"),
+            is_video=post_data["is_video"],
+            post_type=post_data["post"].post_type,
+            status=post_data["post"].status,
+            visibility=post_data["post"].visibility,
+            sample_video_url=sample_video_url,
+            main_video_url=main_video_url,
+            image_urls=image_urls,
+            category_ids=post_data.get("category_ids", []),
+            tags=post_data.get("tags"),
+            plan_ids=post_data.get("plan_ids", [])
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="無効な投稿IDです")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("投稿詳細取得エラーが発生しました", e)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/post/{post_id}", response_model=AccountPostUpdateResponse)
+def update_account_post(
+    post_id: str,
+    request_data: AccountPostUpdateRequest,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    クリエイター自身の投稿を更新（非公開化、削除、編集など）
+    """
+    try:
+        from uuid import UUID
+
+        # 更新データを準備
+        update_data = request_data.dict(exclude_unset=True)
+
+        if not update_data:
+            raise HTTPException(status_code=400, detail="更新するデータがありません")
+
+        # 投稿を更新
+        updated_post = update_post_by_creator(db, UUID(post_id), current_user.id, update_data)
+
+        if not updated_post:
+            raise HTTPException(status_code=404, detail="投稿が見つかりません")
+
+        db.commit()
+
+        return AccountPostUpdateResponse(
+            message="投稿を更新しました",
+            success=True
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="無効な投稿IDです")
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print("投稿更新エラーが発生しました", e)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/plans")
 def get_plans(
     current_user = Depends(get_current_user),

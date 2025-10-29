@@ -145,11 +145,16 @@ class AccountPostResponse(BaseModel):
     description: str
     thumbnail_url: Optional[str] = None
     likes_count: int
+    comments_count: int = 0
+    purchase_count: int = 0
     creator_name: str
     username: str
     creator_avatar_url: Optional[str] = None
     price: int
     currency: str
+    created_at: Optional[str] = None
+    duration: Optional[str] = None
+    is_video: bool = False
 
 class AccountPostStatusResponse(BaseModel):
     pending_posts: List[AccountPostResponse] = []
@@ -157,3 +162,44 @@ class AccountPostStatusResponse(BaseModel):
     unpublished_posts: List[AccountPostResponse] = []
     deleted_posts: List[AccountPostResponse] = []
     approved_posts: List[AccountPostResponse] = []
+
+class AccountPostDetailResponse(BaseModel):
+    """クリエイター用投稿詳細レスポンス"""
+    id: str
+    description: str
+    thumbnail_url: Optional[str] = None
+    ogp_image_url: Optional[str] = None
+    likes_count: int
+    comments_count: int
+    purchase_count: int
+    creator_name: str
+    username: str
+    creator_avatar_url: Optional[str] = None
+    price: int
+    currency: str
+    created_at: str
+    updated_at: str
+    duration: Optional[str] = None
+    is_video: bool
+    post_type: Optional[int] = None  # 1=VIDEO, 2=IMAGE
+    status: int
+    visibility: int
+    # メディア情報
+    sample_video_url: Optional[str] = None
+    main_video_url: Optional[str] = None
+    image_urls: List[str] = []
+    # カテゴリー・プラン情報
+    category_ids: List[str] = []
+    tags: Optional[str] = None
+    plan_ids: List[str] = []
+
+class AccountPostUpdateRequest(BaseModel):
+    """投稿更新リクエスト"""
+    description: Optional[str] = None
+    status: Optional[int] = None
+    visibility: Optional[int] = None
+
+class AccountPostUpdateResponse(BaseModel):
+    """投稿更新レスポンス"""
+    message: str
+    success: bool
