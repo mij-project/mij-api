@@ -18,6 +18,8 @@ from app.schemas.admin import (
     AdminPostDetailResponse,
     CreateAdminRequest,
     AdminResponse,
+    PostRejectRequest,
+    PostRejectResponse,
 )
 from app.models.user import Users
 from app.models.creators import Creators
@@ -35,9 +37,13 @@ from app.crud.admin_crud import (
     update_post_status,
     get_post_by_id,
     create_admin,
+    reject_post_with_comments,
 )
 from app.services.s3.presign import presign_get
-from app.constants.enums import MediaAssetKind
+from app.constants.enums import MediaAssetKind, PostStatus
+
+CDN_URL = getenv("CDN_BASE_URL")
+MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
 
 router = APIRouter()
 
@@ -291,6 +297,30 @@ def update_post_status(
     
     return {"message": "投稿ステータスを更新しました"}
 
+@router.post("/posts/{post_id}/reject", response_model=PostRejectResponse)
+def reject_post(
+    post_id: str,
+    reject_request: PostRejectRequest,
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user)
+):
+    """投稿を拒否し、拒否理由を保存"""
+
+    success = reject_post_with_comments(
+        db=db,
+        post_id=post_id,
+        post_reject_comment=reject_request.post_reject_comment,
+        media_reject_comments=reject_request.media_reject_comments
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="投稿が見つかりません")
+
+    return PostRejectResponse(
+        message="投稿を拒否しました",
+        success=True
+    )
+
 @router.get("/posts/{post_id}", response_model=AdminPostDetailResponse)
 def get_post(
     post_id: str,
@@ -301,12 +331,20 @@ def get_post(
     
     post_data = get_post_by_id(db, post_id)
 
+    before_examination_flg = False if post_data['status'] == PostStatus.APPROVED else True
+
     # メディアアセットの情報からkindが3,4,5のものはpresign_getを呼び出し、urlを取得
-    CDN_URL = getenv("CDN_BASE_URL", "")
     for media_asset_id, media_asset_data in post_data['media_assets'].items():
-        if media_asset_data['kind'] in [MediaAssetKind.IMAGES, MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
+        if before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.IMAGES, MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
             presign_url = presign_get("ingest", media_asset_data['storage_key'])
             post_data['media_assets'][media_asset_id]['storage_key'] = presign_url['download_url']
+
+        elif not before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
+            post_data['media_assets'][media_asset_id]['storage_key'] = MEDIA_CDN_URL + "/" + media_asset_data['storage_key']
+        
+        elif not before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.IMAGES]:
+            post_data['media_assets'][media_asset_id]['storage_key'] = MEDIA_CDN_URL + "/" + media_asset_data['storage_key'] + "_1080w.webp"
+
         elif media_asset_data['kind'] in [MediaAssetKind.OGP, MediaAssetKind.THUMBNAIL]:
             post_data['media_assets'][media_asset_id]['storage_key'] = CDN_URL + "/" + media_asset_data['storage_key']
 

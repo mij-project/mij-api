@@ -16,7 +16,7 @@ from app.schemas.commons import PresignResponseItem, UploadItem
 from typing import Dict, List, Union
 from app.crud.media_assets_crud import create_media_asset
 from app.models.posts import Posts
-from app.constants.enums import MediaAssetKind, MediaAssetOrientation
+from app.constants.enums import MediaAssetKind, MediaAssetOrientation, MediaAssetStatus
 
 router = APIRouter()
 
@@ -88,6 +88,7 @@ async def presign_post_media_image(
                 "storage_key": key,
                 "orientation": ORIENTATION_MAPPING[f.orientation],
                 "mime_type": f.content_type,
+                "status": MediaAssetStatus.PENDING,
                 "bytes": 0,
             }
             media_asset = create_media_asset(db, media_asset_data)
@@ -145,6 +146,7 @@ async def presign_post_media_video(
                 "storage_key": key,
                 "mime_type": f.content_type,
                 "bytes": 0,
+                "status": MediaAssetStatus.PENDING,
             }
             media_asset = create_media_asset(db, media_asset_data)
 

@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Optional, List, Generic, TypeVar, Dict
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 import os
+from app.constants.enums import PostStatus
 
 CDN_URL = os.getenv("CDN_BASE_URL")
 
@@ -134,8 +135,15 @@ class AdminPostResponse(BaseModel):
     @classmethod
     def from_orm(cls, post):
         # statusを数値から文字列に変換
-        status_map = {1: "draft", 2: "published", 3: "archived", 4: "pending", 5: "completed"}
-        status_str = status_map.get(post.status, "draft")
+        status_map = {
+            PostStatus.PENDING: "pending",       # 1 -> "pending"
+            PostStatus.REJECTED: "rejected",     # 2 -> "rejected"
+            PostStatus.UNPUBLISHED: "unpublished", # 3 -> "unpublished"
+            PostStatus.DELETED: "deleted",       # 4 -> "deleted"
+            PostStatus.APPROVED: "approved",     # 5 -> "approved"
+            PostStatus.RESUBMIT: "resubmit",     # 6 -> "resubmit"
+        }
+        status_str = status_map.get(post.status, "pending")
         
         data = {
             "id": str(post.id),
@@ -199,7 +207,16 @@ class CreateAdminRequest(BaseModel):
     email: str
     password: str
     role: int = 1
-    status: int = 1
+
+class PostRejectRequest(BaseModel):
+    """投稿拒否リクエスト"""
+    post_reject_comment: str = Field(..., description="投稿全体に対する拒否理由（必須）")
+    media_reject_comments: Optional[dict[str, str]] = Field(None, description="メディア別の拒否理由 {media_asset_id: comment}")
+
+class PostRejectResponse(BaseModel):
+    """投稿拒否レスポンス"""
+    message: str
+    success: bool
 
 class CreateUserRequest(BaseModel):
     email: str

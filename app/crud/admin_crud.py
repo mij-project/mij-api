@@ -14,6 +14,7 @@ from app.models.subscriptions import Subscriptions
 from app.models.media_assets import MediaAssets
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
+from app.constants.enums import PostStatus, MediaAssetStatus
 import os
 
 CDN_URL = os.getenv("CDN_BASE_URL")
@@ -375,8 +376,14 @@ def get_posts_paginated(
         )
     
     if status:
-        status_map = {"draft": 1, "published": 2, "archived": 3}
-        query = query.filter(Posts.status == status_map.get(status, 2))
+        status_map = {
+            "approved": PostStatus.APPROVED, 
+            "rejected": PostStatus.REJECTED, 
+            "resubmit": PostStatus.RESUBMIT,
+            "deleted": PostStatus.DELETED,
+            "pending": PostStatus.PENDING,
+        }
+        query = query.filter(Posts.status == status_map.get(status, PostStatus.PENDING))
     
     # ソート処理
     if sort == "created_at_desc":
@@ -510,8 +517,14 @@ def update_post_status(db: Session, post_id: str, status: str) -> bool:
         if not post:
             return False
         
-        status_map = {"published": 2, "archived": 3, "draft": 1}
-        post.status = status_map.get(status, 2)
+        status_map = {
+            "approved": PostStatus.APPROVED, 
+            "rejected": PostStatus.REJECTED, 
+            "resubmit": PostStatus.RESUBMIT,
+            "deleted": PostStatus.DELETED,
+            "pending": PostStatus.PENDING,
+        }
+        post.status = status_map.get(status, PostStatus.PENDING)
         post.updated_at = datetime.utcnow()
         
         db.commit()
@@ -615,7 +628,57 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
             ma['id']: {
                 'kind': ma['kind'],
                 'storage_key': ma['storage_key']
-            } 
+            }
             for ma in media_assets if ma['storage_key']
         }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
     }
+
+
+def reject_post_with_comments(
+    db: Session,
+    post_id: str,
+    post_reject_comment: str,
+    media_reject_comments: Optional[Dict[str, str]] = None
+) -> bool:
+    """
+    投稿を拒否し、拒否理由をpostsとmedia_assetsに保存
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+        post_reject_comment: 投稿全体に対する拒否理由
+        media_reject_comments: メディア別の拒否理由 {media_asset_id: comment}
+
+    Returns:
+        bool: 更新成功フラグ
+    """
+    try:
+        # 投稿を取得
+        post = db.query(Posts).filter(Posts.id == post_id).first()
+        if not post:
+            return False
+
+        # 投稿のステータスを拒否に更新し、拒否理由を保存
+        post.status = PostStatus.REJECTED
+        post.reject_comments = post_reject_comment
+        post.updated_at = datetime.utcnow()
+
+        # メディア別の拒否理由を保存
+        if media_reject_comments:
+            for media_id, comment in media_reject_comments.items():
+                media_asset = db.query(MediaAssets).filter(
+                    MediaAssets.id == media_id,
+                    MediaAssets.post_id == post_id
+                ).first()
+                if media_asset:
+                    media_asset.reject_comments = comment
+                    media_asset.status = MediaAssetStatus.REJECTED
+
+        db.commit()
+        return True
+    except Exception as e:
+        print(f"Reject post with comments error: {e}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        return False

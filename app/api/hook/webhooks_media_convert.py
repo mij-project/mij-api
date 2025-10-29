@@ -11,7 +11,7 @@ from app.crud.media_rendition_jobs_crud import update_media_rendition_job, get_m
 from app.crud.media_assets_crud import get_media_asset_by_id, update_media_asset
 from app.crud.media_rendition_crud import create_media_rendition
 from app.crud.post_crud import update_post_status
-from app.constants.enums import MediaRenditionJobStatus, MediaRenditionKind, PostStatus
+from app.constants.enums import MediaRenditionJobStatus, MediaRenditionKind, PostStatus, MediaAssetStatus
 from app.db.base import get_db
 from app.services.s3.client import MEDIA_BUCKET_NAME, AWS_REGION
 
@@ -170,7 +170,8 @@ def _handle_final_hls_completion(db: Session, webhook_data: dict) -> None:
     media_asset_update_data = {
         "bytes": size_bytes or 0,
         "storage_key": storage_key,
-        "duration_sec": duration_sec
+        "duration_sec": duration_sec,
+        "status": MediaAssetStatus.APPROVED,
     }
     update_media_asset(db, asset.id, media_asset_update_data)
     

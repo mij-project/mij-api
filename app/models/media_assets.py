@@ -28,6 +28,7 @@ class MediaAssets(Base):
     duration_sec: Mapped[Optional[Decimal]] = mapped_column(NUMERIC(10, 3), nullable=True)
     orientation: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    reject_comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
     post: Mapped["Posts"] = relationship("Posts", back_populates="media_assets")

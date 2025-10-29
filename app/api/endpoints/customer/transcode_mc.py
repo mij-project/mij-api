@@ -25,6 +25,7 @@ from app.constants.enums import (
     MediaRenditionKind,
     PostStatus,
     PostType,
+    MediaAssetStatus,
 )
 from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
 from app.crud.media_rendition_crud import create_media_rendition
@@ -168,6 +169,7 @@ def _process_image_asset(
             media_asset_update_data = {
                 "storage_key": stem,
                 "bytes": len(bytes_data),
+                "status": MediaAssetStatus.APPROVED,
             }
             update_media_asset(db, asset_row.id, media_asset_update_data)
 

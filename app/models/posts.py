@@ -27,6 +27,7 @@ class Posts(Base):
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     scheduled_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     expiration_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    reject_comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)

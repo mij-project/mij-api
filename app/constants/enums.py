@@ -42,6 +42,7 @@ class PostStatus:
     UNPUBLISHED = 3 # 非公開
     DELETED = 4 # 削除
     APPROVED = 5 # 公開
+    RESUBMIT = 6 # 再申請
 
 # 投稿の種類
 class PostType:
@@ -78,6 +79,15 @@ class ProfileImageStatus:
 class PriceType:
     SINGLE = 1 # 単品
     PLAN = 2 # プラン
+
+class MediaAssetStatus:
+    PENDING = 1 # 未承認
+    REJECTED = 2 # 拒否
+    APPROVED = 3 # 承認
+    DELETED = 4 # 削除
+    UNPUBLISHED = 5 # 非公開
+    RESUBMIT = 6 # 再申請
+    CONVERTING = 7 # 変換中
 
 # メディアアセットのkind
 class MediaAssetKind:
