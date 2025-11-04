@@ -52,6 +52,67 @@ def sms_client():
         region_name=AWS_REGION,
     )
 
+def delete_object(bucket: str, key: str):
+    client = s3_client()
+    client.delete_object(Bucket=bucket, Key=key)
+
+def delete_hls_directory(bucket: str, m3u8_key: str):
+    """
+    HLS動画の.m3u8ファイルとその関連ファイル（.tsセグメント、プレイリスト等）を削除
+
+    Args:
+        bucket (str): S3バケット名
+        m3u8_key (str): .m3u8ファイルのキー（例: "path/to/video/playlist.m3u8"）
+    """
+    client = s3_client()
+
+    # .m3u8ファイルのディレクトリパスを取得
+    # 例: "path/to/video/playlist.m3u8" -> "path/to/video/"
+    if '/' in m3u8_key:
+        directory_prefix = m3u8_key.rsplit('/', 1)[0] + '/'
+    else:
+        # ルートディレクトリの場合
+        directory_prefix = ''
+
+    try:
+        # ディレクトリ配下の全オブジェクトをリスト
+        paginator = client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket, Prefix=directory_prefix)
+
+        deleted_count = 0
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+
+            # 削除対象のオブジェクトを収集
+            objects_to_delete = []
+            for obj in page['Contents']:
+                key = obj['Key']
+                # HLS関連ファイル（.m3u8, .ts, .vtt等）を削除対象に
+                if key.endswith(('.m3u8', '.ts', '.vtt', '.jpg', '.png')):
+                    objects_to_delete.append({'Key': key})
+
+            # バッチ削除（最大1000件まで一度に削除可能）
+            if objects_to_delete:
+                response = client.delete_objects(
+                    Bucket=bucket,
+                    Delete={'Objects': objects_to_delete}
+                )
+                deleted_count += len(objects_to_delete)
+                print(f"Deleted {len(objects_to_delete)} HLS files from {directory_prefix}")
+
+                # 削除エラーがあればログ出力
+                if 'Errors' in response:
+                    for error in response['Errors']:
+                        print(f"Error deleting {error['Key']}: {error['Message']}")
+
+        print(f"Total deleted {deleted_count} HLS-related files")
+        return deleted_count
+
+    except Exception as e:
+        print(f"Failed to delete HLS directory {directory_prefix}: {e}")
+        raise
+
 
 @lru_cache(maxsize=1)
 def s3_client_for_mc():

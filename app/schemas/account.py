@@ -167,8 +167,11 @@ class AccountPostDetailResponse(BaseModel):
     """クリエイター用投稿詳細レスポンス"""
     id: str
     description: str
+    reject_comments: Optional[str] = None
     thumbnail_url: Optional[str] = None
     ogp_image_url: Optional[str] = None
+    scheduled_at: Optional[str] = None
+    expiration_at: Optional[str] = None
     likes_count: int
     comments_count: int
     purchase_count: int
@@ -177,8 +180,6 @@ class AccountPostDetailResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     price: int
     currency: str
-    created_at: str
-    updated_at: str
     duration: Optional[str] = None
     is_video: bool
     post_type: Optional[int] = None  # 1=VIDEO, 2=IMAGE
@@ -186,18 +187,23 @@ class AccountPostDetailResponse(BaseModel):
     visibility: int
     # メディア情報
     sample_video_url: Optional[str] = None
+    sample_video_reject_comments: Optional[str] = None
     main_video_url: Optional[str] = None
+    main_video_reject_comments: Optional[str] = None
+    ogp_image_reject_comments: Optional[str] = None
     image_urls: List[str] = []
+    image_reject_comments: List[Optional[str]] = []
     # カテゴリー・プラン情報
     category_ids: List[str] = []
     tags: Optional[str] = None
-    plan_ids: List[str] = []
+    plan_list: List[dict] = []
 
 class AccountPostUpdateRequest(BaseModel):
     """投稿更新リクエスト"""
     description: Optional[str] = None
     status: Optional[int] = None
     visibility: Optional[int] = None
+    scheduled_at: Optional[str] = None
 
 class AccountPostUpdateResponse(BaseModel):
     """投稿更新レスポンス"""

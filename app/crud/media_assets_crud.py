@@ -21,6 +21,14 @@ def create_media_asset(db: Session, media_asset_data: dict) -> MediaAssets:
     db.flush()
     return db_media_asset
 
+def update_media_asset(db: Session, asset_id: str, update_data: dict) -> MediaAssets:
+    """
+    メディアアセット更新
+    """
+    db.query(MediaAssets).filter(MediaAssets.id == asset_id).update(update_data)
+    db.flush()
+    return db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
+
 
 def get_media_asset_by_post_id(db: Session, post_id: str, type: str) -> MediaAssets:
     """
@@ -79,3 +87,25 @@ def update_media_asset(db: Session, asset_id: str, update_data: dict) -> MediaAs
     
     # 更新されたオブジェクトを取得して返す
     return db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
+
+def get_media_assets_by_post_id(db: Session, post_id: str, kind: str) -> str:
+    """
+    メディアアセット取得（最新のものを返す）
+
+    Args:
+        db (Session): データベースセッション
+        post_id (str): 投稿ID
+        kind (str): メディアアセットの種類
+
+    Returns:
+        MediaAssets: メディアアセット（最新のもの）
+    """
+    return (
+        db.query(
+            MediaAssets.storage_key,
+            MediaAssets.id
+        )
+        .filter(MediaAssets.post_id == post_id, MediaAssets.kind == kind)
+        .order_by(MediaAssets.created_at.desc())
+        .first()
+    )

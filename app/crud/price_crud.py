@@ -16,3 +16,11 @@ def get_price_by_id(db: Session, price_id: UUID) -> Prices:
     価格を取得
     """
     return db.query(Prices).filter(Prices.id == price_id).first()
+
+def delete_price_by_post_id(db: Session, post_id: UUID):
+    """
+    価格を削除
+    """
+    db.query(Prices).filter(Prices.post_id == post_id).delete()
+    db.commit()
+    return True

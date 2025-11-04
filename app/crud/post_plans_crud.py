@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from uuid import UUID
 from app.models.plans import PostPlans
 
 def create_post_plan(db: Session, post_plan_data) -> PostPlans:
@@ -9,3 +10,11 @@ def create_post_plan(db: Session, post_plan_data) -> PostPlans:
     db.add(db_post_plan)
     db.flush()
     return db_post_plan
+
+def delete_plan_by_post_id(db: Session, post_id: UUID):
+    """
+    プランを投稿IDで削除
+    """
+    db.query(PostPlans).filter(PostPlans.post_id == post_id).delete()
+    db.flush()
+    return True

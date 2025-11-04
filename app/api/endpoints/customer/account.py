@@ -55,6 +55,7 @@ from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_us
 from app.crud import profile_image_crud
 from app.services.s3.keygen import account_asset_key
 from app.services.s3.presign import presign_put_public
+from uuid import UUID
 import os
 
 router = APIRouter()
@@ -335,47 +336,12 @@ def get_post_status(
     try:
         posts_data = get_post_status_by_user_id(db, user.id)
         
-        # データ変換用のヘルパー関数
-        def convert_posts(posts_list):
-            result = []
-            for row in posts_list:
-                # タプルの最初の要素がPostsオブジェクト
-                post_obj = row[0]
-                
-                # 動画時間をフォーマット
-                duration = None
-                if row.duration_sec:
-                    minutes = int(row.duration_sec // 60)
-                    seconds = int(row.duration_sec % 60)
-                    duration = f"{minutes:02d}:{seconds:02d}"
-
-                # 投稿タイプを判定
-                is_video = post_obj.post_type == 1 if post_obj.post_type else False  # PostType.VIDEO = 1
-
-                result.append(AccountPostResponse(
-                    id=str(post_obj.id),
-                    description=post_obj.description,
-                    thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}" if row.thumbnail_key else None,
-                    likes_count=row.likes_count or 0,
-                    comments_count=row.comments_count or 0,
-                    purchase_count=row.purchase_count or 0,
-                    creator_name=row.profile_name,
-                    username=row.username,
-                    creator_avatar_url=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
-                    price=row.post_price or 0,
-                    currency=row.post_currency or "JPY",
-                    created_at=post_obj.created_at.isoformat() if post_obj.created_at else None,
-                    duration=duration,
-                    is_video=is_video
-                ))
-            return result
-        
         return AccountPostStatusResponse(
-            pending_posts=convert_posts(posts_data["pending_posts"]),
-            rejected_posts=convert_posts(posts_data["rejected_posts"]),
-            unpublished_posts=convert_posts(posts_data["unpublished_posts"]),
-            deleted_posts=convert_posts(posts_data["deleted_posts"]),
-            approved_posts=convert_posts(posts_data["approved_posts"])
+            pending_posts=_convert_posts(posts_data["pending_posts"]),
+            rejected_posts=_convert_posts(posts_data["rejected_posts"]),
+            unpublished_posts=_convert_posts(posts_data["unpublished_posts"]),
+            deleted_posts=_convert_posts(posts_data["deleted_posts"]),
+            approved_posts=_convert_posts(posts_data["approved_posts"])
         )
     except Exception as e:
         print("投稿ステータス取得エラーが発生しました", e)
@@ -391,7 +357,6 @@ def get_account_post_detail(
     クリエイター自身の投稿詳細を取得（編集・管理用）
     """
     try:
-        from uuid import UUID
 
         post_data = get_post_detail_for_creator(db, UUID(post_id), current_user.id)
 
@@ -400,16 +365,27 @@ def get_account_post_detail(
 
         # メディア情報を取得
         media_info = post_data.get("media_info", {})
-        sample_video_url = media_info.get("sample_video", {}).get("url") if media_info.get("sample_video") else None
-        main_video_url = media_info.get("main_video", {}).get("url") if media_info.get("main_video") else None
-        ogp_image_url = media_info.get("ogp_image", {}).get("url") if media_info.get("ogp_image") else None
-        image_urls = [img.get("url") for img in media_info.get("images", []) if img.get("url")]
+        sample_video = media_info.get("sample_video", {})
+        main_video = media_info.get("main_video", {})
+        ogp_image = media_info.get("ogp_image", {})
+        images = media_info.get("images", [])
+        
+        sample_video_url = sample_video.get("url") if sample_video else None
+        sample_video_reject_comments = sample_video.get("reject_comments") if sample_video else None
+        main_video_url = main_video.get("url") if main_video else None
+        main_video_reject_comments = main_video.get("reject_comments") if main_video else None
+        ogp_image_url = ogp_image.get("url") if ogp_image else None
+        ogp_image_reject_comments = ogp_image.get("reject_comments") if ogp_image else None
+        image_urls = [img.get("url") for img in images if img.get("url")]
+        image_reject_comments = [img.get("reject_comments") for img in images]
 
         return AccountPostDetailResponse(
             id=str(post_data["post"].id),
             description=post_data["post"].description,
+            reject_comments=post_data["post"].reject_comments if post_data["post"].reject_comments else None,
             thumbnail_url=f"{BASE_URL}/{post_data['thumbnail_key']}" if post_data.get('thumbnail_key') else None,
             ogp_image_url=ogp_image_url if ogp_image_url else None,
+            ogp_image_reject_comments=ogp_image_reject_comments,
             likes_count=post_data["likes_count"],
             comments_count=post_data["comments_count"],
             purchase_count=post_data["purchase_count"],
@@ -418,19 +394,22 @@ def get_account_post_detail(
             creator_avatar_url=f"{BASE_URL}/{post_data['creator_avatar_url']}" if post_data.get('creator_avatar_url') else None,
             price=post_data["price"],
             currency=post_data["currency"],
-            created_at=post_data["post"].created_at.isoformat(),
-            updated_at=post_data["post"].updated_at.isoformat(),
+            scheduled_at=post_data["post"].scheduled_at.isoformat() if post_data["post"].scheduled_at else None,
+            expiration_at=post_data["post"].expiration_at.isoformat() if post_data["post"].expiration_at else None,
             duration=post_data.get("duration"),
             is_video=post_data["is_video"],
             post_type=post_data["post"].post_type,
             status=post_data["post"].status,
             visibility=post_data["post"].visibility,
             sample_video_url=sample_video_url,
+            sample_video_reject_comments=sample_video_reject_comments,
             main_video_url=main_video_url,
+            main_video_reject_comments=main_video_reject_comments,
             image_urls=image_urls,
+            image_reject_comments=image_reject_comments,
             category_ids=post_data.get("category_ids", []),
             tags=post_data.get("tags"),
-            plan_ids=post_data.get("plan_ids", [])
+            plan_list=post_data.get("plan_list", [])
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="無効な投稿IDです")
@@ -438,48 +417,6 @@ def get_account_post_detail(
         raise
     except Exception as e:
         print("投稿詳細取得エラーが発生しました", e)
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.put("/post/{post_id}", response_model=AccountPostUpdateResponse)
-def update_account_post(
-    post_id: str,
-    request_data: AccountPostUpdateRequest,
-    current_user: Users = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    クリエイター自身の投稿を更新（非公開化、削除、編集など）
-    """
-    try:
-        from uuid import UUID
-
-        # 更新データを準備
-        update_data = request_data.dict(exclude_unset=True)
-
-        if not update_data:
-            raise HTTPException(status_code=400, detail="更新するデータがありません")
-
-        # 投稿を更新
-        updated_post = update_post_by_creator(db, UUID(post_id), current_user.id, update_data)
-
-        if not updated_post:
-            raise HTTPException(status_code=404, detail="投稿が見つかりません")
-
-        db.commit()
-
-        return AccountPostUpdateResponse(
-            message="投稿を更新しました",
-            success=True
-        )
-    except ValueError:
-        raise HTTPException(status_code=400, detail="無効な投稿IDです")
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        print("投稿更新エラーが発生しました", e)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -703,3 +640,37 @@ def get_profile_image_status(
         print("申請状況取得エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+# データ変換用のヘルパー関数
+def _convert_posts(posts_list):
+    result = []
+    for row in posts_list:
+        # タプルの最初の要素がPostsオブジェクト
+        post_obj = row[0]
+        
+        # 動画時間をフォーマット
+        duration = None
+        if row.duration_sec:
+            minutes = int(row.duration_sec // 60)
+            seconds = int(row.duration_sec % 60)
+            duration = f"{minutes:02d}:{seconds:02d}"
+
+        # 投稿タイプを判定
+        is_video = post_obj.post_type == 1 if post_obj.post_type else False  # PostType.VIDEO = 1
+
+        result.append(AccountPostResponse(
+            id=str(post_obj.id),
+            description=post_obj.description,
+            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}" if row.thumbnail_key else None,
+            likes_count=row.likes_count or 0,
+            comments_count=row.comments_count or 0,
+            purchase_count=row.purchase_count or 0,
+            creator_name=row.profile_name,
+            username=row.username,
+            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
+            price=row.post_price or 0,
+            currency=row.post_currency or "JPY",
+            created_at=post_obj.created_at.isoformat() if post_obj.created_at else None,
+            duration=duration,
+            is_video=is_video
+        ))
+    return result

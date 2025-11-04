@@ -26,6 +26,7 @@ from app.models.purchases import Purchases
 from app.models.orders import Orders, OrderItems
 from app.constants.enums import PostType
 from datetime import datetime, timedelta
+from app.services.s3.presign import presign_get
 
 # エイリアスを定義
 ThumbnailAssets = aliased(MediaAssets)
@@ -106,7 +107,7 @@ def get_posts_by_category_slug(db: Session, slug: str) -> List[Posts]:
         .all()
     )
 
-def _build_post_status_query(db: Session, user_id: UUID, post_status: PostStatus):
+def _build_post_status_query(db: Session, user_id: UUID, post_statuses: List[PostStatus]):
     """
     投稿ステータス取得クエリの共通部分
     """
@@ -136,7 +137,7 @@ def _build_post_status_query(db: Session, user_id: UUID, post_status: PostStatus
         .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == post_status)
+        .filter(Posts.status.in_(post_statuses))
         .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAsset.duration_sec)
         .order_by(desc(Posts.created_at))
     )
@@ -147,19 +148,19 @@ def get_post_status_by_user_id(db: Session, user_id: UUID) -> dict:
     """
 
     # 審査中の投稿を取得
-    pending_posts = _build_post_status_query(db, user_id, PostStatus.PENDING).all()
+    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT]).all()
 
     # 拒否された投稿を取得
-    rejected_posts = _build_post_status_query(db, user_id, PostStatus.REJECTED).all()
+    rejected_posts = _build_post_status_query(db, user_id, [PostStatus.REJECTED]).all()
 
     # 非公開の投稿を取得
-    unpublished_posts = _build_post_status_query(db, user_id, PostStatus.UNPUBLISHED).all()
+    unpublished_posts = _build_post_status_query(db, user_id, [PostStatus.UNPUBLISHED]).all()
 
     # 削除された投稿を取得
-    deleted_posts = _build_post_status_query(db, user_id, PostStatus.DELETED).all()
+    deleted_posts = _build_post_status_query(db, user_id, [PostStatus.DELETED]).all()
 
     # 公開された投稿を取得
-    approved_posts = _build_post_status_query(db, user_id, PostStatus.APPROVED).all()
+    approved_posts = _build_post_status_query(db, user_id, [PostStatus.APPROVED]).all()
 
     return {
         "pending_posts": pending_posts,
@@ -612,6 +613,22 @@ def create_post(db: Session, post_data: dict):
     db.flush()
     return post
 
+def update_post(db: Session, post_data: dict):
+    """
+    投稿を更新
+    """
+    post = db.query(Posts).filter(Posts.id == post_data["id"]).first()
+    if not post:
+        return None
+    
+    for key, value in post_data.items():
+        if hasattr(post, key) and value is not None:
+            setattr(post, key, value)
+    
+    post.updated_at = datetime.now()
+    db.flush()
+    return post
+
 def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
     """
     投稿のメディアアセットを更新
@@ -773,16 +790,17 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
 
 
 # ========== クリエイター投稿管理用 ==========
-
-def _get_media_info_for_creator(db: Session, post_id: str) -> dict:
+def _get_media_info_for_creator(db: Session, post_id: str, status: int) -> dict:
     """クリエイター用メディア情報を取得（視聴権限チェックなし、全メディア取得）"""
     media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
 
     sample_video = None
     main_video = None
     thumbnail = None
+    ogp_image = None
     images = []
-
+    upload_flg = True if status != PostStatus.APPROVED else False
+    
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail = {
@@ -791,32 +809,53 @@ def _get_media_info_for_creator(db: Session, post_id: str) -> dict:
                 "url": f"{CDN_BASE_URL}/{media_asset.storage_key}"
             }
         elif media_asset.kind == MediaAssetKind.SAMPLE_VIDEO:
+            if upload_flg:
+                presign_url = presign_get("ingest", media_asset.storage_key)
+                sample_video_url = presign_url['download_url']
+            else:
+                sample_video_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
+                
             sample_video = {
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
-                "url": f"{MEDIA_CDN_URL}/{media_asset.storage_key}",
-                "duration": media_asset.duration_sec
+                "url": sample_video_url,
+                "duration": media_asset.duration_sec,
+                "reject_comments": media_asset.reject_comments
             }
         elif media_asset.kind == MediaAssetKind.MAIN_VIDEO:
+            if upload_flg:
+                presign_url = presign_get("ingest", media_asset.storage_key)
+                main_video_url = presign_url['download_url']
+            else:
+                main_video_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
+
             main_video = {
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
-                "url": f"{MEDIA_CDN_URL}/{media_asset.storage_key}",
-                "duration": media_asset.duration_sec
+                "url": main_video_url,
+                "duration": media_asset.duration_sec,
+                "reject_comments": media_asset.reject_comments
             }
         elif media_asset.kind == MediaAssetKind.IMAGES:
+            if upload_flg:
+                presign_url = presign_get("ingest", media_asset.storage_key)
+                image_url = presign_url['download_url']
+            else:
+                image_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}_1080w.webp"
             images.append({
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
-                "url": f"{MEDIA_CDN_URL}/{media_asset.storage_key}_1080w.webp",  # モザイクなし
+                "url": image_url,
                 "duration": media_asset.duration_sec,
-                "orientation": media_asset.orientation
+                "orientation": media_asset.orientation,
+                "reject_comments": media_asset.reject_comments
             })
         elif media_asset.kind == MediaAssetKind.OGP:
             ogp_image = {
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
-                "url": f"{CDN_BASE_URL}/{media_asset.storage_key}"
+                "url": f"{CDN_BASE_URL}/{media_asset.storage_key}",
+                "reject_comments": media_asset.reject_comments
             }
 
     return {
@@ -886,7 +925,7 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
     is_video = result.Posts.post_type == PostType.VIDEO  # PostType.VIDEO = 1
 
     # メディア情報を取得
-    media_info = _get_media_info_for_creator(db, str(post_id))
+    media_info = _get_media_info_for_creator(db, str(post_id), result.Posts.status)
 
     # カテゴリー情報を取得
     category_records = db.query(PostCategories).filter(PostCategories.post_id == post_id).all()
@@ -894,7 +933,7 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
 
     # プラン情報を取得
     plan_records = db.query(PostPlans).filter(PostPlans.post_id == post_id).all()
-    plan_ids = [str(rec.plan_id) for rec in plan_records]
+    plan_list = [{'id': str(rec.plan_id), 'name': rec.plan.name} for rec in plan_records]
 
     return {
         "post": result.Posts,
@@ -912,7 +951,7 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
         "media_info": media_info,
         "category_ids": category_ids,
         "tags": None,  # タグ実装はまだしていない
-        "plan_ids": plan_ids
+        "plan_list": plan_list
     }
 
 

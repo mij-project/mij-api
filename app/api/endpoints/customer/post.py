@@ -3,16 +3,17 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
-from app.schemas import post
-from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse
+from app.constants.enums import PostStatus
+from app.models.user import Users
+from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse, PostUpdateRequest
 from app.constants.enums import PostVisibility, PostType, PlanStatus, PriceType, MediaAssetKind
-from app.crud.post_crud import create_post, get_post_detail_by_id
+from app.crud.post_crud import create_post, get_post_detail_by_id, update_post
 from app.crud.plan_crud import create_plan
-from app.crud.price_crud import create_price
-from app.crud.post_plans_crud import create_post_plan
+from app.crud.price_crud import create_price, delete_price_by_post_id
+from app.crud.post_plans_crud import create_post_plan, delete_plan_by_post_id
 from app.crud.tags_crud import exit_tag, create_tag
-from app.crud.post_tags_crud import create_post_tag
-from app.crud.post_categories_crud import create_post_category
+from app.crud.post_tags_crud import create_post_tag, delete_post_tags_by_post_id
+from app.crud.post_categories_crud import create_post_category, delete_post_categories_by_post_id
 from app.crud.post_crud import get_recent_posts
 from app.crud.entitlements_crud import check_entitlement
 from app.models.tags import Tags
@@ -86,6 +87,63 @@ async def create_post_endpoint(
         print("投稿作成エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.put("/update")
+async def update_post_endpoint(
+    request_data: PostUpdateRequest,
+    current_user: Users = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """投稿を更新する"""
+    try:
+        # 投稿を更新
+        # 可視性を判定
+        visibility = _determine_visibility(request_data.single, request_data.plan)
+        
+        # 関連オブジェクトを初期化
+        price = None
+        plan_posts = []
+        category_posts = []
+        tag_posts = []
+        
+        # 投稿を更新
+        post = _update_post(db, request_data, current_user.id, visibility)
+        
+        # 単品販売の場合、価格をデリートインサート
+        if request_data.single:
+            delete_price_by_post_id(db, request_data.post_id)
+            price = _create_price(db, request_data.post_id, request_data.price)
+
+        # プランの場合、プランをデリートインサート
+        if request_data.plan:
+            delete_plan_by_post_id(db, request_data.post_id)
+            plan_posts = _create_plan(db, request_data.post_id, request_data.plan_ids)
+
+        
+        # カテゴリをデリートインサート
+        if request_data.category_ids:
+            delete_post_categories_by_post_id(db, request_data.post_id)
+            category_posts = _create_post_categories(db, request_data.post_id, request_data.category_ids)
+
+        
+        # タグをデリートインサート
+        if request_data.tags:
+            delete_post_tags_by_post_id(db, request_data.post_id)
+            tag_posts = _create_post_tag(db, request_data.post_id, request_data.tags)
+
+        
+        # データベースをコミット
+        db.commit()
+        
+        # オブジェクトをリフレッシュ
+        _refresh_related_objects(
+            db, post, price, plan_posts, category_posts, tag_posts
+        )
+        
+        return post
+    except Exception as e:
+        print("投稿更新エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/detail")
 async def get_post_detail(
     post_id: str = Query(..., description="投稿ID"),
@@ -98,7 +156,6 @@ async def get_post_detail(
 
         post_data = get_post_detail_by_id(db, post_id, user_id)
 
-                
         if not post_data:
             raise HTTPException(status_code=404, detail="投稿が見つかりません")
 
@@ -210,6 +267,40 @@ def _create_post_tag(db: Session, post_id: str, tag_name: str):
         "tag_id": tag.id,
     }
     return create_post_tag(db, post_tag_data)
+
+def _update_post(db: Session, request_data: PostUpdateRequest, user_id: str, visibility: int):
+    """投稿を更新する"""
+    post_data = {
+        "id": request_data.post_id,
+        "creator_user_id": user_id,
+        "description": request_data.description,
+        "scheduled_at": request_data.formattedScheduledDateTime if request_data.scheduled else None,
+        "expiration_at": request_data.expirationDate if request_data.expiration else None,
+        "visibility": visibility,
+        "status": PostStatus.RESUBMIT,
+    }
+    return update_post(db, post_data)
+
+
+# def _delete_post_categories(db: Session, post_id: str):
+#     """投稿に紐づくカテゴリを削除する"""
+#     delete_post_category(db, post_id)
+#     return True
+
+# def _delete_post_tags(db: Session, post_id: str):
+#     """投稿に紐づくタグを削除する"""
+#     delete_post_tag(db, post_id)
+#     return True
+
+# def _delete_post_plans(db: Session, post_id: str):
+#     """投稿に紐づくプランを削除する"""
+#     delete_post_plans(db, post_id)
+#     return True
+
+# def _delete_post_price(db: Session, post_id: str):
+#     """投稿に紐づく価格を削除する"""
+#     delete_price(db, post_id)
+#     return True
 
 def _refresh_related_objects(
     db: Session, 
