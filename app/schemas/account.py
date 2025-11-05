@@ -192,6 +192,7 @@ class AccountPostDetailResponse(BaseModel):
     main_video_reject_comments: Optional[str] = None
     ogp_image_reject_comments: Optional[str] = None
     image_urls: List[str] = []
+    image_ids: List[str] = []  # 画像のmedia_assets.id一覧
     image_reject_comments: List[Optional[str]] = []
     # カテゴリー・プラン情報
     category_ids: List[str] = []

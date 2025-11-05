@@ -254,6 +254,11 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
         .all()
     )
 
+def get_post_by_id(db: Session, post_id: UUID) -> Posts:
+    """
+    投稿をIDで取得
+    """
+    return db.query(Posts).filter(Posts.id == post_id).first()
 
 # ========== いいねした投稿用 ==========
 
@@ -843,6 +848,7 @@ def _get_media_info_for_creator(db: Session, post_id: str, status: int) -> dict:
             else:
                 image_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}_1080w.webp"
             images.append({
+                "id": str(media_asset.id),  # IDをstringとして返す
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
                 "url": image_url,

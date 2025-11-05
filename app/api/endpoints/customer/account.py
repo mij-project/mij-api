@@ -369,7 +369,7 @@ def get_account_post_detail(
         main_video = media_info.get("main_video", {})
         ogp_image = media_info.get("ogp_image", {})
         images = media_info.get("images", [])
-        
+
         sample_video_url = sample_video.get("url") if sample_video else None
         sample_video_reject_comments = sample_video.get("reject_comments") if sample_video else None
         main_video_url = main_video.get("url") if main_video else None
@@ -377,6 +377,7 @@ def get_account_post_detail(
         ogp_image_url = ogp_image.get("url") if ogp_image else None
         ogp_image_reject_comments = ogp_image.get("reject_comments") if ogp_image else None
         image_urls = [img.get("url") for img in images if img.get("url")]
+        image_ids = [str(img.get("id")) for img in images if img.get("id")]
         image_reject_comments = [img.get("reject_comments") for img in images]
 
         return AccountPostDetailResponse(
@@ -406,6 +407,7 @@ def get_account_post_detail(
             main_video_url=main_video_url,
             main_video_reject_comments=main_video_reject_comments,
             image_urls=image_urls,
+            image_ids=image_ids,
             image_reject_comments=image_reject_comments,
             category_ids=post_data.get("category_ids", []),
             tags=post_data.get("tags"),

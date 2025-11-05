@@ -109,3 +109,44 @@ def get_media_assets_by_post_id(db: Session, post_id: str, kind: str) -> str:
         .order_by(MediaAssets.created_at.desc())
         .first()
     )
+
+def get_media_assets_by_post_id_and_kind(db: Session, post_id: str, kind: str) -> MediaAssets:
+    """
+    メディアアセット取得（post_idとkindが一致するものを返す）
+    """
+    return (
+        db.query(MediaAssets)
+        .filter(MediaAssets.post_id == post_id, MediaAssets.kind == kind)
+        .order_by(MediaAssets.created_at.desc())
+        .first()
+    )
+
+def delete_media_asset(db: Session, asset_id: str) -> bool:
+    """
+    メディアアセット削除
+    """
+    asset = db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
+    if asset:
+        db.delete(asset)
+        db.commit()
+        return True
+    return False
+
+def get_all_media_assets_by_post_id_and_kind(db: Session, post_id: str, kind: str) -> list[MediaAssets]:
+    """
+    指定されたpost_idとkindに一致するすべてのメディアアセットを取得
+
+    Args:
+        db (Session): データベースセッション
+        post_id (str): 投稿ID
+        kind (str): メディアアセットの種類
+
+    Returns:
+        list[MediaAssets]: メディアアセット一覧
+    """
+    return (
+        db.query(MediaAssets)
+        .filter(MediaAssets.post_id == post_id, MediaAssets.kind == kind)
+        .order_by(MediaAssets.created_at.asc())
+        .all()
+    )
