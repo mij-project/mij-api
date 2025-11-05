@@ -23,14 +23,16 @@ from app.api.endpoints.debug import debug_email
 
 
 # Hook routes
-from app.api.hook.webhooks_media_convert import router as webhooks_media_convert
-from app.api.hook.websocket_conversations import router as websocket_conversations
-
+from app.api.endpoints.hook.media_convert import router as media_convert_hook
+from app.api.endpoints.hook.conversations import router as conversations_hook
+from app.api.endpoints.hook.payment import router as payment_hook
 api_router = APIRouter()
 
 # Hook routes
-api_router.include_router(webhooks_media_convert, prefix="/webhooks", tags=["Webhooks"])
-api_router.include_router(websocket_conversations, prefix="/ws", tags=["WebSocket Conversations"])
+api_router.include_router(media_convert_hook, prefix="/webhooks", tags=["Webhooks"])
+api_router.include_router(conversations_hook, prefix="/ws", tags=["WebSocket Conversations"])
+api_router.include_router(payment_hook, prefix="/webhook", tags=["Payment"])
+
 
 
 api_router.include_router(videos.router, prefix="/videos", tags=["Videos"])
