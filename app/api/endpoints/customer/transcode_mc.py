@@ -26,6 +26,7 @@ from app.constants.enums import (
     PostStatus,
     PostType,
     MediaAssetStatus,
+    AuthenticatedFlag,
 )
 from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
 from app.crud.media_rendition_crud import create_media_rendition
@@ -234,7 +235,7 @@ def transcode_mc_unified(
                     raise HTTPException(status_code=500, detail="Image processing failed")
                 else:
                     # 投稿ステータスの更新
-                    post = update_post_status(db, post_id, PostStatus.APPROVED)
+                    post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
                     db.commit()
                     db.refresh(post)
 

@@ -40,7 +40,7 @@ from app.crud.admin_crud import (
     reject_post_with_comments,
 )
 from app.services.s3.presign import presign_get
-from app.constants.enums import MediaAssetKind, PostStatus
+from app.constants.enums import MediaAssetKind, PostStatus, MediaAssetStatus
 
 CDN_URL = getenv("CDN_BASE_URL")
 MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
@@ -335,14 +335,14 @@ def get_post(
 
     # メディアアセットの情報からkindが3,4,5のものはpresign_getを呼び出し、urlを取得
     for media_asset_id, media_asset_data in post_data['media_assets'].items():
-        if before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.IMAGES, MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
+        if before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.IMAGES, MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO] and media_asset_data['status'] in [MediaAssetStatus.PENDING, MediaAssetStatus.RESUBMIT, MediaAssetStatus.CONVERTING]:
             presign_url = presign_get("ingest", media_asset_data['storage_key'])
             post_data['media_assets'][media_asset_id]['storage_key'] = presign_url['download_url']
 
         elif not before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
             post_data['media_assets'][media_asset_id]['storage_key'] = MEDIA_CDN_URL + "/" + media_asset_data['storage_key']
         
-        elif not before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.IMAGES]:
+        elif not before_examination_flg and media_asset_data['kind'] in [MediaAssetKind.IMAGES] or media_asset_data['status'] == MediaAssetStatus.APPROVED:
             post_data['media_assets'][media_asset_id]['storage_key'] = MEDIA_CDN_URL + "/" + media_asset_data['storage_key'] + "_1080w.webp"
 
         elif media_asset_data['kind'] in [MediaAssetKind.OGP, MediaAssetKind.THUMBNAIL]:

@@ -13,6 +13,7 @@ from app.crud.media_rendition_crud import create_media_rendition
 from app.crud.post_crud import update_post_status
 from app.constants.enums import MediaRenditionJobStatus, MediaRenditionKind, PostStatus, MediaAssetStatus
 from app.db.base import get_db
+from app.constants.enums import AuthenticatedFlag
 from app.services.s3.client import MEDIA_BUCKET_NAME, AWS_REGION
 
 # Constants
@@ -176,7 +177,7 @@ def _handle_final_hls_completion(db: Session, webhook_data: dict) -> None:
     update_media_asset(db, asset.id, media_asset_update_data)
     
     # 投稿のステータスを承認に更新
-    post = update_post_status(db, asset.post_id, PostStatus.APPROVED)
+    post = update_post_status(db, asset.post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
     if not post:
         raise HTTPException(404, "Post not found")
 

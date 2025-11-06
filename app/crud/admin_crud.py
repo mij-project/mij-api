@@ -580,6 +580,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         if row.MediaAssets:
             media_asset = {
                 'id': str(row.MediaAssets.id),
+                'status': row.MediaAssets.status,
                 'post_id': str(row.MediaAssets.post_id),
                 'kind': row.MediaAssets.kind,
                 'storage_key': row.MediaAssets.storage_key,
@@ -627,7 +628,8 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         'media_assets': {
             ma['id']: {
                 'kind': ma['kind'],
-                'storage_key': ma['storage_key']
+                'storage_key': ma['storage_key'],
+                'status': ma['status'],
             }
             for ma in media_assets if ma['storage_key']
         }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書

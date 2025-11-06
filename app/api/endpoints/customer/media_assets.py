@@ -26,9 +26,11 @@ from app.crud.media_assets_crud import (
     delete_media_asset,
     get_media_asset_by_id,
 )
+from app.crud.media_rendition_jobs_crud import delete_media_rendition_job
 from app.crud.post_crud import get_post_by_id
 from app.models.posts import Posts
 from app.constants.enums import MediaAssetKind, MediaAssetOrientation, MediaAssetStatus, PostStatus
+from app.constants.enums import AuthenticatedFlag
 
 router = APIRouter()
 
@@ -142,48 +144,48 @@ def generate_video_presign(
     return presign_put("ingest", key, content_type)
 
 
-def get_image_resource_and_approved_flag(kind: str, post_status: PostStatus) -> Tuple[Resource, bool]:
+def get_image_resource_and_approved_flag(kind: str, authenticated_flag: AuthenticatedFlag) -> Resource:
     """
     画像のkindとpostステータスからリソース名とapproved_flagを取得
     
     Args:
         kind (str): 画像の種類（"images", "thumbnail", "ogp"）
         post_status (PostStatus): 投稿のステータス
-        
+
     Returns:
         Tuple[Resource, bool]: (リソース名, approved_flag)
     """
     if kind == "images":
-        if post_status == PostStatus.APPROVED:
-            return "media", True
+        if authenticated_flag == AuthenticatedFlag.AUTHENTICATED:
+            return "media"
         else:
-            return "ingest", False
+            return "ingest"
     elif kind in ("thumbnail", "ogp"):
-        return "public", False
+        return "public"
     else:
         raise ValueError(f"Unknown image kind: {kind}")
 
 
-def get_video_resource_and_approved_flag(post_status: PostStatus) -> Tuple[Resource, bool]:
+def get_video_resource_and_approved_flag(uploaded_flag: int) -> Resource:
     """
-    動画のpostステータスからリソース名とapproved_flagを取得
+    動画のアップロードフラグからリソース名とapproved_flagを取得
     
     Args:
-        post_status (PostStatus): 投稿のステータス
+        uploaded_flag (int): アップロードフラグ
         
     Returns:
         Tuple[Resource, bool]: (リソース名, approved_flag)
     """
-    if post_status == PostStatus.APPROVED:
-        return "media", True
+    if uploaded_flag == AuthenticatedFlag.AUTHENTICATED:
+        return "media"
     else:
-        return "ingest", False
+        return "ingest"
 
 
 def delete_existing_media_file(
     storage_key: str,
     resource: Resource,
-    approved_flag: bool,
+    authenticated_flag: int,
     is_video: bool = False
 ) -> None:
     """
@@ -192,16 +194,16 @@ def delete_existing_media_file(
     Args:
         storage_key (str): ストレージキー
         resource (Resource): リソース名
-        approved_flag (bool): 承認済みフラグ
+        authenticated_flag (int): 認証フラグ
         is_video (bool): 動画かどうか
     """
     if not storage_key:
         return
 
-    bucket = get_bucket_name(resource)
+    bucket = get_bucket_name(resource)  
 
     try:
-        if approved_flag:
+        if authenticated_flag == AuthenticatedFlag.AUTHENTICATED:
             if is_video:
                 # 動画の場合、hlsディレクトリを削除
                 if '/hls/' in storage_key:
@@ -377,13 +379,13 @@ async def presign_update_image_upload(
             new_key = response["key"]
 
             # リソースと承認フラグを決定
-            resource, approved_flag = get_image_resource_and_approved_flag(
-                f.kind, post.status
+            resource = get_image_resource_and_approved_flag(
+                f.kind, post.authenticated_flag
             )
 
             # 既存ファイルをS3から削除
             delete_existing_media_file(
-                existing_assets.storage_key, resource, approved_flag, is_video=False
+                existing_assets.storage_key, resource, post.authenticated_flag, is_video=False
             )
 
             # 古いメディアアセットをDBから削除
@@ -455,14 +457,17 @@ async def presign_update_video_upload(
             new_key = response["key"]
 
             # リソースと承認フラグを決定
-            resource, approved_flag = get_video_resource_and_approved_flag(post.status)
+            resource = get_video_resource_and_approved_flag(post.authenticated_flag)
 
             # 既存ファイルをS3から削除
             delete_existing_media_file(
-                existing_assets.storage_key, resource, approved_flag, is_video=True
+                existing_assets.storage_key, resource, post.authenticated_flag, is_video=True
             )
 
             # 古いメディアアセットをDBから削除
+            if post.authenticated_flag == AuthenticatedFlag.AUTHENTICATED:
+                delete_media_rendition_job(db, existing_assets.id)
+                
             delete_media_asset(db, existing_assets.id)
 
             # レスポンスに追加
@@ -508,8 +513,8 @@ async def update_images(
 
         # 指定されたIDの画像を削除
         if request.delete_image_ids:
-            resource, approved_flag = get_image_resource_and_approved_flag(
-                "images", post.status
+            resource = get_image_resource_and_approved_flag(
+                "images", post.authenticated_flag
             )
 
             for image_id in request.delete_image_ids:
@@ -534,7 +539,7 @@ async def update_images(
                 # S3から削除
                 if asset.storage_key:
                     delete_existing_media_file(
-                        asset.storage_key, resource, approved_flag, is_video=False
+                        asset.storage_key, resource, post.authenticated_flag, is_video=False
                     )
 
                 # DBから削除

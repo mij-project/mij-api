@@ -7,7 +7,7 @@ from app.models.posts import Posts
 from app.models.social import Likes, Bookmarks, Comments
 from uuid import UUID
 from datetime import datetime
-from app.constants.enums import PostStatus, MediaAssetKind
+from app.constants.enums import PostStatus, MediaAssetKind, MediaAssetStatus
 from app.schemas.post import PostCreateRequest
 from app.models.post_categories import PostCategories
 from app.models.categories import Categories
@@ -660,7 +660,7 @@ def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
     db.flush()
     return post
 
-def update_post_status(db: Session, post_id: UUID, status: int):
+def update_post_status(db: Session, post_id: UUID, status: int, authenticated_flag: int = None):
     """
     投稿のステータスを更新
     """
@@ -669,8 +669,10 @@ def update_post_status(db: Session, post_id: UUID, status: int):
         raise HTTPException(status_code=404, detail="Post not found")
     
     post.status = status
+    if authenticated_flag is not None:
+        post.authenticated_flag = authenticated_flag
     post.updated_at = datetime.now()
-    db.add(post)
+    db.add(post)    
     db.flush()
     return post
 
@@ -842,7 +844,7 @@ def _get_media_info_for_creator(db: Session, post_id: str, status: int) -> dict:
                 "reject_comments": media_asset.reject_comments
             }
         elif media_asset.kind == MediaAssetKind.IMAGES:
-            if upload_flg:
+            if upload_flg and media_asset.status in [MediaAssetStatus.PENDING, MediaAssetStatus.RESUBMIT, MediaAssetStatus.CONVERTING]:
                 presign_url = presign_get("ingest", media_asset.storage_key)
                 image_url = presign_url['download_url']
             else:
