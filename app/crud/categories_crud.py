@@ -42,3 +42,20 @@ def get_top_categories(db: Session, limit: int = 8):
         .limit(limit)
         .all()
     )
+
+def get_genres_with_categories(db: Session):
+    """
+    全ジャンルと配下のカテゴリを取得
+    """
+    genres = db.query(Genres).filter(Genres.is_active == True).order_by(Genres.sort_order).all()
+    result = []
+    for genre in genres:
+        categories = db.query(Categories).filter(
+            Categories.genre_id == genre.id,
+            Categories.is_active == True
+        ).order_by(Categories.sort_order).all()
+        result.append({
+            "genre": genre,
+            "categories": categories
+        })
+    return result
