@@ -263,3 +263,7 @@ RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
 MAX_ATTEMPTS = int(os.getenv("SMS_MAX_ATTEMPTS", "5"))
 SNS_SENDER_ID = os.getenv("SNS_SENDER_ID", "mijfans")
 SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
+
+# バナー画像
+BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
+BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")

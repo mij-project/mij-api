@@ -212,3 +212,19 @@ class SMSPurpose:
     PASSWORD_RESET = 3 # パスワードリセット
     PAYMENT = 4 # 支払い
     OTHER = 9 # その他
+
+# バナーの種類
+class BannerType:
+    CREATOR = 1 # クリエイター
+    SPECIAL_EVENT = 2 # お知らせ
+
+# バナーのステータス
+class BannerStatus:
+    INACTIVE = 0 # 無効
+    ACTIVE = 1 # 有効
+    DRAFT = 2 # 下書き
+
+# バナーのソース
+class BannerImageSource:
+    USER_PROFILE = 1 # ユーザープロフィール
+    ADMIN_POST = 2 # 管理者投稿
