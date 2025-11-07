@@ -7,7 +7,7 @@ from app.api.endpoints.customer import (
     creater, gender, plans, categories, post,
     transcode_mc, top, category, ranking, social,
     purchases, preregistrations, account, auth_email_verify,
-    conversations, order, sms_verifications
+    conversations, order, sms_verifications, banners
 )
 
 # Admin routes
@@ -15,7 +15,8 @@ from app.api.endpoints.admin import (
     admin, admin_auth, conversations as admin_conversations,
     preregistrations as admin_preregistrations,
     identity as admin_identity,
-    profile_images as admin_profile_images
+    profile_images as admin_profile_images,
+    banners as admin_banners
 )
 
 # Debug routes
@@ -55,6 +56,7 @@ api_router.include_router(auth_email_verify.router, prefix="/auth/email", tags=[
 api_router.include_router(conversations.router, prefix="/conversations", tags=["Conversations"])
 api_router.include_router(order.router, prefix="/orders", tags=["Orders"])
 api_router.include_router(sms_verifications.router, prefix="/sms-verifications", tags=["SMS Verifications"])
+api_router.include_router(banners.router, prefix="/banners", tags=["Banners"])
 
 # Admin routes
 api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin Auth"])
@@ -63,5 +65,6 @@ api_router.include_router(admin_conversations.router, prefix="/admin", tags=["Ad
 api_router.include_router(admin_preregistrations.router, prefix="/admin", tags=["Admin Preregistrations"])
 api_router.include_router(admin_identity.router, prefix="/admin", tags=["Identity"])
 api_router.include_router(admin_profile_images.router, prefix="/admin/profile-images", tags=["Admin Profile Images"])
+api_router.include_router(admin_banners.router, prefix="/admin/banners", tags=["Admin Banners"])
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])
