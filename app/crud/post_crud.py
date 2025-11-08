@@ -660,7 +660,7 @@ def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
     db.flush()
     return post
 
-def update_post_status(db: Session, post_id: UUID, status: int, authenticated_flag: int = None):
+def update_post_status(db: Session, post_id: UUID, status: int, authenticated_flg: int = None):
     """
     投稿のステータスを更新
     """
@@ -669,8 +669,8 @@ def update_post_status(db: Session, post_id: UUID, status: int, authenticated_fl
         raise HTTPException(status_code=404, detail="Post not found")
     
     post.status = status
-    if authenticated_flag is not None:
-        post.authenticated_flag = authenticated_flag
+    if authenticated_flg is not None:
+        post.authenticated_flg = authenticated_flg
     post.updated_at = datetime.now()
     db.add(post)    
     db.flush()

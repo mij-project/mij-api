@@ -4,6 +4,7 @@ from app.models.media_assets import MediaAssets
 from app.models.posts import Posts
 from app.constants.enums import MediaAssetKind
 from app.constants.enums import PostType
+from typing import List
 
 def create_media_asset(db: Session, media_asset_data: dict) -> MediaAssets:
     """
@@ -20,15 +21,6 @@ def create_media_asset(db: Session, media_asset_data: dict) -> MediaAssets:
     db.add(db_media_asset)
     db.flush()
     return db_media_asset
-
-def update_media_asset(db: Session, asset_id: str, update_data: dict) -> MediaAssets:
-    """
-    メディアアセット更新
-    """
-    db.query(MediaAssets).filter(MediaAssets.id == asset_id).update(update_data)
-    db.flush()
-    return db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
-
 
 def get_media_asset_by_post_id(db: Session, post_id: str, type: str) -> MediaAssets:
     """
@@ -87,6 +79,15 @@ def update_media_asset(db: Session, asset_id: str, update_data: dict) -> MediaAs
     
     # 更新されたオブジェクトを取得して返す
     return db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
+
+def update_sub_media_assets_status(db: Session,post_id: str, kind: List[str], status: int) -> MediaAssets:
+    """
+    メディアアセット更新（post_idとkindが一致するものを更新）
+    """
+    db.query(MediaAssets).filter(MediaAssets.post_id == post_id, MediaAssets.kind.in_(kind)).update({"status": status})
+    db.flush()
+    db.commit()
+    return db.query(MediaAssets).filter(MediaAssets.post_id == post_id, MediaAssets.kind.in_(kind)).all()
 
 def get_media_assets_by_post_id(db: Session, post_id: str, kind: str) -> str:
     """

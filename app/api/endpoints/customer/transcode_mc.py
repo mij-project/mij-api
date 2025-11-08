@@ -30,7 +30,9 @@ from app.constants.enums import (
 )
 from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
 from app.crud.media_rendition_crud import create_media_rendition
+from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status
 from app.crud.post_crud import update_post_status
+from app.constants.enums import MediaAssetKind
 import boto3
 from typing import Dict, Any, Optional
 
@@ -202,6 +204,8 @@ def transcode_mc_unified(
         }
         type = type_mapping.get(post_type, "video")  # デフォルトはvideo
 
+        update_sub_media_asset(db, post_id)
+
         # メディアアセットの取得
         assets = get_media_asset_by_post_id(db, post_id, post_type)
         if not assets:
@@ -236,6 +240,7 @@ def transcode_mc_unified(
                 else:
                     # 投稿ステータスの更新
                     post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
+                    
                     db.commit()
                     db.refresh(post)
 
@@ -248,3 +253,11 @@ def transcode_mc_unified(
         db.rollback()
         print(f"メディアコンバート処理にてエラーが発生しました。: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+def update_sub_media_asset(db: Session, post_id: str) -> Optional[Any]:
+    """
+    サブメディアアセットを更新する
+    """
+    kind_list = [MediaAssetKind.THUMBNAIL, MediaAssetKind.OGP]
+    media_assets = update_sub_media_assets_status(db, post_id, kind_list, MediaAssetStatus.APPROVED)
+    return True

@@ -15,12 +15,12 @@ from app.models.media_assets import MediaAssets
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
 from app.constants.enums import PostStatus, MediaAssetStatus
-from app.constants.enums import AccountType
 import os
 
 CDN_URL = os.getenv("CDN_BASE_URL")
 
 """管理機能用のCRUD操作クラス"""
+
 
 # ==================== Admin CRUD Functions ====================
 
@@ -209,12 +209,11 @@ def get_users_paginated(
     if search:
         query = query.join(Profiles).filter(
             (Profiles.username.ilike(f"%{search}%")) |
-            (Users.profile_name.ilike(f"%{search}%")) |
             (Users.email.ilike(f"%{search}%"))
         )
     
     if role:
-        role_map = {"user": AccountType.GENERAL_USER, "creator": AccountType.CREATOR}
+        role_map = {"user": 1, "creator": 2, "admin": 3}
         query = query.filter(Users.role == role_map.get(role))
     
     # ソート処理
