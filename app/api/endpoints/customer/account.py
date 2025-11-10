@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from uuid import UUID
 from typing import Dict
 from app.db.base import get_db
 from app.deps.auth import get_current_user
@@ -686,3 +687,64 @@ def _convert_posts(posts_list):
             is_video=is_video
         ))
     return result
+
+
+@router.put("/post/{post_id}")
+def update_account_post(
+    post_id: str,
+    request: AccountPostUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user)
+) -> AccountPostUpdateResponse:
+    """
+    クリエイターが自分の投稿を更新
+
+    Args:
+        post_id: 投稿ID
+        request: 更新リクエスト（status, visibility, scheduled_at）
+        db: データベースセッション
+        current_user: 現在のユーザー
+
+    Returns:
+        AccountPostUpdateResponse: 更新結果
+    """
+
+    try:
+        # リクエストデータを辞書に変換（Noneでない値のみ）
+        update_data = {}
+        if request.status is not None:
+            update_data['status'] = request.status
+        if request.visibility is not None:
+            update_data['visibility'] = request.visibility
+        if request.scheduled_at is not None:
+            update_data['scheduled_at'] = request.scheduled_at
+        if request.description is not None:
+            update_data['description'] = request.description
+
+        # 投稿を更新
+        updated_post = update_post_by_creator(
+            db=db,
+            post_id=UUID(post_id),
+            creator_user_id=current_user.id,
+            update_data=update_data
+        )
+
+        if not updated_post:
+            raise HTTPException(
+                status_code=404,
+                detail="投稿が見つからないか、更新する権限がありません"
+            )
+
+        db.commit()
+
+        return AccountPostUpdateResponse(
+            message="投稿を更新しました",
+            success=True
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"無効な投稿ID: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        print(f"投稿更新エラー: {e}")
+        raise HTTPException(status_code=500, detail="投稿の更新に失敗しました")

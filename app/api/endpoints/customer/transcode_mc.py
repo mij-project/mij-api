@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, Path
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.services.s3.media_covert import build_media_rendition_job_settings, build_hls_abr4_settings
-from app.crud.media_assets_crud import get_media_asset_by_post_id, update_media_asset
+from app.crud.media_assets_crud import get_media_asset_by_post_id, update_media_asset, get_media_assets_by_ids
 from app.schemas.post_media import PoseMediaCovertRequest
 from app.services.s3.keygen import (
     transcode_mc_hls_prefix, 
@@ -32,6 +32,9 @@ from app.crud.media_rendition_jobs_crud import create_media_rendition_job, updat
 from app.crud.media_rendition_crud import create_media_rendition
 from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status
 from app.crud.post_crud import update_post_status
+from app.crud.media_assets_crud import get_media_asset_by_id
+from app.schemas.transcode_mc import TranscodeMCUpdateRequest
+from app.crud.post_crud import get_post_by_id
 from app.constants.enums import MediaAssetKind
 import boto3
 from typing import Dict, Any, Optional
@@ -253,6 +256,69 @@ def transcode_mc_unified(
         db.rollback()
         print(f"メディアコンバート処理にてエラーが発生しました。: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.put("/transcode_mc")
+def transcode_mc_update(
+    update_request: TranscodeMCUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    再申請メディアアセットのコンバート処理
+
+    Args:
+        update_request: TranscodeMCUpdateRequest
+        db: Session
+
+    Returns:
+        dict: メディアコンバート結果
+    """
+    try:
+        post_id = update_request.post_id
+        media_asset_ids = update_request.media_assets
+        post_type = update_request.post_type
+
+        type_mapping = {
+            PostType.VIDEO: "video",  # 動画投稿
+            PostType.IMAGE: "image",  # 画像投稿
+        }
+        type = type_mapping.get(post_type, "video")  # デフォルトはvideo
+
+        update_sub_media_asset(db, post_id)
+
+        assets = get_media_assets_by_ids(db, media_asset_ids, type)
+        if not assets:
+            raise HTTPException(status_code=404, detail="Media asset not found")
+
+        for asset in assets:
+            if type == "video":
+                output_prefix = transcode_mc_hls_prefix(
+                    creator_id=asset.creator_user_id,
+                    post_id=asset.post_id,
+                    asset_id=asset.id,
+                )
+                _create_media_convert_job(db, asset, post_id, MediaRenditionJobKind.HLS_ABR4, output_prefix, "final-hls", build_hls_abr4_settings)
+            if type == "image":
+                result = _process_image_asset(db, asset, post_id)
+                if not result:
+                    raise HTTPException(status_code=500, detail="Image processing failed")
+                else:
+                    # 投稿ステータスの更新
+                    post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
+                    db.commit()
+                    db.refresh(post)
+
+        return {"status": True, "message": f"Media conversion completed for {type}"}
+
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"メディアコンバート更新処理にてエラーが発生しました。: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 def update_sub_media_asset(db: Session, post_id: str) -> Optional[Any]:
     """

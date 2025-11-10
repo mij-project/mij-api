@@ -960,7 +960,18 @@ def update_post_by_creator(
 ) -> Posts | None:
     """
     クリエイターが自分の投稿を更新
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+        creator_user_id: クリエイターのユーザーID
+        update_data: 更新データ（status, visibility, scheduled_at, deleted_atなど）
+
+    Returns:
+        Posts | None: 更新された投稿、または見つからない場合はNone
     """
+    from app.constants.enums import PostStatus
+
     post = (
         db.query(Posts)
         .filter(Posts.id == post_id)
@@ -978,6 +989,10 @@ def update_post_by_creator(
     for field, value in update_data.items():
         if field in allowed_fields and value is not None:
             setattr(post, field, value)
+
+    # ステータスがDELETEDの場合、deleted_atを設定
+    if 'status' in update_data and update_data['status'] == PostStatus.DELETED:
+        post.deleted_at = datetime.now()
 
     post.updated_at = datetime.now()
     db.flush()

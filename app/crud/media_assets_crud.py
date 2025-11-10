@@ -69,6 +69,34 @@ def get_media_asset_by_id(db: Session, asset_id: str) -> MediaAssets:
     """
     return db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
 
+def get_media_assets_by_ids(db: Session, asset_ids: List[str], type: str) -> List[MediaAssets]:
+    """
+    メディアアセット取得（asset_idsが一致するものを返す）
+    """
+    
+    if type == 'video':
+        kind = [
+            MediaAssetKind.MAIN_VIDEO, 
+            MediaAssetKind.SAMPLE_VIDEO, 
+        ]
+    else:
+        kind = [
+            MediaAssetKind.IMAGES, 
+        ]
+    return (
+        db.query(
+            MediaAssets.id,
+            MediaAssets.post_id,
+            MediaAssets.kind,
+            MediaAssets.created_at,
+            MediaAssets.storage_key,
+            MediaAssets.mime_type,
+            Posts.creator_user_id
+        )
+        .filter(MediaAssets.id.in_(asset_ids), MediaAssets.kind.in_(kind))
+        .join(Posts, MediaAssets.post_id == Posts.id)
+        .all())
+
 def update_media_asset(db: Session, asset_id: str, update_data: dict) -> MediaAssets:
     """
     メディアアセット更新
