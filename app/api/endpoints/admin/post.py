@@ -1,7 +1,6 @@
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from os import getenv
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
 from app.schemas.admin import (
@@ -15,29 +14,10 @@ from app.models.admins import Admins
 from app.crud.admin_crud import (
     get_posts_paginated,
     update_post_status,
-    get_post_by_id,
     reject_post_with_comments,
 )
-from app.services.s3.presign import presign_get
-from app.constants.enums import MediaAssetKind, PostStatus, MediaAssetStatus
-
-CDN_URL = getenv("CDN_BASE_URL")
-MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
-
-APPROVED_MEDIA_CDN_KINDS = {
-    MediaAssetKind.MAIN_VIDEO,
-    MediaAssetKind.SAMPLE_VIDEO,
-}
-CDN_MEDIA_KINDS = {
-    MediaAssetKind.OGP,
-    MediaAssetKind.THUMBNAIL,
-}
-PENDING_MEDIA_ASSET_STATUSES = {
-    MediaAssetStatus.PENDING,
-    MediaAssetStatus.RESUBMIT,
-    MediaAssetStatus.CONVERTING,
-}
-PRESIGN_MEDIA_KINDS = APPROVED_MEDIA_CDN_KINDS | {MediaAssetKind.IMAGES}
+from app.crud.post_crud import get_post_by_id
+from app.api.commons.utils import resolve_media_asset_storage_key
 
 router = APIRouter()
 
@@ -123,36 +103,9 @@ def get_post(
         raise HTTPException(status_code=404, detail="投稿が見つかりません")
 
     for media_asset_id, media_asset_data in post_data['media_assets'].items():
-        post_data['media_assets'][media_asset_id]['storage_key'] = _resolve_media_asset_storage_key(
+        post_data['media_assets'][media_asset_id]['storage_key'] = resolve_media_asset_storage_key(
             media_asset_data
         )
+        post_data['media_assets'][media_asset_id]['status'] = media_asset_data['status']
 
     return AdminPostDetailResponse(**post_data)
-
-
-def _resolve_media_asset_storage_key(media_asset: Dict[str, Any]) -> str:
-    """メディアアセットの状態に応じて表示用の storage_key を返す。"""
-    kind = media_asset.get("kind")
-    status = media_asset.get("status")
-    storage_key = media_asset.get("storage_key")
-
-    if not storage_key:
-        return ""
-
-    if status == MediaAssetStatus.APPROVED:
-        if kind == MediaAssetKind.IMAGES:
-            return f"{MEDIA_CDN_URL}/{storage_key}_1080w.webp"
-        if kind in APPROVED_MEDIA_CDN_KINDS:
-            return f"{MEDIA_CDN_URL}/{storage_key}"
-        if kind in CDN_MEDIA_KINDS:
-            return f"{CDN_URL}/{storage_key}"
-        return storage_key
-
-    if status in PENDING_MEDIA_ASSET_STATUSES:
-        if kind in PRESIGN_MEDIA_KINDS:
-            presign_url = presign_get("ingest", storage_key)
-            return presign_url["download_url"]
-        if kind in CDN_MEDIA_KINDS:
-            return f"{CDN_URL}/{storage_key}"
-
-    return storage_key

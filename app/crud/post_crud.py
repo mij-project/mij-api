@@ -11,7 +11,7 @@ from app.constants.enums import PostStatus, MediaAssetKind, MediaAssetStatus
 from app.schemas.post import PostCreateRequest
 from app.models.post_categories import PostCategories
 from app.models.categories import Categories
-from typing import List
+from typing import List, Dict, Any
 from app.models.user import Users
 from app.models.profiles import Profiles
 from app.models.post_categories import PostCategories
@@ -24,9 +24,11 @@ from app.api.commons.utils import get_video_duration
 from app.constants.enums import PlanStatus
 from app.models.purchases import Purchases
 from app.models.orders import Orders, OrderItems
+from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.constants.enums import PostType
 from datetime import datetime, timedelta
 from app.services.s3.presign import presign_get
+from app.constants.enums import MediaAssetKind, MediaAssetStatus
 
 # エイリアスを定義
 ThumbnailAssets = aliased(MediaAssets)
@@ -933,15 +935,6 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
     is_video = result.Posts.post_type == PostType.VIDEO  # PostType.VIDEO = 1
 
     # メディア情報を取得
-    media_info = _get_media_info_for_creator(db, str(post_id), result.Posts.status)
-
-    # カテゴリー情報を取得
-    category_records = db.query(PostCategories).filter(PostCategories.post_id == post_id).all()
-    category_ids = [str(rec.category_id) for rec in category_records]
-
-    # プラン情報を取得
-    plan_records = db.query(PostPlans).filter(PostPlans.post_id == post_id).all()
-    plan_list = [{'id': str(rec.plan_id), 'name': rec.plan.name} for rec in plan_records]
 
     return {
         "post": result.Posts,
@@ -956,10 +949,6 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
         "thumbnail_key": result.thumbnail_key,
         "duration": duration,
         "is_video": is_video,
-        "media_info": media_info,
-        "category_ids": category_ids,
-        "tags": None,  # タグ実装はまだしていない
-        "plan_list": plan_list
     }
 
 
@@ -994,3 +983,100 @@ def update_post_by_creator(
     db.flush()
 
     return post
+
+
+def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
+    """
+    投稿IDをキーにして投稿情報、ユーザー情報、メディア情報を取得
+    """
+    try:
+        # UUIDに変換
+        post_uuid = UUID(post_id)
+    except ValueError:
+        return None
+
+    # 投稿情報と関連データを取得
+    result = (
+        db.query(
+            Posts,
+            Users,
+            Profiles,
+            MediaAssets,
+            MediaRenditionJobs.output_key.label('rendition_output_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, Posts.id == MediaAssets.post_id)
+        .outerjoin(MediaRenditionJobs, MediaAssets.id == MediaRenditionJobs.asset_id)
+        .filter(Posts.id == post_uuid)
+        .filter(Posts.deleted_at.is_(None))
+        .all()
+    )
+
+    if not result:
+        return None
+
+    # 最初のレコードから基本情報を取得
+    first_row = result[0]
+    post = first_row.Posts
+    user = first_row.Users
+    profile = first_row.Profiles
+
+    # メディアアセット情報を整理
+    media_assets = []
+    rendition_jobs = []
+
+    for row in result:
+        if row.MediaAssets:
+            media_asset = {
+                'id': str(row.MediaAssets.id),
+                'status': row.MediaAssets.status,
+                'post_id': str(row.MediaAssets.post_id),
+                'kind': row.MediaAssets.kind,
+                'storage_key': row.MediaAssets.storage_key,
+                'file_size': row.MediaAssets.bytes,
+                'reject_comments': row.MediaAssets.reject_comments,
+                'duration': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
+                'orientation': row.MediaAssets.orientation,
+                'created_at': row.MediaAssets.created_at.isoformat() if row.MediaAssets.created_at else None,
+                'updated_at': None
+            }
+            
+            # 重複を避けるため、既に存在するかチェック
+            if not any(ma['id'] == media_asset['id'] for ma in media_assets):
+                media_assets.append(media_asset)
+
+        if row.rendition_output_key:
+            rendition_job = {
+                'output_key': row.rendition_output_key
+            }
+            
+            # 重複を避けるため、既に存在するかチェック
+            if not any(rj['output_key'] == rendition_job['output_key'] for rj in rendition_jobs):
+                rendition_jobs.append(rendition_job)
+
+    # 指定された内容を返却
+    return {
+        # 投稿情報
+        'id': str(post.id),
+        'description': post.description,
+        'status': post.status,
+        'created_at': post.created_at.isoformat() if post.created_at else None,
+        # ユーザー情報
+        'user_id': str(user.id),
+        'profile_name': user.profile_name,
+        # プロフィール情報
+        'username': profile.username,
+        'profile_avatar_url': f"{CDN_BASE_URL}/{profile.avatar_url}" if profile.avatar_url else None,
+        'post_type': post.post_type,
+        # メディアアセット情報
+        'media_assets': {
+            ma['id']: {
+                'kind': ma['kind'],
+                'storage_key': ma['storage_key'],
+                'status': ma['status'],
+                'reject_comments': ma['reject_comments'],
+            }
+            for ma in media_assets if ma['storage_key']
+        }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
+    }

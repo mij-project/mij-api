@@ -2,7 +2,28 @@ import random
 import string
 import base64
 import hashlib, bcrypt
-import os
+from typing import Dict, Any
+from os import getenv
+from app.constants.enums import MediaAssetKind, MediaAssetStatus
+from app.services.s3.presign import presign_get
+
+CDN_URL = getenv("CDN_BASE_URL")
+MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
+
+APPROVED_MEDIA_CDN_KINDS = {
+    MediaAssetKind.MAIN_VIDEO,
+    MediaAssetKind.SAMPLE_VIDEO,
+}
+CDN_MEDIA_KINDS = {
+    MediaAssetKind.OGP,
+    MediaAssetKind.THUMBNAIL,
+}
+PENDING_MEDIA_ASSET_STATUSES = {
+    MediaAssetStatus.PENDING,
+    MediaAssetStatus.RESUBMIT,
+    MediaAssetStatus.CONVERTING,
+}
+PRESIGN_MEDIA_KINDS = APPROVED_MEDIA_CDN_KINDS | {MediaAssetKind.IMAGES}
 
 
 def generate_code(length: int = 5) -> str:
@@ -69,3 +90,30 @@ def generete_hash(code: str) -> str:
         str: ハッシュ化されたコード
     """
     return bcrypt.hashpw(code.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def resolve_media_asset_storage_key(media_asset: Dict[str, Any]) -> str:
+    """メディアアセットの状態に応じて表示用の storage_key を返す。"""
+    kind = media_asset.get("kind")
+    status = media_asset.get("status")
+    storage_key = media_asset.get("storage_key")
+
+    if not storage_key:
+        return ""
+
+    if status == MediaAssetStatus.APPROVED:
+        if kind == MediaAssetKind.IMAGES:
+            return f"{MEDIA_CDN_URL}/{storage_key}_1080w.webp"
+        if kind in APPROVED_MEDIA_CDN_KINDS:
+            return f"{MEDIA_CDN_URL}/{storage_key}"
+        if kind in CDN_MEDIA_KINDS:
+            return f"{CDN_URL}/{storage_key}"
+        return storage_key
+
+    if status in PENDING_MEDIA_ASSET_STATUSES:
+        if kind in PRESIGN_MEDIA_KINDS:
+            presign_url = presign_get("ingest", storage_key)
+            return presign_url["download_url"]
+        if kind in CDN_MEDIA_KINDS:
+            return f"{CDN_URL}/{storage_key}"
+
+    return storage_key
