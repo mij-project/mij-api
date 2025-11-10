@@ -380,12 +380,12 @@ async def presign_update_image_upload(
 
             # リソースと承認フラグを決定
             resource = get_image_resource_and_approved_flag(
-                f.kind, post.authenticated_flg
+                f.kind, post['authenticated_flg']
             )
 
             # 既存ファイルをS3から削除
             delete_existing_media_file(
-                existing_assets.storage_key, resource, post.authenticated_flg, is_video=False
+                existing_assets.storage_key, resource, post['authenticated_flg'], is_video=False
             )
 
             # 古いメディアアセットをDBから削除
@@ -456,15 +456,15 @@ async def presign_update_video_upload(
             new_key = response["key"]
 
             # リソースと承認フラグを決定
-            resource = get_video_resource_and_approved_flag(post.authenticated_flg)
+            resource = get_video_resource_and_approved_flag(post['authenticated_flg'])
 
             # 既存ファイルをS3から削除
             delete_existing_media_file(
-                existing_assets.storage_key, resource, post.authenticated_flg, is_video=True
+                existing_assets.storage_key, resource, post['authenticated_flg'], is_video=True
             )
 
             # 古いメディアアセットをDBから削除
-            if post.authenticated_flg == AuthenticatedFlag.AUTHENTICATED:
+            if post['authenticated_flg'] == AuthenticatedFlag.AUTHENTICATED:
                 delete_media_rendition_job(db, existing_assets.id)
                 
             delete_media_asset(db, existing_assets.id)
@@ -513,7 +513,7 @@ async def update_images(
         # 指定されたIDの画像を削除
         if request.delete_image_ids:
             resource = get_image_resource_and_approved_flag(
-                "images", post.authenticated_flg
+                "images", post['authenticated_flg']
             )
 
             for image_id in request.delete_image_ids:
@@ -538,7 +538,7 @@ async def update_images(
                 # S3から削除
                 if asset.storage_key:
                     delete_existing_media_file(
-                        asset.storage_key, resource, post.authenticated_flg, is_video=False
+                        asset.storage_key, resource, post['authenticated_flg'], is_video=False
                     )
 
                 # DBから削除

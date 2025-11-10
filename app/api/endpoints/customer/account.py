@@ -354,16 +354,15 @@ def get_post_status(
 @router.get("/post/{post_id}", response_model=AccountPostDetailResponse)
 def get_account_post_detail(
     post_id: str,
-    # current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     クリエイター自身の投稿詳細を取得（編集・管理用）
     """
     try:
-        current_user = "276081e3-6647-48b2-a257-170c9c4a6b0e"
         #投稿基本情報取得
-        post_base_info = get_post_detail_for_creator(db, UUID(post_id), "276081e3-6647-48b2-a257-170c9c4a6b0e")
+        post_base_info = get_post_detail_for_creator(db, UUID(post_id), current_user.id)
 
 
         if not post_base_info:

@@ -55,3 +55,4 @@ class PostUpdateRequest(BaseModel):
 	single: bool
 	price: Optional[int] = None
 	post_type: str
+	reject_comments: Optional[str] = None

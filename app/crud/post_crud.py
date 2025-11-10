@@ -991,7 +991,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     """
     try:
         # UUIDに変換
-        post_uuid = UUID(post_id)
+        post_uuid = post_id
     except ValueError:
         return None
 
@@ -1062,6 +1062,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         'description': post.description,
         'status': post.status,
         'created_at': post.created_at.isoformat() if post.created_at else None,
+        'authenticated_flg': post.authenticated_flg,
         # ユーザー情報
         'user_id': str(user.id),
         'profile_name': user.profile_name,

@@ -22,6 +22,7 @@ PENDING_MEDIA_ASSET_STATUSES = {
     MediaAssetStatus.PENDING,
     MediaAssetStatus.RESUBMIT,
     MediaAssetStatus.CONVERTING,
+    MediaAssetStatus.REJECTED,
 }
 PRESIGN_MEDIA_KINDS = APPROVED_MEDIA_CDN_KINDS | {MediaAssetKind.IMAGES}
 
