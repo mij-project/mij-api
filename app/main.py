@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from fastapi import Request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.middlewares.csrf import CSRFMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -16,6 +17,13 @@ print(f" Loaded FastAPI ENV: {env_file}")
 
 from app.routers import api_router
 app = FastAPI()
+
+# ========================
+# 一時動画ファイルの静的配信
+# ========================
+TEMP_VIDEO_DIR = os.getenv("TEMP_VIDEO_DIR", "/tmp/mij_temp_videos")
+os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
+app.mount("/temp-videos", StaticFiles(directory=TEMP_VIDEO_DIR), name="temp_videos")
 
 # ========================
 # CORS
