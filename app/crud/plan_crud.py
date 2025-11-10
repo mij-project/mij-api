@@ -376,6 +376,7 @@ def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, 
         "per_page": per_page,
         "has_next": has_next
     }
+
 def update_plan(db: Session, plan_id: UUID, update_data: dict) -> Optional[Plans]:
     """
     プランを更新

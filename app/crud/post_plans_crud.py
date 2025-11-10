@@ -18,3 +18,10 @@ def delete_plan_by_post_id(db: Session, post_id: UUID):
     db.query(PostPlans).filter(PostPlans.post_id == post_id).delete()
     db.flush()
     return True
+
+def get_post_plans(db: Session, post_id: UUID) -> list[PostPlans]:
+    """
+    投稿に紐づくプランを取得
+    """
+    post_plans = db.query(PostPlans).filter(PostPlans.post_id == post_id).all()
+    return post_plans

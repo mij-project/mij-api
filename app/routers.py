@@ -16,7 +16,8 @@ from app.api.endpoints.admin import (
     preregistrations as admin_preregistrations,
     identity as admin_identity,
     profile_images as admin_profile_images,
-    banners as admin_banners
+    banners as admin_banners,
+    post as admin_post
 )
 
 # Debug routes
@@ -24,14 +25,16 @@ from app.api.endpoints.debug import debug_email
 
 
 # Hook routes
-from app.api.hook.webhooks_media_convert import router as webhooks_media_convert
-from app.api.hook.websocket_conversations import router as websocket_conversations
-
+from app.api.endpoints.hook.media_convert import router as media_convert_hook
+from app.api.endpoints.hook.conversations import router as conversations_hook
+from app.api.endpoints.hook.payment import router as payment_hook
 api_router = APIRouter()
 
 # Hook routes
-api_router.include_router(webhooks_media_convert, prefix="/webhooks", tags=["Webhooks"])
-api_router.include_router(websocket_conversations, prefix="/ws", tags=["WebSocket Conversations"])
+api_router.include_router(media_convert_hook, prefix="/webhooks", tags=["Webhooks"])
+api_router.include_router(conversations_hook, prefix="/ws", tags=["WebSocket Conversations"])
+api_router.include_router(payment_hook, prefix="/webhook", tags=["Payment"])
+
 
 
 api_router.include_router(videos.router, prefix="/videos", tags=["Videos"])
@@ -66,5 +69,5 @@ api_router.include_router(admin_preregistrations.router, prefix="/admin", tags=[
 api_router.include_router(admin_identity.router, prefix="/admin", tags=["Identity"])
 api_router.include_router(admin_profile_images.router, prefix="/admin/profile-images", tags=["Admin Profile Images"])
 api_router.include_router(admin_banners.router, prefix="/admin/banners", tags=["Admin Banners"])
-# Debug routes
+api_router.include_router(admin_post.router, prefix="/admin/posts", tags=["Admin Posts"])# Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])

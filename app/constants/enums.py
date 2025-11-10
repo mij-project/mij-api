@@ -49,6 +49,11 @@ class PostType:
     VIDEO = 1 # ビデオ
     IMAGE = 2 # 画像
 
+# 認証フラグ
+class AuthenticatedFlag:
+    NOT_AUTHENTICATED = 0 # 未認証
+    AUTHENTICATED = 1 # 認証済み
+
 # 投稿の公開範囲
 class PostVisibility:
     SINGLE = 1 # 単品

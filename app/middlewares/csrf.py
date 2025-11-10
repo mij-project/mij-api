@@ -10,7 +10,7 @@ EXCLUDE_PATHS = {
     "/admin/auth/login", "/admin/auth/logout", "/admin/auth/me",
     "/transcodes/transcode_mc", "/preregistrations", "/auth/email/resend",
     "/auth/email/verify", "/_debug/send-email",
-    "/admin/conversations", "/admin/create-admin"
+    "/admin/conversations", "/admin/create-admin",
 }
 
 class CSRFMiddleware(BaseHTTPMiddleware):

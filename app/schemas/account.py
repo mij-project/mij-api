@@ -163,15 +163,27 @@ class AccountPostStatusResponse(BaseModel):
     deleted_posts: List[AccountPostResponse] = []
     approved_posts: List[AccountPostResponse] = []
 
+class AccountMediaAsset(BaseModel):
+    """クリエイター用投稿詳細のメディアアセット情報"""
+    kind: int
+    storage_key: Optional[str] = None
+    status: int
+    reject_comments: Optional[str] = None
+
+
+class PlanSummary(BaseModel):
+    """投稿に紐づくプランの簡易情報"""
+    id: str
+    name: Optional[str] = None
+
+
 class AccountPostDetailResponse(BaseModel):
     """クリエイター用投稿詳細レスポンス"""
     id: str
     description: str
-    reject_comments: Optional[str] = None
-    thumbnail_url: Optional[str] = None
-    ogp_image_url: Optional[str] = None
     scheduled_at: Optional[str] = None
     expiration_at: Optional[str] = None
+    reject_comments: Optional[str] = None
     likes_count: int
     comments_count: int
     purchase_count: int
@@ -186,17 +198,11 @@ class AccountPostDetailResponse(BaseModel):
     status: int
     visibility: int
     # メディア情報
-    sample_video_url: Optional[str] = None
-    sample_video_reject_comments: Optional[str] = None
-    main_video_url: Optional[str] = None
-    main_video_reject_comments: Optional[str] = None
-    ogp_image_reject_comments: Optional[str] = None
-    image_urls: List[str] = []
-    image_reject_comments: List[Optional[str]] = []
+    media_assets: Dict[str, AccountMediaAsset] = Field(default_factory=dict)
     # カテゴリー・プラン情報
-    category_ids: List[str] = []
+    category_ids: List[str] = Field(default_factory=list)
     tags: Optional[str] = None
-    plan_list: List[dict] = []
+    plan_list: List[PlanSummary] = Field(default_factory=list)
 
 class AccountPostUpdateRequest(BaseModel):
     """投稿更新リクエスト"""
