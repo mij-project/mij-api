@@ -7,9 +7,11 @@ from .client import (
     ASSETS_BUCKET_NAME,
     KYC_BUCKET_NAME,
     KMS_ALIAS_KYC, 
+    MEDIA_BUCKET_NAME,
+    KMS_ALIAS_MEDIA,
 )
 
-Resource = Literal["ingest", "identity", "public"]
+Resource = Literal["ingest", "identity", "public", "media"]
 
 def _bucket_and_kms(resource: Resource):
     if resource == "ingest":
@@ -18,6 +20,8 @@ def _bucket_and_kms(resource: Resource):
         return KYC_BUCKET_NAME, KMS_ALIAS_KYC
     elif resource == "public":
         return ASSETS_BUCKET_NAME
+    elif resource == "media":
+        return MEDIA_BUCKET_NAME, KMS_ALIAS_MEDIA
     raise ValueError("unknown resource")
 
 def presign_put(
@@ -177,3 +181,30 @@ def multipart_complete(resource: Resource, key: str, upload_id: str, parts: list
         MultipartUpload={"Parts": parts},
     )
     return {"ok": True}
+
+def get_bucket_name(resource: Resource) -> str:
+    """
+    リソース名からバケット名を取得
+
+    Args:
+        resource (Resource): リソース名
+
+    Returns:
+        str: バケット名
+    """
+    result = _bucket_and_kms(resource)
+    if isinstance(result, tuple):
+        return result[0]
+    return result
+
+def delete_object(resource: Resource, key: str):
+    """
+    S3オブジェクトを削除
+
+    Args:
+        resource (Resource): リソース名
+        key (str): S3オブジェクトキー
+    """
+    bucket = get_bucket_name(resource)
+    client = s3_client()
+    client.delete_object(Bucket=bucket, Key=key)

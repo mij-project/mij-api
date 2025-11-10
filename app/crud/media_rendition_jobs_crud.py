@@ -33,3 +33,11 @@ def get_media_rendition_job_by_id(db: Session, media_rendition_job_id: str) -> M
     メディアレンディションジョブ取得
     """
     return db.query(MediaRenditionJobs).filter(MediaRenditionJobs.id == media_rendition_job_id).first()
+
+def delete_media_rendition_job(db: Session, asset_id: str) -> bool:
+    """
+    メディアレンディションジョブ削除
+    """
+    db.query(MediaRenditionJobs).filter(MediaRenditionJobs.asset_id == asset_id).delete()
+    db.commit()
+    return True

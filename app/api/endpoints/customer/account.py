@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from uuid import UUID
 from typing import Dict
 from app.db.base import get_db
 from app.deps.auth import get_current_user
@@ -47,6 +48,7 @@ from app.crud.post_crud import (
     get_post_detail_for_creator,
     update_post_by_creator
 )
+from app.crud.post_categries import get_post_categories
 from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id
 from app.crud.purchases_crud import get_single_purchases_count_by_user_id, get_single_purchases_by_user_id
@@ -55,7 +57,10 @@ from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_us
 from app.crud import profile_image_crud
 from app.services.s3.keygen import account_asset_key
 from app.services.s3.presign import presign_put_public
+from app.crud.post_crud import get_post_by_id
+from app.crud.post_plans_crud import get_post_plans 
 from uuid import UUID
+from app.api.commons.utils import resolve_media_asset_storage_key
 import os
 
 router = APIRouter()
@@ -357,59 +362,67 @@ def get_account_post_detail(
     クリエイター自身の投稿詳細を取得（編集・管理用）
     """
     try:
+        #投稿基本情報取得
+        post_base_info = get_post_detail_for_creator(db, UUID(post_id), current_user.id)
 
-        post_data = get_post_detail_for_creator(db, UUID(post_id), current_user.id)
 
+        if not post_base_info:
+            raise HTTPException(status_code=404, detail="投稿が見つかりません")
+
+        # カテゴリー情報取得
+        category_records = get_post_categories(db, post_id)
+        category_ids = [str(rec.category_id) for rec in category_records]
+
+        # プラン情報を取得
+        post_plans = get_post_plans(db, post_id)
+        plan_list = [{'id': str(rec.plan_id), 'name': rec.plan.name} for rec in post_plans]
+
+        # メディア情報を取得
+        post_data = get_post_by_id(db, post_id)
         if not post_data:
             raise HTTPException(status_code=404, detail="投稿が見つかりません")
 
-        # メディア情報を取得
-        media_info = post_data.get("media_info", {})
-        sample_video = media_info.get("sample_video", {})
-        main_video = media_info.get("main_video", {})
-        ogp_image = media_info.get("ogp_image", {})
-        images = media_info.get("images", [])
-        
-        sample_video_url = sample_video.get("url") if sample_video else None
-        sample_video_reject_comments = sample_video.get("reject_comments") if sample_video else None
-        main_video_url = main_video.get("url") if main_video else None
-        main_video_reject_comments = main_video.get("reject_comments") if main_video else None
-        ogp_image_url = ogp_image.get("url") if ogp_image else None
-        ogp_image_reject_comments = ogp_image.get("reject_comments") if ogp_image else None
-        image_urls = [img.get("url") for img in images if img.get("url")]
-        image_reject_comments = [img.get("reject_comments") for img in images]
+        media_assets = post_data.get('media_assets', {})
+        processed_media_assets = {
+            media_asset_id: {
+                **media_asset_data,
+                "storage_key": resolve_media_asset_storage_key(media_asset_data),
+            }
+            for media_asset_id, media_asset_data in media_assets.items()
+        }
+
+        plan_list_response = []
+        for plan in post_plans:
+            plan_list_response.append(
+                {
+                    "id": str(plan.plan_id),
+                    "name": getattr(plan.plan, "name", None),
+                }
+            )
 
         return AccountPostDetailResponse(
-            id=str(post_data["post"].id),
-            description=post_data["post"].description,
-            reject_comments=post_data["post"].reject_comments if post_data["post"].reject_comments else None,
-            thumbnail_url=f"{BASE_URL}/{post_data['thumbnail_key']}" if post_data.get('thumbnail_key') else None,
-            ogp_image_url=ogp_image_url if ogp_image_url else None,
-            ogp_image_reject_comments=ogp_image_reject_comments,
-            likes_count=post_data["likes_count"],
-            comments_count=post_data["comments_count"],
-            purchase_count=post_data["purchase_count"],
-            creator_name=post_data["creator_name"],
-            username=post_data["username"],
-            creator_avatar_url=f"{BASE_URL}/{post_data['creator_avatar_url']}" if post_data.get('creator_avatar_url') else None,
-            price=post_data["price"],
-            currency=post_data["currency"],
-            scheduled_at=post_data["post"].scheduled_at.isoformat() if post_data["post"].scheduled_at else None,
-            expiration_at=post_data["post"].expiration_at.isoformat() if post_data["post"].expiration_at else None,
-            duration=post_data.get("duration"),
-            is_video=post_data["is_video"],
-            post_type=post_data["post"].post_type,
-            status=post_data["post"].status,
-            visibility=post_data["post"].visibility,
-            sample_video_url=sample_video_url,
-            sample_video_reject_comments=sample_video_reject_comments,
-            main_video_url=main_video_url,
-            main_video_reject_comments=main_video_reject_comments,
-            image_urls=image_urls,
-            image_reject_comments=image_reject_comments,
-            category_ids=post_data.get("category_ids", []),
-            tags=post_data.get("tags"),
-            plan_list=post_data.get("plan_list", [])
+            id=str(post_base_info["post"].id),
+            description=post_base_info["post"].description,
+            reject_comments=post_base_info["post"].reject_comments if post_base_info["post"].reject_comments else None,
+            likes_count=post_base_info["likes_count"],
+            comments_count=post_base_info["comments_count"],
+            purchase_count=post_base_info["purchase_count"],
+            creator_name=post_base_info["creator_name"],
+            username=post_base_info["username"],
+            creator_avatar_url=f"{BASE_URL}/{post_base_info['creator_avatar_url']}" if post_base_info.get('creator_avatar_url') else None,
+            price=int(post_base_info["price"]) if post_base_info["price"] is not None else 0,
+            currency=post_base_info["currency"] or "JPY",
+            scheduled_at=post_base_info["post"].scheduled_at.isoformat() if post_base_info["post"].scheduled_at else None,
+            expiration_at=post_base_info["post"].expiration_at.isoformat() if post_base_info["post"].expiration_at else None,
+            duration=post_base_info.get("duration"),
+            is_video=post_base_info["is_video"],
+            post_type=post_base_info["post"].post_type,
+            status=post_base_info["post"].status,
+            visibility=post_base_info["post"].visibility,
+            category_ids=category_ids,
+            tags=post_base_info.get("tags"),
+            plan_list=plan_list_response,
+            media_assets=processed_media_assets,
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="無効な投稿IDです")
@@ -674,3 +687,64 @@ def _convert_posts(posts_list):
             is_video=is_video
         ))
     return result
+
+
+@router.put("/post/{post_id}")
+def update_account_post(
+    post_id: str,
+    request: AccountPostUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user)
+) -> AccountPostUpdateResponse:
+    """
+    クリエイターが自分の投稿を更新
+
+    Args:
+        post_id: 投稿ID
+        request: 更新リクエスト（status, visibility, scheduled_at）
+        db: データベースセッション
+        current_user: 現在のユーザー
+
+    Returns:
+        AccountPostUpdateResponse: 更新結果
+    """
+
+    try:
+        # リクエストデータを辞書に変換（Noneでない値のみ）
+        update_data = {}
+        if request.status is not None:
+            update_data['status'] = request.status
+        if request.visibility is not None:
+            update_data['visibility'] = request.visibility
+        if request.scheduled_at is not None:
+            update_data['scheduled_at'] = request.scheduled_at
+        if request.description is not None:
+            update_data['description'] = request.description
+
+        # 投稿を更新
+        updated_post = update_post_by_creator(
+            db=db,
+            post_id=UUID(post_id),
+            creator_user_id=current_user.id,
+            update_data=update_data
+        )
+
+        if not updated_post:
+            raise HTTPException(
+                status_code=404,
+                detail="投稿が見つからないか、更新する権限がありません"
+            )
+
+        db.commit()
+
+        return AccountPostUpdateResponse(
+            message="投稿を更新しました",
+            success=True
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"無効な投稿ID: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        print(f"投稿更新エラー: {e}")
+        raise HTTPException(status_code=500, detail="投稿の更新に失敗しました")

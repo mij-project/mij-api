@@ -229,6 +229,7 @@ class CreateUserRequest(BaseModel):
 class MediaAssetData(BaseModel):
     kind: int
     storage_key: str
+    status: int
 
 class AdminPostDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
