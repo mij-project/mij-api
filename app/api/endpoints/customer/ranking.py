@@ -134,6 +134,7 @@ def _get_ranking_posts_genres(db: Session) -> RankingGenresResponse:
     ranking_posts_genres_daily = get_ranking_posts_genres_daily(db, limit=10)
     ranking_posts_genres_weekly = get_ranking_posts_genres_weekly(db, limit=10)
     ranking_posts_genres_monthly = get_ranking_posts_genres_monthly(db, limit=10)
+    
     response = {
         "all_time": __arrange_ranking_posts_genres(ranking_posts_genres_all_time),
         "daily": __arrange_ranking_posts_genres(ranking_posts_genres_daily),
@@ -148,11 +149,25 @@ def _get_ranking_posts_genres(db: Session) -> RankingGenresResponse:
     )
 
 def __arrange_ranking_posts_genres(ranking_posts_genres: list) -> dict:
-    results = []
-    for idx, row in enumerate(ranking_posts_genres):
-        filter = [x for x in results if x["genre_id"] == row.genre_id]
-        if filter:
-            filter[0]["posts"].append(RankingPostsGenresDetailResponse(
+    grouped: dict[str, RankingPostsGenresResponse] = {}
+
+    for row in ranking_posts_genres:
+        # bỏ qua post không có creator
+        if not row.profile_name:
+            continue
+
+        genre_id = str(row.category_id)       # giờ đang group theo category
+        genre_name = str(row.category_name)
+
+        if genre_id not in grouped:
+            grouped[genre_id] = RankingPostsGenresResponse(
+                genre_id=genre_id,
+                genre_name=genre_name,
+                posts=[],
+            )
+
+        grouped[genre_id].posts.append(
+            RankingPostsGenresDetailResponse(
                 id=str(row.post_id),
                 description=row.description,
                 thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}" if row.thumbnail_key else None,
@@ -160,29 +175,17 @@ def __arrange_ranking_posts_genres(ranking_posts_genres: list) -> dict:
                 creator_name=row.profile_name,
                 username=row.username,
                 creator_avatar_url=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
-                rank=0
-            ))
-        else:
-            if row.profile_name:
-                results.append(RankingPostsGenresResponse(
-                    genre_id=str(row.genre_id),
-                    genre_name=str(row.genre_name),
-                    posts=[RankingPostsGenresDetailResponse(
-                        id=str(row.post_id),
-                        description=row.description,
-                        thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}" if row.thumbnail_key else None,
-                        likes_count=row.likes_count,
-                        creator_name=row.profile_name,
-                        username=row.username,
-                        creator_avatar_url=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
-                        rank=0
-                    )]
-                ))
-    
+                rank=0,
+            )
+        )
+
+    # sort + set rank
+    results = list(grouped.values())
     for genre in results:
-        genre.posts = sorted(genre.posts, key=lambda x: x.likes_count, reverse=True)
+        genre.posts = sorted(genre.posts, key=lambda x: x.likes_count or 0, reverse=True)
         for idx, post in enumerate(genre.posts):
             post.rank = idx + 1
+
     return results
 
 

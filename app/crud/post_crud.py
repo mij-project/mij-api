@@ -3,8 +3,6 @@ import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import distinct, distinct, distinct, func, desc, exists, and_
-from app.models.genres import Genres, and_
-from app.models.genres import Genres, and_
 from app.models.genres import Genres
 from app.models.posts import Posts
 from app.models.social import Follows, Follows, Follows, Likes, Bookmarks, Comments
@@ -3153,6 +3151,9 @@ def get_ranking_posts_genres_all_time(db: Session, limit: int = 50):
     """
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
 
@@ -3168,13 +3169,13 @@ def get_ranking_posts_genres_all_time(db: Session, limit: int = 50):
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3197,10 +3198,12 @@ def get_ranking_posts_genres_all_time(db: Session, limit: int = 50):
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                # Like.created_at >= func.date_trunc("day", func.now()),
+                # Likes.created_at >= func.date_trunc("day", func.now()),
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3212,15 +3215,17 @@ def get_ranking_posts_genres_all_time(db: Session, limit: int = 50):
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
         .filter(like_counts_subq.c.rn <= limit)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .all()
     )
+
     return result
 
 def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
@@ -3230,9 +3235,12 @@ def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
     one_day_ago = datetime.now() - timedelta(days=1)
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-            
+
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.description.label("description"),
@@ -3245,13 +3253,13 @@ def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3274,10 +3282,12 @@ def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                Likes.created_at >= func.date_trunc("day", one_day_ago),
+                Likes.created_at >= one_day_ago,
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3289,15 +3299,17 @@ def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
         .filter(like_counts_subq.c.rn <= limit)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .all()
     )
+
     return result
 
 def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
@@ -3307,6 +3319,9 @@ def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
     one_week_ago = datetime.now() - timedelta(days=7)
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
 
@@ -3322,13 +3337,13 @@ def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3351,10 +3366,12 @@ def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                Likes.created_at >= func.date_trunc("day", one_week_ago),
+                Likes.created_at >= one_week_ago,
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3366,15 +3383,17 @@ def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
         .filter(like_counts_subq.c.rn <= limit)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .all()
     )
+
     return result
 
 def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
@@ -3384,6 +3403,9 @@ def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
     one_month_ago = datetime.now() - timedelta(days=7)
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
 
@@ -3399,13 +3421,13 @@ def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3428,10 +3450,12 @@ def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                Likes.created_at >= func.date_trunc("day", one_month_ago),
+                Likes.created_at >= one_month_ago,
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3443,15 +3467,17 @@ def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
         .filter(like_counts_subq.c.rn <= limit)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .all()
     )
+
     return result
 
 
@@ -3576,6 +3602,9 @@ def get_ranking_posts_detail_genres_all_time(db: Session, genre: str, page: int 
     offset = (page - 1) * limit
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
 
@@ -3591,13 +3620,13 @@ def get_ranking_posts_detail_genres_all_time(db: Session, genre: str, page: int 
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3620,10 +3649,12 @@ def get_ranking_posts_detail_genres_all_time(db: Session, genre: str, page: int 
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                # Like.created_at >= func.date_trunc("day", func.now()),
+                # Likes.created_at >= func.date_trunc("day", func.now()),
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3635,11 +3666,12 @@ def get_ranking_posts_detail_genres_all_time(db: Session, genre: str, page: int 
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
-        .filter(like_counts_subq.c.genre_id == genre)
+        .filter(like_counts_subq.c.category_id == genre)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .offset(offset)
@@ -3656,9 +3688,12 @@ def get_ranking_posts_detail_genres_daily(db: Session, genre: str, page: int = 1
     offset = (page - 1) * limit
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-            
+
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.description.label("description"),
@@ -3671,13 +3706,13 @@ def get_ranking_posts_detail_genres_daily(db: Session, genre: str, page: int = 1
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3700,10 +3735,12 @@ def get_ranking_posts_detail_genres_daily(db: Session, genre: str, page: int = 1
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                Likes.created_at >= func.date_trunc("day", one_day_ago),
+                Likes.created_at >= one_day_ago,
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3715,11 +3752,12 @@ def get_ranking_posts_detail_genres_daily(db: Session, genre: str, page: int = 1
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
-        .filter(like_counts_subq.c.genre_id == genre)
+        .filter(like_counts_subq.c.category_id == genre)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .offset(offset)
@@ -3732,13 +3770,16 @@ def get_ranking_posts_detail_genres_weekly(db: Session, genre: str, page: int = 
     """
     各ジャンルでいいね数が多い投稿を取得 Weekly
     """
-    one_day_ago = datetime.now() - timedelta(days=7)
+    one_week_ago = datetime.now() - timedelta(days=7)
     offset = (page - 1) * limit
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-            
+
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.description.label("description"),
@@ -3751,13 +3792,13 @@ def get_ranking_posts_detail_genres_weekly(db: Session, genre: str, page: int = 
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3780,10 +3821,12 @@ def get_ranking_posts_detail_genres_weekly(db: Session, genre: str, page: int = 
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                Likes.created_at >= func.date_trunc("day", one_day_ago),
+                Likes.created_at >= one_week_ago,
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3795,11 +3838,12 @@ def get_ranking_posts_detail_genres_weekly(db: Session, genre: str, page: int = 
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
-        .filter(like_counts_subq.c.genre_id == genre)
+        .filter(like_counts_subq.c.category_id == genre)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .offset(offset)
@@ -3812,13 +3856,16 @@ def get_ranking_posts_detail_genres_monthly(db: Session, genre: str, page: int =
     """
     各ジャンルでいいね数が多い投稿を取得 Monthy
     """
-    one_day_ago = datetime.now() - timedelta(days=30)
+    one_month_ago = datetime.now() - timedelta(days=30)
     offset = (page - 1) * limit
     like_counts_subq = (
         db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-            
+
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.description.label("description"),
@@ -3831,13 +3878,13 @@ def get_ranking_posts_detail_genres_monthly(db: Session, genre: str, page: int =
 
             func.row_number()
             .over(
-                partition_by=Genres.id,
+                partition_by=Categories.id,
                 order_by=func.count(Likes.post_id).desc()
             )
             .label("rn"),
         )
-        .select_from(Genres)
-        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
@@ -3860,10 +3907,12 @@ def get_ranking_posts_detail_genres_monthly(db: Session, genre: str, page: int =
             Likes,
             and_(
                 Likes.post_id == Posts.id,
-                Likes.created_at >= func.date_trunc("day", one_day_ago),
+                Likes.created_at >= one_month_ago,
             ),
         )
         .group_by(
+            Categories.id,
+            Categories.name,
             Genres.id,
             Genres.name,
             Posts.id,
@@ -3875,11 +3924,12 @@ def get_ranking_posts_detail_genres_monthly(db: Session, genre: str, page: int =
         )
         .subquery("like_counts")
     )
+
     result = (
         db.query(like_counts_subq)
-        .filter(like_counts_subq.c.genre_id == genre)
+        .filter(like_counts_subq.c.category_id == genre)
         .order_by(
-            like_counts_subq.c.genre_name,
+            like_counts_subq.c.category_name,
             like_counts_subq.c.likes_count.desc().nullslast(),
         )
         .offset(offset)
