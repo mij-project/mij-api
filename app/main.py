@@ -19,13 +19,6 @@ from app.routers import api_router
 app = FastAPI()
 
 # ========================
-# 一時動画ファイルの静的配信
-# ========================
-TEMP_VIDEO_DIR = os.getenv("TEMP_VIDEO_DIR", "/tmp/mij_temp_videos")
-os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
-app.mount("/temp-videos", StaticFiles(directory=TEMP_VIDEO_DIR), name="temp_videos")
-
-# ========================
 # CORS
 # ========================
 origins = [
@@ -72,7 +65,7 @@ app.add_middleware(
 # ========================
 # CSRF（必要なら /auth/x/* を除外する設定に）
 # ========================
-# app.add_middleware(CSRFMiddleware)
+app.add_middleware(CSRFMiddleware)
 
 @app.get("/healthz")
 def healthz():

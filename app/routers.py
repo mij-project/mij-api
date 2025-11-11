@@ -60,7 +60,7 @@ api_router.include_router(conversations.router, prefix="/conversations", tags=["
 api_router.include_router(order.router, prefix="/orders", tags=["Orders"])
 api_router.include_router(sms_verifications.router, prefix="/sms-verifications", tags=["SMS Verifications"])
 api_router.include_router(banners.router, prefix="/banners", tags=["Banners"])
-api_router.include_router(video_temp.router, prefix="/video-temp", tags=["Video Temp"])
+api_router.include_router(video_temp.router, prefix="", tags=["Video Temp"])
 
 # Admin routes
 api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin Auth"])

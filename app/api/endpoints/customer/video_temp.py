@@ -5,6 +5,7 @@ import os
 import uuid
 import subprocess
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
@@ -22,7 +23,7 @@ TEMP_VIDEO_DIR = os.getenv("TEMP_VIDEO_DIR", "/tmp/mij_temp_videos")
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
 
-@router.post("/temp-upload/main-video", response_model=TempVideoResponse)
+@router.post("/video-temp/temp-upload/main-video", response_model=TempVideoResponse)
 async def upload_temp_main_video(
     file: UploadFile = File(...),
     user: Users = Depends(get_current_user_optional),
@@ -59,7 +60,7 @@ async def upload_temp_main_video(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/temp-upload/create-sample", response_model=SampleVideoResponse)
+@router.post("/video-temp/temp-upload/create-sample", response_model=SampleVideoResponse)
 async def create_sample_video(
     request: CreateSampleRequest,
     user: Users = Depends(get_current_user_optional),
@@ -169,3 +170,57 @@ def _cut_video(input_path: str, output_path: str, start_time: float, end_time: f
     except Exception as e:
         print(f"動画切り取りエラー: {e}")
         raise Exception(f"動画の切り取りに失敗しました: {str(e)}")
+
+
+@router.get("/temp-videos/{filename:path}")
+async def serve_temp_video(filename: str):
+    """
+    一時動画ファイルを配信する
+
+    Args:
+        filename: ファイル名（拡張子含む）
+
+    Returns:
+        FileResponse: 動画ファイル
+    """
+    try:
+        # ファイルパスを構築
+        file_path = os.path.join(TEMP_VIDEO_DIR, filename)
+
+        # セキュリティ: パストラバーサル攻撃を防ぐ
+        # 正規化されたパスがTEMP_VIDEO_DIR内にあることを確認
+        normalized_path = os.path.normpath(file_path)
+        if not normalized_path.startswith(os.path.normpath(TEMP_VIDEO_DIR)):
+            raise HTTPException(status_code=403, detail="アクセスが拒否されました")
+
+        # ファイルが存在するか確認
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="ファイルが見つかりません")
+
+        # ファイルが通常のファイルであることを確認（ディレクトリではない）
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=400, detail="無効なファイルです")
+
+        # MIMEタイプを拡張子から判定
+        ext = os.path.splitext(filename)[1].lower()
+        media_type_mapping = {
+            ".mp4": "video/mp4",
+            ".mov": "video/quicktime",
+            ".avi": "video/x-msvideo",
+            ".mkv": "video/x-matroska",
+            ".webm": "video/webm",
+        }
+        media_type = media_type_mapping.get(ext, "application/octet-stream")
+
+        # ファイルを返す
+        return FileResponse(
+            path=file_path,
+            media_type=media_type,
+            filename=filename
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"一時動画配信エラー: {e}")
+        raise HTTPException(status_code=500, detail="動画の配信に失敗しました")

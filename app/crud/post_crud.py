@@ -1052,7 +1052,11 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
                 'file_size': row.MediaAssets.bytes,
                 'reject_comments': row.MediaAssets.reject_comments,
                 'duration': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
+                'duration_sec': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
                 'orientation': row.MediaAssets.orientation,
+                'sample_type': row.MediaAssets.sample_type,
+                'sample_start_time': float(row.MediaAssets.sample_start_time) if row.MediaAssets.sample_start_time else None,
+                'sample_end_time': float(row.MediaAssets.sample_end_time) if row.MediaAssets.sample_end_time else None,
                 'created_at': row.MediaAssets.created_at.isoformat() if row.MediaAssets.created_at else None,
                 'updated_at': None
             }
@@ -1092,6 +1096,11 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
                 'storage_key': ma['storage_key'],
                 'status': ma['status'],
                 'reject_comments': ma['reject_comments'],
+                'duration_sec': ma.get('duration_sec'),
+                'orientation': ma.get('orientation'),
+                'sample_type': ma.get('sample_type'),
+                'sample_start_time': ma.get('sample_start_time'),
+                'sample_end_time': ma.get('sample_end_time'),
             }
             for ma in media_assets if ma['storage_key']
         }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書

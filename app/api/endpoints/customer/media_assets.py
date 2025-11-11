@@ -94,9 +94,12 @@ def create_media_asset_data(
     orientation: str,
     content_type: str,
     status: MediaAssetStatus = MediaAssetStatus.PENDING,
+    sample_type: str | None = None,
+    sample_start_time: float | None = None,
+    sample_end_time: float | None = None,
 ) -> dict:
     """メディアアセットデータを作成"""
-    return {
+    data = {
         "post_id": post_id,
         "kind": KIND_MAPPING[kind],
         "storage_key": storage_key,
@@ -105,6 +108,15 @@ def create_media_asset_data(
         "status": status,
         "bytes": 0,
     }
+
+    # サンプル動画のメタデータを追加（kind=sampleの場合のみ）
+    if kind == "sample" and sample_type:
+        data["sample_type"] = sample_type
+        if sample_type == "cut_out":
+            data["sample_start_time"] = sample_start_time
+            data["sample_end_time"] = sample_end_time
+
+    return data
 
 
 def generate_image_presign(
@@ -317,9 +329,12 @@ async def presign_post_media_video(
             key = response["key"]
             
             uploads[f.kind] = create_presign_response_item(response)
-            
+
             media_asset_data = create_media_asset_data(
-                str(f.post_id), f.kind, key, f.orientation, f.content_type
+                str(f.post_id), f.kind, key, f.orientation, f.content_type,
+                sample_type=f.sample_type,
+                sample_start_time=f.sample_start_time,
+                sample_end_time=f.sample_end_time
             )
             create_media_asset(db, media_asset_data)
 
@@ -475,7 +490,10 @@ async def presign_update_video_upload(
             # 新しいメディアアセットを作成
             media_asset_data = create_media_asset_data(
                 str(request.post_id), f.kind, new_key, f.orientation,
-                f.content_type, MediaAssetStatus.RESUBMIT
+                f.content_type, MediaAssetStatus.RESUBMIT,
+                sample_type=f.sample_type,
+                sample_start_time=f.sample_start_time,
+                sample_end_time=f.sample_end_time
             )
             create_media_asset(db, media_asset_data)
             db.commit()
