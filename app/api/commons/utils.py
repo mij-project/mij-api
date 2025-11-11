@@ -7,6 +7,7 @@ from os import getenv
 from app.constants.enums import MediaAssetKind, MediaAssetStatus
 from app.services.s3.presign import presign_get
 
+
 CDN_URL = getenv("CDN_BASE_URL")
 MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
 
@@ -70,7 +71,7 @@ def get_video_duration(duration_sec: float) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 def generate_email_verification_token() -> tuple[str, str]:
-    raw = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
+    raw = base64.urlsafe_b64encode(random.randbytes(32)).decode().rstrip("=")
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
     return raw, token_hash
 

@@ -228,3 +228,8 @@ class BannerStatus:
 class BannerImageSource:
     USER_PROFILE = 1 # ユーザープロフィール
     ADMIN_POST = 2 # 管理者投稿
+
+class EventStatus:
+    INACTIVE = 0 # 無効
+    ACTIVE = 1 # 有効
+    DRAFT = 2 # 下書き

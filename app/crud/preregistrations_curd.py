@@ -74,3 +74,9 @@ def get_preregistrations_paginated(
     preregistrations = query.offset(skip).limit(limit).all()
 
     return preregistrations, total
+
+def get_preregistration_by_email(db: Session, email: str) -> bool:
+    """
+    事前登録データが存在するかを確認
+    """
+    return db.query(Preregistrations).filter(Preregistrations.email == email).first() is not None
