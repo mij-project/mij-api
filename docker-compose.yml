@@ -12,6 +12,9 @@ services:
       - mij_db
     environment:
       DATABASE_URL: postgresql://user:password@mij_db:5432/mij_db
+      TEMP_VIDEO_DIR: /app/temp_videos
+    volumes:
+      - temp_videos:/app/temp_videos
       
   mij_db:
     image: postgres:15
@@ -27,3 +30,4 @@ services:
 
 volumes:
   mij_db_data:
+  temp_videos:

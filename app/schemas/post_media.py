@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Literal, List, Union
 from app.schemas.commons import PresignResponseItem
 from uuid import UUID
+from typing import Optional
 
 ImageKind = Literal["ogp", "thumbnail", "images"]
 VideoKind = Literal["main", "sample"]
@@ -26,6 +27,9 @@ class PostMediaVideoFileSpec(BaseModel):
     orientation: Orientation
     content_type: Literal["video/mp4", "video/webm", "video/quicktime"]
     ext: Literal["mp4", "webm", "mov"]
+    sample_type: Optional[str] = Field(None, description='サンプル動画の種類: upload=アップロード, cut_out=本編から指定')
+    sample_start_time: Optional[float] = Field(None, description='本編から指定の場合の開始時間（秒）')
+    sample_end_time: Optional[float] = Field(None, description='本編から指定の場合の終了時間（秒）')
 
 class UpdateMediaVideoFileSpec(BaseModel):
     post_id: UUID = Field(..., description='投稿ID')
@@ -33,6 +37,9 @@ class UpdateMediaVideoFileSpec(BaseModel):
     orientation: Orientation
     content_type: Literal["video/mp4", "video/webm", "video/quicktime"]
     ext: Literal["mp4", "webm", "mov"]
+    sample_type: Optional[str] = Field(None, description='サンプル動画の種類: upload=アップロード, cut_out=本編から指定')
+    sample_start_time: Optional[float] = Field(None, description='本編から指定の場合の開始時間（秒）')
+    sample_end_time: Optional[float] = Field(None, description='本編から指定の場合の終了時間（秒）')
 
 class PostMediaImagePresignRequest(BaseModel):
     files: List[PostMediaImageFileSpec] = Field(..., description='例: [{"kind":"ogp","ext":"jpg"}, ...]')

@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from fastapi import Request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.middlewares.csrf import CSRFMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -64,7 +65,7 @@ app.add_middleware(
 # ========================
 # CSRF（必要なら /auth/x/* を除外する設定に）
 # ========================
-# app.add_middleware(CSRFMiddleware)
+app.add_middleware(CSRFMiddleware)
 
 @app.get("/healthz")
 def healthz():

@@ -29,6 +29,9 @@ class MediaAssets(Base):
     orientation: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     reject_comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sample_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment='サンプル動画の種類: upload=アップロード, cut_out=本編から指定')
+    sample_start_time: Mapped[Optional[Decimal]] = mapped_column(NUMERIC(10, 3), nullable=True, comment='本編から指定の場合の開始時間（秒）')
+    sample_end_time: Mapped[Optional[Decimal]] = mapped_column(NUMERIC(10, 3), nullable=True, comment='本編から指定の場合の終了時間（秒）')
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
     post: Mapped["Posts"] = relationship("Posts", back_populates="media_assets")

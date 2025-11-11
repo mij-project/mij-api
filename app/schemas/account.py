@@ -169,6 +169,11 @@ class AccountMediaAsset(BaseModel):
     storage_key: Optional[str] = None
     status: int
     reject_comments: Optional[str] = None
+    duration_sec: Optional[Decimal] = None
+    orientation: Optional[int] = None
+    sample_type: Optional[str] = None
+    sample_start_time: Optional[Decimal] = None
+    sample_end_time: Optional[Decimal] = None
 
 
 class PlanSummary(BaseModel):
