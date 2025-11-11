@@ -59,7 +59,6 @@ def register_user(
         db_user = create_user(db, user_create)
         db_profile = create_profile(db, db_user.id, username_code)
 
-
         # メールアドレスの認証トークンを発行
         raw, expires_at = issue_verification_token(db, db_user.id)
         verify_url = f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={raw}"

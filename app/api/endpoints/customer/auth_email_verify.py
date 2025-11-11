@@ -51,6 +51,8 @@ def verify(body: VerifyIn, db: AsyncSession = Depends(get_db)):
         # 事前登録判定
         user = get_user_by_id(db, rec.user_id)
         result = get_preregistration_by_email(db, user.email)
+
+        # 事前登録イベントを挿入
         if result:
             _insert_user_event(db, rec.user_id, EventCode.PRE_REGISTRATION)
 
