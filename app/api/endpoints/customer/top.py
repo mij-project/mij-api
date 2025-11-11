@@ -11,6 +11,7 @@ from app.crud.post_crud import get_ranking_posts, get_recent_posts
 from os import getenv
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PostType
+from app.deps.auth import get_current_user
 
 router = APIRouter()
 
@@ -56,14 +57,16 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                 username=c.username,
                 avatar=f"{BASE_URL}/{c.avatar_url}" if c.avatar_url else None,
                 followers=c.followers_count,
-                rank=idx + 1
+                rank=idx + 1,
+                follower_ids=[str(x)for x in c.follower_ids],
+                likes=c.likes_count
             ) for idx, c in enumerate(top_creators)],
             new_creators=[CreatorResponse(
                 id=str(c.Users.id),
                 name=c.profile_name,
                 username=c.username,
                 avatar=f"{BASE_URL}/{c.avatar_url}" if c.avatar_url else None,
-                followers=0
+                followers=0,
             ) for c in new_creators],
             recent_posts=[RecentPostResponse(
                 id=str(p.Posts.id),
