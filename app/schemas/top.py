@@ -31,7 +31,9 @@ class CreatorResponse(BaseModel):
     avatar: Optional[str] = None
     followers: int
     rank: Optional[int] = None
-
+    follower_ids: Optional[List[str]] = None
+    likes: Optional[int] = None
+    
 class RecentPostResponse(BaseModel):
     id: str
     post_type: int

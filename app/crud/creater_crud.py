@@ -1,16 +1,17 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import distinct, exists, select, func, and_, case
 from uuid import UUID
 from datetime import datetime
 from app.models.creators import Creators
+from app.models.posts import Posts
 from app.models.user import Users
 from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.schemas.creator import CreatorCreate, CreatorUpdate, IdentityVerificationCreate, IdentityDocumentCreate
 from app.constants.enums import CreatorStatus, VerificationStatus, AccountType
 from app.models.profiles import Profiles
 from sqlalchemy import desc
-from app.models.social import Follows
+from app.models.social import Follows, Likes
 
 def create_creator(db: Session, creator_create: dict) -> Creators:
     db_creator = Creators(**creator_create)
@@ -152,7 +153,7 @@ def get_creators(db: Session, limit: int = 50):
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            func.coalesce(func.count(Follows.creator_user_id), 0).label('followers_count')
+            func.coalesce(func.count(Follows.creator_user_id), 0).label('followers_count'),
         )
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(Follows, Follows.creator_user_id == Users.id)
@@ -168,22 +169,25 @@ def get_top_creators(db: Session, limit: int = 5):
     フォロワー数上位のクリエイターを取得
     """
     return (
-        db.query(
-            Users,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            func.count(Follows.creator_user_id).label('followers_count')
+            db.query(
+                Users,
+                Users.profile_name,
+                Profiles.username,
+                Profiles.avatar_url,
+                func.count(Follows.creator_user_id).label('followers_count'),
+                func.array_agg(Follows.follower_user_id).label("follower_ids"),
+                func.count(distinct(Likes.post_id)).label("likes_count"),
+            )
+            .join(Profiles, Users.id == Profiles.user_id)
+            .outerjoin(Follows, Users.id == Follows.creator_user_id)
+            .outerjoin(Posts, Posts.creator_user_id == Users.id)
+            .outerjoin(Likes, Likes.post_id == Posts.id)
+            .filter(Users.role == AccountType.CREATOR)
+            .group_by(Users.id, Users.profile_name, Profiles.username, Profiles.avatar_url)
+            .order_by(desc('followers_count'))
+            .limit(limit)
+            .all()
         )
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(Follows, Users.id == Follows.creator_user_id)
-        .filter(Users.role == AccountType.CREATOR)
-        .group_by(Users.id, Users.profile_name, Profiles.username, Profiles.avatar_url)
-        .order_by(desc('followers_count'))
-        .limit(limit)
-        .all()
-    )
-
 def get_new_creators(db: Session, limit: int = 5):
     """
     登録順最新のクリエイターを取得
