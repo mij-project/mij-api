@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .conversation_participants import ConversationParticipants
     from .sms_verifications import SMSVerifications
     from .banners import Banners
+    from .companies import Companies, CompanyUsers
 class Users(Base):
     __tablename__ = "users"
 
@@ -56,3 +57,4 @@ class Users(Base):
     participants: Mapped[List["ConversationParticipants"]] = relationship("ConversationParticipants", back_populates="user")
     sms_verifications: Mapped[List["SMSVerifications"]] = relationship("SMSVerifications", back_populates="user")
     banners: Mapped[List["Banners"]] = relationship("Banners", back_populates="creator")
+    company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")

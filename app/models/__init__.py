@@ -31,6 +31,8 @@ from .conversation_participants import ConversationParticipants
 from .sms_verifications import SMSVerifications
 from .admins import Admins
 from .banners import Banners
+from .companies import Companies, CompanyUsers
+
 __all__ = [
     "Users", "Profiles", "Creators", "Genres", "Categories", "Posts", "PostCategories",
     "MediaAssets", "MediaRenditions", "Plans", "Prices", "Subscriptions",
@@ -39,5 +41,5 @@ __all__ = [
     "AuditLogs", "Tags", "PostTags", "I18nLanguages", "I18nTexts",
     "CreatorType", "Gender", "MediaRenditionJobs", "Preregistrations",
     "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants",
-    "Admins", "PaymentEvents", "SMSVerifications", "Banners"
+    "Admins", "PaymentEvents", "SMSVerifications", "Banners", "Companies", "CompanyUsers"
 ]
