@@ -26,6 +26,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3003",
+    "http://localhost:3005",
 
     # 事前登録サイト
     "https://campaign.mijfans.jp",

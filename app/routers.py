@@ -17,7 +17,8 @@ from app.api.endpoints.admin import (
     identity as admin_identity,
     profile_images as admin_profile_images,
     banners as admin_banners,
-    post as admin_post
+    post as admin_post,
+    events as admin_events  
 )
 
 # Debug routes
@@ -71,4 +72,5 @@ api_router.include_router(admin_identity.router, prefix="/admin", tags=["Identit
 api_router.include_router(admin_profile_images.router, prefix="/admin/profile-images", tags=["Admin Profile Images"])
 api_router.include_router(admin_banners.router, prefix="/admin/banners", tags=["Admin Banners"])
 api_router.include_router(admin_post.router, prefix="/admin/posts", tags=["Admin Posts"])# Debug routes
+api_router.include_router(admin_events.router, prefix="/admin/events", tags=["Admin Events"])
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])
