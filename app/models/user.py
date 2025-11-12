@@ -23,7 +23,10 @@ if TYPE_CHECKING:
     from .conversation_participants import ConversationParticipants
     from .sms_verifications import SMSVerifications
     from .banners import Banners
-    from .companies import Companies, CompanyUsers
+    from .events import UserEvents
+
+
+
 class Users(Base):
     __tablename__ = "users"
 
@@ -39,6 +42,7 @@ class Users(Base):
     password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     role: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    offical_flg: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -57,4 +61,4 @@ class Users(Base):
     participants: Mapped[List["ConversationParticipants"]] = relationship("ConversationParticipants", back_populates="user")
     sms_verifications: Mapped[List["SMSVerifications"]] = relationship("SMSVerifications", back_populates="user")
     banners: Mapped[List["Banners"]] = relationship("Banners", back_populates="creator")
-    company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
+    user_events: Mapped[List["UserEvents"]] = relationship("UserEvents", back_populates="user")
