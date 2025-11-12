@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from app.db.base import get_db
 from sqlalchemy.orm import Session
 from app.constants.event_code import EventCode
+from app.crud.companies_crud import get_company_by_code, add_company_user
 from app.crud.email_verification_crud import (
     issue_verification_token, 
     remake_email_verification_token, 
@@ -18,6 +19,7 @@ from app.models.user import Users
 import hashlib
 from datetime import datetime, timezone
 from app.core.config import settings
+from app.constants.number import CompanyFeePercent
 from app.schemas.user import UserCreate
 from app.crud.user_crud import resend_email_verification
 import os
@@ -55,6 +57,10 @@ def verify(body: VerifyIn, db: AsyncSession = Depends(get_db)):
         # 事前登録イベントを挿入
         if result:
             _insert_user_event(db, rec.user_id, EventCode.PRE_REGISTRATION)
+
+        # 企業登録判定
+        if body.code:
+            _insert_company_user(db, body.code, rec.user_id)
 
         # 成功: ユーザーを検証済みに
         update_user_email_verified_at(db, rec.user_id, result)
@@ -111,3 +117,37 @@ def _insert_user_event(db: Session, user_id: str, event_code: str) -> bool:
     if event:
         return create_user_event(db, user_id, event.id)
     return False
+
+def _insert_company_user(db: Session, company_id: str, user_id: str) -> bool:
+    """企業にユーザーを追加
+
+    Args:
+        db (Session): データベースセッション
+        company_id (str): 企業ID
+        user_id (str): ユーザーID
+
+    Raises:
+        HTTPException: 企業が見つかりません
+
+    Returns:
+        bool: 企業にユーザーを追加
+    """
+    company = get_company_by_code(db, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="企業が見つかりません")
+
+    # 親会社と子会社の設定値を追加
+    targets = (
+        [
+            (company.parent_company_id, CompanyFeePercent.PARENT_DEFAULT),
+            (company.id, CompanyFeePercent.CHILD_DEFAULT),
+        ]
+        # 親会社がない場合は通常の設定値を追加
+        if company.parent_company_id
+        else [(company.id, CompanyFeePercent.DEFAULT)]
+    )
+
+    for company_id, fee_percent in targets:
+        add_company_user(db, company_id, user_id, fee_percent)
+
+    return True

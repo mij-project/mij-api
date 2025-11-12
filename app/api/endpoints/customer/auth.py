@@ -79,9 +79,12 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/x/login")
-def x_login(request: Request):
+def x_login(request: Request, company_code: str = None):
     """
     Xログイン画面へリダイレクト
+
+    Args:
+        company_code: 企業コード(任意)
     """
     try:
         x = OAuth1Session(X_API_KEY, X_API_SECRET, callback_uri=X_CALLBACK_URL)
@@ -97,6 +100,10 @@ def x_login(request: Request):
         # セッション退避
         request.session["oauth_token"] = tokens["oauth_token"]
         request.session["oauth_token_secret"] = tokens["oauth_token_secret"]
+
+        # 企業コードもセッションに保存
+        if company_code:
+            request.session["company_code"] = company_code
 
         # 認可URL（選択肢）
         auth_path = "authenticate"
@@ -207,6 +214,35 @@ def x_callback(
             # プロフィール情報も更新
             profile = update_profile_by_x(db, user.id, x_username)
             db.commit()
+
+        # セッションから企業コードを取得し、company_usersにレコードを追加
+        company_code = request.session.get("company_code")
+        if company_code:
+            from app.crud.companies_crud import add_company_user
+            from app.models.companies import Companies
+
+            # 企業コードから企業を検索
+            company = db.query(Companies).filter(
+                Companies.code == company_code,
+                Companies.deleted_at.is_(None)
+            ).first()
+
+            if company:
+                # company_usersにレコードを追加
+                try:
+                    add_company_user(
+                        db=db,
+                        company_id=company.id,
+                        user_id=user.id,
+                        company_fee_percent=3
+                    )
+                    db.commit()
+                except ValueError:
+                    # 既に登録済みの場合はスキップ
+                    pass
+
+            # セッションから企業コードを削除
+            del request.session["company_code"]
 
         # JWT & Cookie設定（通常ログインと同じ処理）
         print(f"DEBUG: user type = {type(user)}, user = {user}")
