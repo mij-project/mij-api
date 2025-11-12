@@ -15,6 +15,7 @@ from app.schemas.events import (
     EventListResponse,
     EventParticipantListResponse
 )
+from app.constants.enums import EventStatus
 
 router = APIRouter()
 
@@ -50,7 +51,7 @@ def get_events(
     total_pages = math.ceil(total / limit) if total > 0 else 0
 
     # status_labelを追加
-    status_labels = {0: "無効", 1: "有効", 2: "下書き"}
+    status_labels = {EventStatus.INACTIVE: "無効", EventStatus.ACTIVE: "有効", EventStatus.DRAFT: "下書き"}
     for event in events:
         event['status_label'] = status_labels.get(event['status'], "不明")
 
@@ -82,7 +83,7 @@ def get_event(
     # 参加者数を取得
     _, participant_count = events_crud.get_event_participants(db, event_id, page=1, limit=1)
 
-    status_labels = {0: "無効", 1: "有効", 2: "下書き"}
+    status_labels = {EventStatus.INACTIVE: "無効", EventStatus.ACTIVE: "有効", EventStatus.DRAFT: "下書き"}
 
     return EventDetail(
         id=str(event.id),
@@ -121,7 +122,7 @@ def create_event(
         db.commit()
         db.refresh(event)
 
-        status_labels = {0: "無効", 1: "有効", 2: "下書き"}
+        status_labels = {EventStatus.INACTIVE: "無効", EventStatus.ACTIVE: "有効", EventStatus.DRAFT: "下書き"}
 
         return EventDetail(
             id=str(event.id),
@@ -174,7 +175,7 @@ def update_event(
         # 参加者数を取得
         _, participant_count = events_crud.get_event_participants(db, event_id, page=1, limit=1)
 
-        status_labels = {0: "無効", 1: "有効", 2: "下書き"}
+        status_labels = {EventStatus.INACTIVE: "無効", EventStatus.ACTIVE: "有効", EventStatus.DRAFT: "下書き"}
 
         return EventDetail(
             id=str(event.id),
