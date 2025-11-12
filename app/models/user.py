@@ -24,9 +24,7 @@ if TYPE_CHECKING:
     from .sms_verifications import SMSVerifications
     from .banners import Banners
     from .events import UserEvents
-
-
-
+    from .companies import Companies, CompanyUsers
 class Users(Base):
     __tablename__ = "users"
 
@@ -62,3 +60,4 @@ class Users(Base):
     sms_verifications: Mapped[List["SMSVerifications"]] = relationship("SMSVerifications", back_populates="user")
     banners: Mapped[List["Banners"]] = relationship("Banners", back_populates="creator")
     user_events: Mapped[List["UserEvents"]] = relationship("UserEvents", back_populates="user")
+    company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
