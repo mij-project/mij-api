@@ -19,10 +19,12 @@ class Companies(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     code: Mapped[str] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_company_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
+    parent: Mapped[Optional["Companies"]] = relationship("Companies", remote_side=[id], back_populates="children")
     company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="company")
 
 class CompanyUsers(Base):
@@ -32,7 +34,7 @@ class CompanyUsers(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    revenue_share_percentage: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    company_fee_percent: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
