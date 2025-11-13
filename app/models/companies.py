@@ -3,7 +3,7 @@ from typing import Optional, TYPE_CHECKING, List
 from uuid import UUID
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, SmallInteger, BigInteger, func
+from sqlalchemy import ForeignKey, Text, SmallInteger, BigInteger, func, Boolean
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
@@ -47,6 +47,7 @@ class CompanyUsers(Base):
     company_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     company_fee_percent: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    is_referrer: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)

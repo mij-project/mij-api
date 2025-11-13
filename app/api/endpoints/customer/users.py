@@ -18,6 +18,7 @@ from app.deps.auth import get_current_user
 from app.crud.profile_crud import create_profile
 from app.schemas.user import ProfilePostResponse, ProfilePlanResponse, ProfilePurchaseResponse, ProfileGachaResponse
 from app.models.posts import Posts
+from app.api.commons.utils import generate_email_verification_url
 import os
 from app.crud.email_verification_crud import issue_verification_token
 from app.services.email.send_email import send_email_verification
@@ -207,6 +208,7 @@ def get_user_profile_by_username_endpoint(
         return UserProfileResponse(
             id=user.id,
             profile_name=user.profile_name,
+            offical_flg=user.offical_flg,
             username=profile.username if profile else None,
             avatar_url=f"{BASE_URL}/{profile.avatar_url}" if profile and profile.avatar_url else None,
             cover_url=f"{BASE_URL}/{profile.cover_url}" if profile and profile.cover_url else None,
@@ -254,8 +256,8 @@ def _send_email_verification(db: Session, user: Users, background: BackgroundTas
     """
     raw, expires_at = issue_verification_token(db, user.id)
     if company_code:
-        verify_url = f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={raw}&code={company_code}"
+        verify_url = generate_email_verification_url(raw, company_code)
     else:
-        verify_url = f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={raw}"
-    background.add_task(send_email_verification, user.email, verify_url, user.display_name if hasattr(user, "display_name") else None)
+        verify_url = generate_email_verification_url(raw)
+    background.add_task(send_email_verification, user.email, verify_url, user.profile_name if hasattr(user, "profile_name") else None)
 

@@ -32,7 +32,8 @@ class UserBasicInfo(BaseModel):
     email: str
     username: Optional[str] = None
     profile_name: Optional[str] = None
-    role: Optional[str] = None
+    avatar_url: Optional[str] = None
+    role: Optional[int] = None
 
 
 class CompanyDetail(BaseModel):
@@ -63,12 +64,15 @@ class CompanyBasicInfo(BaseModel):
     id: str
     name: str
     code: str
+    fee_percent: Optional[int] = None
+    exists: Optional[bool] = None
 
 
 class CompanyUserCreateRequest(BaseModel):
     """企業ユーザー追加リクエスト"""
     user_id: UUID = Field(..., description="ユーザーID")
     company_fee_percent: int = Field(default=3, ge=0, le=100, description="企業への支払い率（0-100%）")
+    is_referrer: bool = Field(default=True, description="紹介者フラグ")
 
 
 class CompanyUserUpdateRequest(BaseModel):
@@ -83,6 +87,11 @@ class CompanyUserDetail(BaseModel):
     user_id: str
     user: UserBasicInfo
     company_fee_percent: int
+    is_referrer: bool
+    referrer_company_id: Optional[str] = None
+    referrer_company: Optional[CompanyBasicInfo] = None
+    parent_company_id: Optional[str] = None
+    parent_company: Optional[CompanyBasicInfo] = None
     created_at: datetime
     updated_at: datetime
 

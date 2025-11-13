@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional, Dict, Any, Tuple
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc, func
+from app.models.profiles import Profiles
 from datetime import datetime
 from uuid import UUID
 
@@ -100,13 +101,16 @@ def get_companies_paginated(
     """
     skip = (page - 1) * limit
 
-    # サブクエリ: 企業ごとのユーザー数をカウント
+    # サブクエリ: 企業ごとのユーザー数をカウント（is_referrer=Trueのみ）
     user_count_subquery = (
         db.query(
             CompanyUsers.company_id,
             func.count(CompanyUsers.id).label("user_count")
         )
-        .filter(CompanyUsers.deleted_at.is_(None))
+        .filter(
+            CompanyUsers.deleted_at.is_(None),
+            CompanyUsers.is_referrer.is_(True)
+        )
         .group_by(CompanyUsers.company_id)
         .subquery()
     )
@@ -214,10 +218,11 @@ def get_company_detail(
     if not company:
         return None
 
-    # ユーザー数をカウント
+    # ユーザー数をカウント（is_referrer=Trueのみ）
     user_count = db.query(func.count(CompanyUsers.id)).filter(
         CompanyUsers.company_id == company_id,
-        CompanyUsers.deleted_at.is_(None)
+        CompanyUsers.deleted_at.is_(None),
+        CompanyUsers.is_referrer.is_(True)
     ).scalar() or 0
 
     # 子企業数をカウント
@@ -346,8 +351,9 @@ def get_company_users(
     skip = (page - 1) * limit
 
     query = (
-        db.query(CompanyUsers, Users)
+        db.query(CompanyUsers, Users, Profiles)
         .join(Users, CompanyUsers.user_id == Users.id)
+        .outerjoin(Profiles, Users.id == Profiles.user_id)
         .filter(
             CompanyUsers.company_id == company_id,
             CompanyUsers.deleted_at.is_(None)
@@ -362,22 +368,112 @@ def get_company_users(
     for row in results:
         company_user = row[0]
         user = row[1]
+        profile = row[2]
 
-        users.append({
+        # 関連企業の情報を取得
+        # - is_referrer = False の場合: 2次代理店からの紹介なので、2次代理店の情報を取得
+        # - is_referrer = True の場合: 1次代理店の情報を取得（2次代理店の画面で必要）
+        referrer_company_id = None
+        referrer_company = None
+        parent_company_id = None
+        parent_company = None
+
+        # 同じuser_idで別の企業との紐付けを検索
+        other_records = db.query(CompanyUsers).filter(
+            CompanyUsers.user_id == company_user.user_id,
+            CompanyUsers.company_id != company_user.company_id,
+            CompanyUsers.deleted_at.is_(None)
+        ).all()
+
+        for other_record in other_records:
+            other_company = db.query(Companies).filter(
+                Companies.id == other_record.company_id
+            ).first()
+
+            if not other_company:
+                continue
+
+            company_info = {
+                "id": str(other_company.id),
+                "name": other_company.name,
+                "code": str(other_company.code),
+                "fee_percent": other_record.company_fee_percent
+            }
+
+            # is_referrer = True のレコードは紹介元（2次代理店）
+            if other_record.is_referrer is True:
+                referrer_company_id = str(other_record.company_id)
+                referrer_company = company_info
+            # is_referrer = False のレコードは親企業（1次代理店）
+            elif other_record.is_referrer is False:
+                parent_company_id = str(other_record.company_id)
+                parent_company = company_info
+
+        # 現在の企業情報を取得（キャッシュのために一度だけ取得）
+        if not hasattr(get_company_users, '_current_company_cache'):
+            get_company_users._current_company_cache = {}
+
+        if company_id not in get_company_users._current_company_cache:
+            current_company = db.query(Companies).filter(
+                Companies.id == company_id
+            ).first()
+            get_company_users._current_company_cache[company_id] = current_company
+        else:
+            current_company = get_company_users._current_company_cache[company_id]
+
+        # 2次企業の場合、親企業情報が必要
+        # - 自社紹介クリエイター（is_referrer=True）: parent_companyに1次企業の情報を設定
+        # - 1次企業からの2次代理店紹介（is_referrer=False）: 既にreferrer_companyに2次企業情報がある
+        if current_company and current_company.parent_company_id:
+            if company_user.is_referrer and not parent_company_id:
+                # 2次企業の自社紹介: 親企業（1次企業）の情報を取得
+                parent_comp = db.query(Companies).filter(
+                    Companies.id == current_company.parent_company_id
+                ).first()
+                if parent_comp:
+                    # 親企業とのcompany_usersレコードを検索して支払い率を取得
+                    parent_cu = db.query(CompanyUsers).filter(
+                        CompanyUsers.user_id == company_user.user_id,
+                        CompanyUsers.company_id == parent_comp.id,
+                        CompanyUsers.deleted_at.is_(None)
+                    ).first()
+
+                    # parent_cuが存在しない場合、このクリエイターは1次企業に登録されていない
+                    # デフォルト値として0を使用し、フロントエンドで新規作成を促す
+                    parent_company_id = str(parent_comp.id)
+                    parent_company = {
+                        "id": str(parent_comp.id),
+                        "name": parent_comp.name,
+                        "code": str(parent_comp.code),
+                        "fee_percent": parent_cu.company_fee_percent if parent_cu else 0,
+                        "exists": parent_cu is not None  # レコードが存在するかのフラグ
+                    }
+
+        # 1次企業の場合で、is_referrer=Falseのクリエイター（2次代理店からの紹介）
+        # referrer_companyには既に2次企業の情報が入っているはず
+        user_data = {
             "id": str(company_user.id),
             "company_id": str(company_user.company_id),
             "user_id": str(company_user.user_id),
             "user": {
                 "id": str(user.id),
                 "email": user.email,
-                "username": user.username,
+                "username": profile.username if profile else None,
                 "profile_name": user.profile_name,
+                "avatar_url": profile.avatar_url if profile else None,
                 "role": user.role
             },
             "company_fee_percent": company_user.company_fee_percent,
+            "is_referrer": company_user.is_referrer if company_user.is_referrer is not None else False,
+            "referrer_company_id": referrer_company_id,
+            "referrer_company": referrer_company,
+            "parent_company_id": parent_company_id,
+            "parent_company": parent_company,
             "created_at": company_user.created_at,
             "updated_at": company_user.updated_at
-        })
+        }
+
+        users.append(user_data)
 
     return users, total
 
@@ -386,7 +482,8 @@ def add_company_user(
     db: Session,
     company_id: UUID,
     user_id: UUID,
-    company_fee_percent: int = 3
+    company_fee_percent: int = 3,
+    is_referrer: bool = False
 ) -> CompanyUsers:
     """
     企業にユーザー（クリエイター）を追加
@@ -396,6 +493,7 @@ def add_company_user(
         company_id: 企業ID
         user_id: ユーザーID
         company_fee_percent: 企業への支払い率（デフォルト3%）
+        is_referrer: 紹介者フラグ（デフォルトFalse）
 
     Returns:
         CompanyUsers: 作成されたCompanyUser
@@ -414,7 +512,8 @@ def add_company_user(
     company_user = CompanyUsers(
         company_id=company_id,
         user_id=user_id,
-        company_fee_percent=company_fee_percent
+        company_fee_percent=company_fee_percent,
+        is_referrer=is_referrer
     )
     db.add(company_user)
     db.flush()

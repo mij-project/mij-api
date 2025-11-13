@@ -237,27 +237,33 @@ def get_company_users(
     - **page**: ページ番号
     - **limit**: 1ページあたりの件数
     """
-    # 企業が存在するか確認
-    company = companies_crud.get_company_by_id(db, company_id)
-    if not company:
-        raise HTTPException(status_code=404, detail="企業が見つかりません")
+    try:
+        # 企業が存在するか確認
+        company = companies_crud.get_company_by_id(db, company_id)
+        if not company:
+            raise HTTPException(status_code=404, detail="企業が見つかりません")
 
-    users, total = companies_crud.get_company_users(
-        db=db,
-        company_id=company_id,
-        page=page,
-        limit=limit
-    )
+        users, total = companies_crud.get_company_users(
+            db=db,
+            company_id=company_id,
+            page=page,
+            limit=limit
+        )
 
-    total_pages = math.ceil(total / limit) if total > 0 else 0
+        total_pages = math.ceil(total / limit) if total > 0 else 0
 
-    return CompanyUserListResponse(
-        items=[CompanyUserDetail(**user) for user in users],
-        total=total,
-        page=page,
-        limit=limit,
-        total_pages=total_pages
-    )
+
+        return CompanyUserListResponse(
+            items=[CompanyUserDetail(**user) for user in users],
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=total_pages
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"クリエイター追加に失敗しました: {str(e)}")
+
 
 
 @router.post("/{company_id}/users", response_model=CompanyUserDetail)
@@ -284,7 +290,8 @@ def add_company_user(
             db=db,
             company_id=company_id,
             user_id=request.user_id,
-            company_fee_percent=request.company_fee_percent
+            company_fee_percent=request.company_fee_percent,
+            is_referrer=request.is_referrer
         )
         db.commit()
         db.refresh(company_user)
