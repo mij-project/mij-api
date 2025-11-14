@@ -75,7 +75,7 @@ async def get_unread_count(
     """
     未読通知数を取得
     """
-    admin_count, users_count, payments_count = get_unread_count_crud(db, current_user.id)
+    admin_count, users_count, payments_count = get_unread_count_crud(db, current_user)
     return GetUnreadCountResponse(
       admin=admin_count,
       users=users_count,

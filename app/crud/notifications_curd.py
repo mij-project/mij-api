@@ -6,6 +6,7 @@ from sqlalchemy import asc, desc, func, update, cast as sa_cast
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
+from app.models import Users
 from app.models.notifications import Notifications
 from app.schemas.notification import NotificationCreateRequest, NotificationType
 
@@ -228,13 +229,12 @@ def __mark_notification_as_read_payments(db: Session, notification_id: UUID, use
       db.rollback()
       return None 
 
-def get_unread_count(db: Session, user_id: UUID) -> int:
+def get_unread_count(db: Session, user: Users) -> int:
   """
   未読通知数を取得
   """
   try:
-    from icecream import ic
-    user_str = str(user_id)
+    user_str = str(user.id)
 
     cond_has_user = __has_user_expr(user_str)
 
@@ -242,12 +242,29 @@ def get_unread_count(db: Session, user_id: UUID) -> int:
         db.query(func.count(Notifications.id))
         .filter(
           Notifications.type == NotificationType.ADMIN,
+          Notifications.created_at >= user.created_at,
           ~cond_has_user,
         )
         .scalar()
     )
-    users_count = db.query(Notifications).filter(Notifications.type == NotificationType.USERS, Notifications.user_id == user_id, Notifications.is_read == False).count()
-    payments_count = db.query(Notifications).filter(Notifications.type == NotificationType.PAYMENTS, Notifications.user_id == user_id, Notifications.is_read == False).count()
+    users_count = (
+      db.query(Notifications)
+      .filter(
+        Notifications.type == NotificationType.USERS, 
+        Notifications.user_id == user.id, 
+        Notifications.created_at >= user.created_at, 
+        Notifications.is_read == False)
+        .count()
+      )
+    payments_count = (
+      db.query(Notifications)
+      .filter(
+        Notifications.type == NotificationType.PAYMENTS, 
+        Notifications.user_id == user.id, 
+        Notifications.created_at >= user.created_at, 
+        Notifications.is_read == False)
+        .count()
+      )
     return admin_count, users_count, payments_count
   except Exception as e:
     print(f"Get unread count error: {e}")
