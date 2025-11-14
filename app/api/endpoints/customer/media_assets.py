@@ -1,25 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.services.s3.presign import presign_put_public, presign_put
+from app.services.s3.presign import presign_put_public, presign_put, get_bucket_name, Resource
 from app.schemas.post_media import (
     PostMediaImagePresignRequest,
     PostMediaVideoPresignRequest,
     ImageKind,
     PostMediaImagePresignResponse,
     PostMediaVideoPresignResponse,
-    VideoKind
+    VideoKind,
+    UpdateMediaImagePresignRequest,
+    UpdateMediaVideoPresignRequest,
+    UpdateImagesPresignRequest,
+    UpdateImagesPresignResponse,
 )
 from app.deps.auth import get_current_user
 from app.db.base import get_db
 from app.services.s3.keygen import post_media_image_key, post_media_video_key
-from app.schemas.commons import PresignResponseItem, UploadItem
-from typing import Dict, List, Union
-from app.services.s3.client import delete_object, delete_hls_directory
-from app.crud.media_assets_crud import create_media_asset, get_media_assets_by_post_id, update_media_asset
+from app.schemas.commons import PresignResponseItem
+from typing import Dict, List, Union, Tuple, Set
+from app.services.s3.client import delete_ffmpeg_directory, delete_hls_directory_full
+from app.services.s3.presign import delete_object
+from app.crud.media_assets_crud import (
+    create_media_asset,
+    get_media_assets_by_post_id_and_kind,
+    delete_media_asset,
+    get_media_asset_by_id,
+)
+from app.crud.media_rendition_jobs_crud import delete_media_rendition_job
+from app.crud.post_crud import get_post_by_id
 from app.models.posts import Posts
-from app.models.media_assets import MediaAssets
 from app.constants.enums import MediaAssetKind, MediaAssetOrientation, MediaAssetStatus, PostStatus
-from app.services.s3.client import MEDIA_BUCKET_NAME
+from app.constants.enums import AuthenticatedFlag
 
 router = APIRouter()
 
@@ -38,6 +49,193 @@ ORIENTATION_MAPPING = {
     "landscape": MediaAssetOrientation.LANDSCAPE,
     "square": MediaAssetOrientation.SQUARE,
 }
+
+# 許可されたkind
+ALLOWED_IMAGE_KINDS = {"ogp", "thumbnail", "images"}
+ALLOWED_VIDEO_KINDS = {"main", "sample"}
+
+
+# ==================== ヘルパー関数 ====================
+
+def validate_kinds(files: List, allowed_kinds: Set[str]) -> None:
+    """
+    ファイルのkindをバリデート
+    
+    Args:
+        files: ファイルリスト
+        allowed_kinds: 許可されたkindのセット
+        
+    Raises:
+        HTTPException: バリデーションエラー
+    """
+    seen = set()
+    for f in files:
+        if f.kind not in allowed_kinds:
+            raise HTTPException(400, f"unsupported kind: {f.kind}")
+        if f.kind != "images" and f.kind in seen:
+            raise HTTPException(400, f"duplicated kind: {f.kind}")
+        seen.add(f.kind)
+
+
+def create_presign_response_item(response: dict) -> PresignResponseItem:
+    """PresignResponseItemを作成"""
+    return PresignResponseItem(
+        key=response["key"],
+        upload_url=response["upload_url"],
+        expires_in=response["expires_in"],
+        required_headers=response["required_headers"]
+    )
+
+
+def create_media_asset_data(
+    post_id: str,
+    kind: ImageKind | VideoKind,
+    storage_key: str,
+    orientation: str,
+    content_type: str,
+    status: MediaAssetStatus = MediaAssetStatus.PENDING,
+    sample_type: str | None = None,
+    sample_start_time: float | None = None,
+    sample_end_time: float | None = None,
+) -> dict:
+    """メディアアセットデータを作成"""
+    data = {
+        "post_id": post_id,
+        "kind": KIND_MAPPING[kind],
+        "storage_key": storage_key,
+        "orientation": ORIENTATION_MAPPING[orientation],
+        "mime_type": content_type,
+        "status": status,
+        "bytes": 0,
+    }
+
+    # サンプル動画のメタデータを追加（kind=sampleの場合のみ）
+    if kind == "sample" and sample_type:
+        data["sample_type"] = sample_type
+        if sample_type == "cut_out":
+            data["sample_start_time"] = sample_start_time
+            data["sample_end_time"] = sample_end_time
+
+    return data
+
+
+def generate_image_presign(
+    kind: ImageKind,
+    user_id: str,
+    post_id: str,
+    ext: str,
+    content_type: str
+) -> dict:
+    """
+    画像のpresigned URLを生成
+    
+    Returns:
+        dict: presigned URL情報
+    """
+    key = post_media_image_key(kind, user_id, post_id, ext)
+    if kind == "images":
+        return presign_put("ingest", key, content_type)
+    else:
+        return presign_put_public("public", key, content_type)
+
+
+def generate_video_presign(
+    user_id: str,
+    post_id: str,
+    ext: str,
+    kind: VideoKind,
+    content_type: str
+) -> dict:
+    """
+    動画のpresigned URLを生成
+    
+    Returns:
+        dict: presigned URL情報
+    """
+    key = post_media_video_key(user_id, post_id, ext, kind)
+    return presign_put("ingest", key, content_type)
+
+
+def get_image_resource_and_approved_flag(kind: str, authenticated_flg: AuthenticatedFlag) -> Resource:
+    """
+    画像のkindとpostステータスからリソース名とapproved_flagを取得
+    
+    Args:
+        kind (str): 画像の種類（"images", "thumbnail", "ogp"）
+        post_status (PostStatus): 投稿のステータス
+
+    Returns:
+        Tuple[Resource, bool]: (リソース名, approved_flag)
+    """
+    if kind == "images":
+        if authenticated_flg == AuthenticatedFlag.AUTHENTICATED:
+            return "media"
+        else:
+            return "ingest"
+    elif kind in ("thumbnail", "ogp"):
+        return "public"
+    else:
+        raise ValueError(f"Unknown image kind: {kind}")
+
+
+def get_video_resource_and_approved_flag(uploaded_flag: int) -> Resource:
+    """
+    動画のアップロードフラグからリソース名とapproved_flagを取得
+    
+    Args:
+        uploaded_flag (int): アップロードフラグ
+        
+    Returns:
+        Tuple[Resource, bool]: (リソース名, approved_flag)
+    """
+    if uploaded_flag == AuthenticatedFlag.AUTHENTICATED:
+        return "media"
+    else:
+        return "ingest"
+
+
+def delete_existing_media_file(
+    storage_key: str,
+    resource: Resource,
+    authenticated_flg: int,
+    is_video: bool = False
+) -> None:
+    """
+    既存のメディアファイルをS3から削除
+
+    Args:
+        storage_key (str): ストレージキー
+        resource (Resource): リソース名
+        authenticated_flg (int): 認証フラグ
+        is_video (bool): 動画かどうか
+    """
+    if not storage_key:
+        return
+
+    bucket = get_bucket_name(resource)  
+
+    try:
+        if authenticated_flg == AuthenticatedFlag.AUTHENTICATED:
+            if is_video:
+                # 動画の場合、hlsディレクトリを削除
+                if '/hls/' in storage_key:
+                    delete_hls_directory_full(bucket, storage_key)
+                else:
+                    delete_object(resource, storage_key)
+            else:
+                # 画像の場合、ffmpegディレクトリを削除
+                if '/ffmpeg/' in storage_key:
+                    delete_ffmpeg_directory(bucket, storage_key)
+                else:
+                    delete_object(resource, storage_key)
+        else:
+            # 承認されていない場合は通常削除
+            delete_object(resource, storage_key)
+    except Exception as e:
+        print(f"Failed to delete old file from S3: {e}")
+
+
+# ==================== エンドポイント ====================
 
 @router.post("/presign-image-upload")
 async def presign_post_media_image(
@@ -59,56 +257,30 @@ async def presign_post_media_image(
         PostMediaImagePresignResponse: アップロードURL
     """
     try:
-        allowed_kinds =  {"ogp","thumbnail","images"}
-
-        seen = set()
-        for f in request.files:
-            if f.kind not in allowed_kinds:
-                raise HTTPException(400, f"unsupported kind: {f.kind}")
-            if f.kind != "images" and f.kind in seen:
-                raise HTTPException(400, f"duplicated kind: {f.kind}")
-            seen.add(f.kind)
+        validate_kinds(request.files, ALLOWED_IMAGE_KINDS)
 
         uploads: Dict[ImageKind, Union[PresignResponseItem, List[PresignResponseItem]]] = {}
-        updated_posts = set()  # 更新された投稿IDを保存
+        updated_posts: Set[str] = set()
 
         for f in request.files:
-            key = post_media_image_key(f.kind, str(user.id), str(f.post_id), f.ext)
-
-            if f.kind == "images":
-                response = presign_put("ingest", key, f.content_type)
-            else:
-                response = presign_put_public("public", key, f.content_type)
+            response = generate_image_presign(
+                f.kind, str(user.id), str(f.post_id), f.ext, f.content_type
+            )
+            key = response["key"]
 
             if f.kind == "images":
                 if f.kind not in uploads:
                     uploads[f.kind] = []
-                uploads[f.kind].append(PresignResponseItem(
-                    key=response["key"],
-                    upload_url=response["upload_url"],
-                    expires_in=response["expires_in"],
-                    required_headers=response["required_headers"]
-                ))
+                uploads[f.kind].append(create_presign_response_item(response))
             else:
-                uploads[f.kind] = PresignResponseItem(
-                    key=response["key"],
-                    upload_url=response["upload_url"],
-                    expires_in=response["expires_in"],
-                    required_headers=response["required_headers"]
-                )
+                uploads[f.kind] = create_presign_response_item(response)
             
             # メディアアセット作成
-            media_asset_data = {
-                "post_id": f.post_id,
-                "kind": KIND_MAPPING[f.kind],
-                "storage_key": key,
-                "orientation": ORIENTATION_MAPPING[f.orientation],
-                "mime_type": f.content_type,
-                "status": MediaAssetStatus.PENDING,
-                "bytes": 0,
-            }
-            media_asset = create_media_asset(db, media_asset_data)
-            updated_posts.add(f.post_id)
+            media_asset_data = create_media_asset_data(
+                str(f.post_id), f.kind, key, f.orientation, f.content_type
+            )
+            create_media_asset(db, media_asset_data)
+            updated_posts.add(str(f.post_id))
 
         db.commit()
         
@@ -117,11 +289,12 @@ async def presign_post_media_image(
             post = db.query(Posts).filter(Posts.id == post_id).first()
             if post:
                 db.refresh(post)
-                db.refresh(media_asset)
 
         return PostMediaImagePresignResponse(uploads=uploads)
+    except HTTPException:
+        raise
     except Exception as e:
-        print("アップロードURL生成エラーが発生しました", e)
+        print(f"アップロードURL生成エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -145,59 +318,46 @@ async def presign_post_media_video(
         PostMediaVideoPresignResponse: アップロードURL
     """
     try:
-        allowed_kinds = {"main","sample"}
+        validate_kinds(request.files, ALLOWED_VIDEO_KINDS)
 
-        seen = set()
-        for f in request.files:
-            if f.kind not in allowed_kinds:
-                raise HTTPException(400, f"unsupported kind: {f.kind}")
-            if f.kind != "images" and f.kind in seen:
-                raise HTTPException(400, f"duplicated kind: {f.kind}")
-            seen.add(f.kind)
-
-        uploads: Dict[VideoKind, UploadItem] = {}
+        uploads: Dict[VideoKind, PresignResponseItem] = {}
 
         for f in request.files:
-            key = post_media_video_key(str(user.id), str(f.post_id), f.ext, f.kind)
-
-            response = presign_put("ingest", key, f.content_type)
-
-            uploads[f.kind] = PresignResponseItem(
-                key=response["key"],
-                upload_url=response["upload_url"],
-                expires_in=response["expires_in"],
-                required_headers=response["required_headers"]
+            response = generate_video_presign(
+                str(user.id), str(f.post_id), f.ext, f.kind, f.content_type
             )
-            media_asset_data = {
-                "post_id": f.post_id,
-                "kind": KIND_MAPPING[f.kind],
-                "orientation": ORIENTATION_MAPPING[f.orientation],
-                "storage_key": key,
-                "mime_type": f.content_type,
-                "bytes": 0,
-                "status": MediaAssetStatus.PENDING,
-            }
-            media_asset = create_media_asset(db, media_asset_data)
+            key = response["key"]
+            
+            uploads[f.kind] = create_presign_response_item(response)
+
+            media_asset_data = create_media_asset_data(
+                str(f.post_id), f.kind, key, f.orientation, f.content_type,
+                sample_type=f.sample_type,
+                sample_start_time=f.sample_start_time,
+                sample_end_time=f.sample_end_time
+            )
+            create_media_asset(db, media_asset_data)
 
         db.commit()
-        db.refresh(media_asset)
 
         return PostMediaVideoPresignResponse(uploads=uploads)
+    except HTTPException:
+        raise
     except Exception as e:
-        print("アップロードURL生成エラーが発生しました", e)
+        print(f"アップロードURL生成エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/presign-image-upload")
-async def presign_post_media_image(
-    request: PostMediaImagePresignRequest,
+async def presign_update_image_upload(
+    request: UpdateMediaImagePresignRequest,
     user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """画像のアップロードURLを更新
 
     Args:
-        request (PostMediaImagePresignRequest): リクエストデータ
+        request (UpdateMediaImagePresignRequest): リクエストデータ
         user (Users): ユーザー
         db (Session): データベースセッション
 
@@ -208,111 +368,73 @@ async def presign_post_media_image(
         PostMediaImagePresignResponse: アップロードURL
     """
     try:
-        allowed_kinds = {"ogp","thumbnail","images"}
+        post = get_post_by_id(db, request.post_id)
+        if not post:
+            raise HTTPException(404, f"post not found: {request.post_id}")
 
-        seen = set()
+        validate_kinds(request.files, ALLOWED_IMAGE_KINDS)
+
         uploads: Dict[ImageKind, Union[PresignResponseItem, List[PresignResponseItem]]] = {}
+        
         for f in request.files:
-            if f.kind not in allowed_kinds:
-                raise HTTPException(400, f"unsupported kind: {f.kind}")
-            if f.kind != "images" and f.kind in seen:
-                raise HTTPException(400, f"duplicated kind: {f.kind}")
-            seen.add(f.kind)
-
-            # postsテーブルからステータスを取得してバケットを判断
-            post = db.query(Posts).filter(Posts.id == f.post_id).first()
-            if not post:
-                raise HTTPException(404, f"post not found: {f.post_id}")
-
-            #　post_idと同じkindの既存メディアアセットをすべて取得
-            existing_assets = db.query(MediaAssets).filter(
-                MediaAssets.post_id == f.post_id,
-                MediaAssets.kind == KIND_MAPPING[f.kind]
-            ).all()
+            # 既存メディアアセットを取得
+            existing_assets = get_media_assets_by_post_id_and_kind(
+                db, str(request.post_id), KIND_MAPPING[f.kind]
+            )
 
             if not existing_assets:
-                raise HTTPException(404, f"media assets not found: {f.post_id}, {f.kind}")
-
-            # 新しいstorage_keyを生成
-            new_key = post_media_image_key(f.kind, str(user.id), str(f.post_id), f.ext)
-
-            #　既存のすべてのファイルをs3から削除
-            # imagesは常にingestバケット、その他はpostsのstatusで判断
-            if f.kind == "images":
-                bucket = "ingest"
-            else:
-                # 承認済みの場合はMEDIA_BUCKET_NAME、それ以外はpublic
-                bucket = MEDIA_BUCKET_NAME if post.status == PostStatus.APPROVED else "public"
-
-            for old_asset in existing_assets:
-                if old_asset.storage_key:
-                    try:
-                        # 変換済みファイル（.m3u8）の場合、関連ファイルも削除
-                        if old_asset.storage_key.endswith('.m3u8'):
-                            # HLSの関連ファイル（.tsセグメント、プレイリストなど）をディレクトリごと削除
-                            delete_hls_directory(bucket, old_asset.storage_key)
-                        else:
-                            # 通常のファイル（.mp4など）を削除
-                            delete_object(bucket, old_asset.storage_key)
-                        print(f"Deleted old file: {old_asset.storage_key}")
-                    except Exception as e:
-                        print(f"Failed to delete old file from S3: {e}")
-                        # 削除に失敗しても処理を継続
-
-                # 古いメディアアセットをDBから削除
-                db.delete(old_asset)
-
-            # 新しいファイル用のpresigned URLを生成
-            if f.kind == "images":
-                response = presign_put("ingest", new_key, f.content_type)
-            else:
-                response = presign_put_public("public", new_key, f.content_type)
-
-            if f.kind == "images":
-                uploads[f.kind] = PresignResponseItem(
-                    key=response["key"],
-                    upload_url=response["upload_url"],
-                    expires_in=response["expires_in"],
-                    required_headers=response["required_headers"]
-                )
-            else:
-                uploads[f.kind] = PresignResponseItem(
-                    key=response["key"],
-                    upload_url=response["upload_url"],
-                    expires_in=response["expires_in"],
-                    required_headers=response["required_headers"]
+                raise HTTPException(
+                    404, f"media assets not found: {request.post_id}, {f.kind}"
                 )
 
-            # 新しいメディアアセットを作成（古いものは削除済み）
-            media_asset_data = {
-                "post_id": f.post_id,
-                "kind": KIND_MAPPING[f.kind],
-                "storage_key": new_key,
-                "orientation": ORIENTATION_MAPPING[f.orientation],
-                "mime_type": f.content_type,
-                "status": MediaAssetStatus.RESUBMIT,
-                "bytes": 0,
-            }
-            media_asset = create_media_asset(db, media_asset_data)
-            db.flush()
+            # 新しいstorage_keyとpresigned URLを生成
+            response = generate_image_presign(
+                f.kind, str(user.id), str(request.post_id), f.ext, f.content_type
+            )
+            new_key = response["key"]
+
+            # リソースと承認フラグを決定
+            resource = get_image_resource_and_approved_flag(
+                f.kind, post['authenticated_flg']
+            )
+
+            # 既存ファイルをS3から削除
+            delete_existing_media_file(
+                existing_assets.storage_key, resource, post['authenticated_flg'], is_video=False
+            )
+
+            # 古いメディアアセットをDBから削除
+            delete_media_asset(db, existing_assets.id)
+
+            # レスポンスに追加
+            uploads[f.kind] = create_presign_response_item(response)
+
+            # 新しいメディアアセットを作成
+            media_asset_data = create_media_asset_data(
+                str(request.post_id), f.kind, new_key, f.orientation, 
+                f.content_type, MediaAssetStatus.RESUBMIT
+            )
+            create_media_asset(db, media_asset_data)
+            db.commit()
 
         return PostMediaImagePresignResponse(uploads=uploads)
+    except HTTPException:
+        raise
     except Exception as e:
-        print("アップロードURL更新エラーが発生しました", e)
+        print(f"アップロードURL更新エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.put("/presign-video-upload")
-async def presign_post_media_video(
-    request: PostMediaVideoPresignRequest,
+async def presign_update_video_upload(
+    request: UpdateMediaVideoPresignRequest,
     user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """動画のアップロードURLを更新
 
     Args:
-        request (PostMediaVideoPresignRequest): リクエストデータ
+        request (UpdateMediaVideoPresignRequest): リクエストデータ
         user (Users): ユーザー
         db (Session): データベースセッション
 
@@ -323,80 +445,147 @@ async def presign_post_media_video(
         PostMediaVideoPresignResponse: アップロードURL
     """
     try:
-        allowed_kinds = {"main","sample"}
+        post = get_post_by_id(db, request.post_id)
+        if not post:
+            raise HTTPException(404, f"post not found: {request.post_id}")
 
-        seen = set()
-        uploads: Dict[VideoKind, UploadItem] = {}
+        validate_kinds(request.files, ALLOWED_VIDEO_KINDS)
+
+        uploads: Dict[VideoKind, PresignResponseItem] = {}
+        
         for f in request.files:
-            if f.kind not in allowed_kinds:
-                raise HTTPException(400, f"unsupported kind: {f.kind}")
-            if f.kind != "images" and f.kind in seen:
-                raise HTTPException(400, f"duplicated kind: {f.kind}")
-            seen.add(f.kind)
-
-            # postsテーブルからステータスを取得してバケットを判断
-            post = db.query(Posts).filter(Posts.id == f.post_id).first()
-            if not post:
-                raise HTTPException(404, f"post not found: {f.post_id}")
-
-            #　post_idと同じkindの既存メディアアセットをすべて取得
-            existing_assets = db.query(MediaAssets).filter(
-                MediaAssets.post_id == f.post_id,
-                MediaAssets.kind == KIND_MAPPING[f.kind]
-            ).all()
-
-            if not existing_assets:
-                raise HTTPException(404, f"media assets not found: {f.post_id}, {f.kind}")
-
-            # 新しいstorage_keyを生成
-            new_key = post_media_video_key(str(user.id), str(f.post_id), f.ext, f.kind)
-
-            #　既存のすべてのファイルをs3から削除
-            # 承認済みの場合はMEDIA_BUCKET_NAME、それ以外はingest
-            bucket = MEDIA_BUCKET_NAME if post.status == PostStatus.APPROVED else "ingest"
-
-            for old_asset in existing_assets:
-                if old_asset.storage_key:
-                    try:
-                        # 変換済みファイル（.m3u8）の場合、関連ファイルも削除
-                        if old_asset.storage_key.endswith('.m3u8'):
-                            # HLSの関連ファイル（.tsセグメント、プレイリストなど）をディレクトリごと削除
-                            delete_hls_directory(bucket, old_asset.storage_key)
-                        else:
-                            # 通常のファイル（.mp4など）を削除
-                            delete_object(bucket, old_asset.storage_key)
-                        print(f"Deleted old video file: {old_asset.storage_key}")
-                    except Exception as e:
-                        print(f"Failed to delete old video file from S3: {e}")
-                        # 削除に失敗しても処理を継続
-
-                # 古いメディアアセットをDBから削除
-                db.delete(old_asset)
-
-            #　新しいファイル用のpresigned URLを生成
-            response = presign_put("ingest", new_key, f.content_type)
-            uploads[f.kind] = PresignResponseItem(
-                key=response["key"],
-                upload_url=response["upload_url"],
-                expires_in=response["expires_in"],
-                required_headers=response["required_headers"]
+            # 既存メディアアセットを取得
+            existing_assets = get_media_assets_by_post_id_and_kind(
+                db, str(request.post_id), KIND_MAPPING[f.kind]
             )
 
-            # 新しいメディアアセットを作成（古いものは削除済み）
-            media_asset_data = {
-                "post_id": f.post_id,
-                "kind": KIND_MAPPING[f.kind],
-                "storage_key": new_key,
-                "orientation": ORIENTATION_MAPPING[f.orientation],
-                "mime_type": f.content_type,
-                "bytes": 0,
-                "status": MediaAssetStatus.RESUBMIT,
-            }
-            media_asset = create_media_asset(db, media_asset_data)
-            db.flush()
+            if not existing_assets:
+                raise HTTPException(
+                    404, f"media assets not found: {request.post_id}, {f.kind}"
+                )
+
+            # 新しいstorage_keyとpresigned URLを生成
+            response = generate_video_presign(
+                str(user.id), str(request.post_id), f.ext, f.kind, f.content_type
+            )
+            new_key = response["key"]
+
+            # リソースと承認フラグを決定
+            resource = get_video_resource_and_approved_flag(post['authenticated_flg'])
+
+            # 既存ファイルをS3から削除
+            delete_existing_media_file(
+                existing_assets.storage_key, resource, post['authenticated_flg'], is_video=True
+            )
+
+            # 古いメディアアセットをDBから削除
+            if post['authenticated_flg'] == AuthenticatedFlag.AUTHENTICATED:
+                delete_media_rendition_job(db, existing_assets.id)
+                
+            delete_media_asset(db, existing_assets.id)
+
+            # レスポンスに追加
+            uploads[f.kind] = create_presign_response_item(response)
+
+            # 新しいメディアアセットを作成
+            media_asset_data = create_media_asset_data(
+                str(request.post_id), f.kind, new_key, f.orientation,
+                f.content_type, MediaAssetStatus.RESUBMIT,
+                sample_type=f.sample_type,
+                sample_start_time=f.sample_start_time,
+                sample_end_time=f.sample_end_time
+            )
+            create_media_asset(db, media_asset_data)
+            db.commit()
 
         return PostMediaVideoPresignResponse(uploads=uploads)
+    except HTTPException:
+        raise
     except Exception as e:
-        print("アップロードURL更新エラーが発生しました", e)
+        print(f"アップロードURL更新エラーが発生しました: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update-images")
+async def update_images(
+    request: UpdateImagesPresignRequest,
+    user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """画像投稿の更新（複数画像の追加/削除対応）
+
+    Args:
+        request (UpdateImagesPresignRequest): リクエストデータ
+        user: ユーザー
+        db (Session): データベースセッション
+
+    Returns:
+        UpdateImagesPresignResponse: アップロードURL一覧
+    """
+    try:
+        # 投稿の存在確認
+        post = get_post_by_id(db, request.post_id)
+        if not post:
+            raise HTTPException(404, f"post not found: {request.post_id}")
+
+        # 指定されたIDの画像を削除
+        if request.delete_image_ids:
+            resource = get_image_resource_and_approved_flag(
+                "images", post['authenticated_flg']
+            )
+
+            for image_id in request.delete_image_ids:
+                asset = get_media_asset_by_id(db, image_id)
+
+                if not asset:
+                    print(f"Warning: media asset not found: {image_id}")
+                    continue
+
+                # 投稿IDが一致するか確認
+                if str(asset.post_id) != str(request.post_id):
+                    raise HTTPException(
+                        403, 
+                        f"Unauthorized: asset {image_id} does not belong to post {request.post_id}"
+                    )
+
+                # kindがIMAGESであることを確認
+                if asset.kind != MediaAssetKind.IMAGES:
+                    print(f"Warning: asset {image_id} is not an image (kind={asset.kind})")
+                    continue
+
+                # S3から削除
+                if asset.storage_key:
+                    delete_existing_media_file(
+                        asset.storage_key, resource, post['authenticated_flg'], is_video=False
+                    )
+
+                # DBから削除
+                delete_media_asset(db, asset.id)
+
+        # 新しい画像を追加
+        uploads = []
+        for img in request.add_images:
+            response = generate_image_presign(
+                "images", str(user.id), str(request.post_id), img.ext, img.content_type
+            )
+            new_key = response["key"]
+
+            uploads.append(create_presign_response_item(response))
+
+            # 新しいメディアアセットをDBに作成
+            media_asset_data = create_media_asset_data(
+                str(request.post_id), "images", new_key, img.orientation,
+                img.content_type, MediaAssetStatus.RESUBMIT
+            )
+            create_media_asset(db, media_asset_data)
+
+        db.commit()
+
+        return UpdateImagesPresignResponse(uploads=uploads)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"画像更新エラー: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

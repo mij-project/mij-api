@@ -11,10 +11,14 @@ AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
 
 
 def s3_client():
+    """S3クライアントを取得
+
+    Returns:
+        boto3.client: S3クライアント
+    """
     return boto3.client(
         "s3",
         region_name=AWS_REGION,
-        endpoint_url=f"https://s3.{AWS_REGION}.amazonaws.com",
         config=Config(signature_version="s3v4")
     )
 
@@ -51,10 +55,6 @@ def sms_client():
         "sns",
         region_name=AWS_REGION,
     )
-
-def delete_object(bucket: str, key: str):
-    client = s3_client()
-    client.delete_object(Bucket=bucket, Key=key)
 
 def delete_hls_directory(bucket: str, m3u8_key: str):
     """
@@ -113,6 +113,122 @@ def delete_hls_directory(bucket: str, m3u8_key: str):
         print(f"Failed to delete HLS directory {directory_prefix}: {e}")
         raise
 
+def delete_ffmpeg_directory(bucket: str, storage_key: str):
+    """
+    storage_keyからffmpeg以降のディレクトリを削除
+    
+    Args:
+        bucket (str): S3バケット名
+        storage_key (str): ストレージキー（例: "transcode-mc/.../ffmpeg/..."）
+    """
+    client = s3_client()
+    
+    # ffmpegディレクトリのパスを取得
+    # 例: "transcode-mc/.../ffmpeg/51081f73-..." -> "transcode-mc/.../ffmpeg/"
+    if '/ffmpeg/' in storage_key:
+        # ffmpeg/の位置を見つけて、その後のパスを削除対象のプレフィックスにする
+        ffmpeg_index = storage_key.find('/ffmpeg/')
+        directory_prefix = storage_key[:ffmpeg_index + len('/ffmpeg/')]
+    else:
+        # ffmpegが見つからない場合は何もしない
+        print(f"No /ffmpeg/ found in storage_key: {storage_key}")
+        return 0
+    
+    try:
+        # ディレクトリ配下の全オブジェクトをリスト
+        paginator = client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket, Prefix=directory_prefix)
+        
+        deleted_count = 0
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+            
+            # 削除対象のオブジェクトを収集
+            objects_to_delete = []
+            for obj in page['Contents']:
+                key = obj['Key']
+                objects_to_delete.append({'Key': key})
+            
+            # バッチ削除（最大1000件まで一度に削除可能）
+            if objects_to_delete:
+                response = client.delete_objects(
+                    Bucket=bucket,
+                    Delete={'Objects': objects_to_delete}
+                )
+                deleted_count += len(objects_to_delete)
+                print(f"Deleted {len(objects_to_delete)} files from {directory_prefix}")
+                
+                # 削除エラーがあればログ出力
+                if 'Errors' in response:
+                    for error in response['Errors']:
+                        print(f"Error deleting {error['Key']}: {error['Message']}")
+        
+        print(f"Total deleted {deleted_count} files from ffmpeg directory")
+        return deleted_count
+        
+    except Exception as e:
+        print(f"Failed to delete ffmpeg directory {directory_prefix}: {e}")
+        raise
+
+def delete_hls_directory_full(bucket: str, storage_key: str):
+    """
+    storage_keyからhls以降のディレクトリを削除
+    
+    Args:
+        bucket (str): S3バケット名
+        storage_key (str): ストレージキー（例: "transcode-mc/.../hls/..."）
+    """
+    client = s3_client()
+    
+    # hlsディレクトリのパスを取得
+    # 例: "transcode-mc/.../hls/2cc79976-....m3u8" -> "transcode-mc/.../hls/"
+    if '/hls/' in storage_key:
+        # hls/の位置を見つけて、その後のパスを削除対象のプレフィックスにする
+        hls_index = storage_key.find('/hls/')
+        directory_prefix = storage_key[:hls_index + len('/hls/')]
+    else:
+        # hlsが見つからない場合は何もしない
+        print(f"No /hls/ found in storage_key: {storage_key}")
+        return 0
+    
+    try:
+        # ディレクトリ配下の全オブジェクトをリスト
+        paginator = client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket, Prefix=directory_prefix)
+        
+        deleted_count = 0
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+            
+            # 削除対象のオブジェクトを収集
+            objects_to_delete = []
+            for obj in page['Contents']:
+                key = obj['Key']
+                objects_to_delete.append({'Key': key})
+            
+            # バッチ削除（最大1000件まで一度に削除可能）
+            if objects_to_delete:
+                response = client.delete_objects(
+                    Bucket=bucket,
+                    Delete={'Objects': objects_to_delete}
+                )
+                deleted_count += len(objects_to_delete)
+                print(f"Deleted {len(objects_to_delete)} files from {directory_prefix}")
+                
+                # 削除エラーがあればログ出力
+                if 'Errors' in response:
+                    for error in response['Errors']:
+                        print(f"Error deleting {error['Key']}: {error['Message']}")
+        
+        print(f"Total deleted {deleted_count} files from hls directory")
+        return deleted_count
+        
+    except Exception as e:
+        print(f"Failed to delete hls directory {directory_prefix}: {e}")
+        raise
+
 
 @lru_cache(maxsize=1)
 def s3_client_for_mc():
@@ -147,3 +263,7 @@ RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
 MAX_ATTEMPTS = int(os.getenv("SMS_MAX_ATTEMPTS", "5"))
 SNS_SENDER_ID = os.getenv("SNS_SENDER_ID", "mijfans")
 SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
+
+# バナー画像
+BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
+BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")

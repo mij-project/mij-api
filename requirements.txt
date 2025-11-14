@@ -18,3 +18,4 @@ httpx
 requests-oauthlib
 itsdangerous
 tenacity
+openpyxl

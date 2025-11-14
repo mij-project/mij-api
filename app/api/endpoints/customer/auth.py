@@ -8,7 +8,7 @@ from app.schemas.auth import LoginIn, TokenOut, LoginCookieOut
 from app.models.user import Users
 from sqlalchemy.orm import Session
 from app.core.security import verify_password
-from app.crud.user_crud import get_user_by_email, get_user_by_id
+from app.crud.user_crud import get_user_by_email, get_user_by_id, check_email_exists
 from app.core.security import (
     verify_password, 
     create_access_token, 
@@ -25,7 +25,15 @@ from app.deps.auth import issue_app_jwt_for
 from app.crud.user_crud import create_user_by_x
 from app.crud.profile_crud import create_profile, update_profile_by_x, exist_profile_by_username, get_profile_by_username
 from app.constants.enums import AccountType, AccountStatus
-
+from typing import Tuple
+from app.models.user import Users
+from app.models.profiles import Profiles
+from app.crud.companies_crud import get_company_by_code, add_company_user
+from app.constants.number import CompanyFeePercent
+from app.crud.preregistrations_curd import get_preregistration_by_X_name
+from app.constants.event_code import EventCode
+from app.crud.user_events_crud import create_user_event
+from app.crud.events_crud import get_event_by_code
 router = APIRouter()
 
 X_API_KEY = os.getenv('X_API_KEY')
@@ -79,9 +87,12 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/x/login")
-def x_login(request: Request):
+def x_login(request: Request, company_code: str = None):
     """
     Xログイン画面へリダイレクト
+
+    Args:
+        company_code: 企業コード(任意)
     """
     try:
         x = OAuth1Session(X_API_KEY, X_API_SECRET, callback_uri=X_CALLBACK_URL)
@@ -97,6 +108,10 @@ def x_login(request: Request):
         # セッション退避
         request.session["oauth_token"] = tokens["oauth_token"]
         request.session["oauth_token_secret"] = tokens["oauth_token_secret"]
+
+        # 企業コードもセッションに保存
+        if company_code:
+            request.session["company_code"] = company_code
 
         # 認可URL（選択肢）
         auth_path = "authenticate"
@@ -161,59 +176,38 @@ def x_callback(
 
         x_user_id = me.get("id")
         x_username = me.get("username")
+        if x_username and not x_username.startswith("@"):
+            x_username = f"@{x_username}"
         x_name = me.get("name")
 
         # メールアドレスの構築（Xは公開メールがないため仮のメールを生成）
         x_email = f"{x_user_id}@x.twitter.com"
 
-        # 既存ユーザーチェック（ユーザー名で検索）
-        profile_exists = exist_profile_by_username(db, x_username)
+        # ユーザー存在チェック
+        user_exists = check_email_exists(db, x_email)
 
-        if not profile_exists:
+        if not user_exists:
+            # 事前登録対象者かチェック
+            preregistration = get_preregistration_by_X_name(db, x_username, x_name)
+            offical_flg = True if preregistration else False
+
             # 新規ユーザー作成
-            user = Users(
-                profile_name=x_name,  # Xの名前
-                email=x_email,
-                email_verified_at=datetime.utcnow(),
-                password_hash=None,
-                role=AccountType.GENERAL_USER,
-                status=AccountStatus.ACTIVE,
-                last_login_at=datetime.utcnow()
-            )
-            user = create_user_by_x(db, user)
+            user, profile = _create_user_and_profile(db, x_email, x_username, x_name, offical_flg)
+            # セッションから企業コードを取得し、company_usersにレコードを追加
+            company_code = request.session.get("company_code")
+            if company_code:
+                _insert_company_user(db, company_code, user.id)
 
-            # プロフィール作成
-            profile = create_profile(db, user.id, x_username)
-            db.commit()
-            db.refresh(user)
-            db.refresh(profile)
+            if preregistration:
+                _insert_user_event(db, user.id, EventCode.PRE_REGISTRATION)
         else:
             # 既存ユーザーの場合、ユーザー情報を取得して更新
-            # プロフィールからユーザーIDを取得
-            profile = get_profile_by_username(db, x_username)
-            if profile is None:
-                raise HTTPException(status_code=404, detail="Profile not found")
-            
-            user = get_user_by_id(db, profile.user_id)
-            print(f"DEBUG: Existing user found, user.id = {user.id if user else 'None'}")
-            if user is None:
-                raise HTTPException(status_code=404, detail="User not found")
-            
-            # ユーザー情報を更新
-            user.last_login_at = datetime.utcnow()
-            if x_name:
-                user.profile_name = x_name
-            
-            # プロフィール情報も更新
-            profile = update_profile_by_x(db, user.id, x_username)
-            db.commit()
+            user, profile = _update_user_and_profile(db, user, x_username, x_name)
 
-        # JWT & Cookie設定（通常ログインと同じ処理）
-        print(f"DEBUG: user type = {type(user)}, user = {user}")
-        if hasattr(user, 'id'):
-            print(f"DEBUG: user.id = {user.id}")
-        else:
-            print("DEBUG: user has no 'id' attribute")
+        db.commit()
+        db.refresh(user)
+        db.refresh(profile)
+
         
         access_token = create_access_token(str(user.id))
         refresh_token = create_refresh_token(str(user.id))
@@ -228,6 +222,7 @@ def x_callback(
 
         return redirect_response
     except Exception as e:
+        db.rollback()
         print("Xログインコールバックに失敗しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -264,6 +259,7 @@ def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
             "role": user.role, 
             "is_phone_verified": user.is_phone_verified,
             "is_identity_verified": user.is_identity_verified,
+            "offical_flg": user.offical_flg,
         }
     except HTTPException:
         raise
@@ -360,3 +356,112 @@ async def auth_callback(code: str):
         res.set_cookie("cognito_refresh_token", tokens["refresh_token"], httponly=True, samesite="Lax", secure=False)
 
     return res
+
+
+def _create_user_and_profile(db: Session, x_email: str, x_username: str, x_name: str, offical_flg: bool) -> Tuple[Users, Profiles]:
+    """ユーザーとプロフィールを作成
+
+    Args:
+        db (Session): データベースセッション
+        x_email (str): Xメールアドレス
+        x_username (str): Xユーザー名
+        x_name (str): Xの名前
+
+    Returns:
+        Tuple[Users, Profiles]: ユーザーとプロフィール
+    """
+    # 新規ユーザー作成
+    user = Users(
+        profile_name=x_name,  # Xの名前
+        email=x_email,
+        email_verified_at=datetime.utcnow(),
+        password_hash=None,
+        role=AccountType.GENERAL_USER,
+        status=AccountStatus.ACTIVE,
+        last_login_at=datetime.utcnow(),
+        offical_flg=offical_flg
+    )
+    user = create_user_by_x(db, user)
+
+    # x_usernameの先頭の@を削除
+    if x_username and x_username.startswith("@"):
+        x_username = x_username[1:]
+
+    # プロフィール作成
+    profile = create_profile(db, user.id, x_username)
+    return user, profile
+
+
+def _update_user_and_profile(db: Session, user: Users, x_username: str, x_name: str) -> Tuple[Users, Profiles]:
+    """ユーザーとプロフィールを更新
+
+    Args:
+        db (Session): データベースセッション
+        user (Users): ユーザー
+        x_username (str): Xユーザー名
+
+    Returns:
+        Tuple[Users, Profiles]: ユーザーとプロフィール
+    """
+     # 既存ユーザーの場合、ユーザー情報を取得して更新
+    # プロフィールからユーザーIDを取得
+    profile = get_profile_by_username(db, x_username)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    user = get_user_by_id(db, profile.user_id)
+    print(f"DEBUG: Existing user found, user.id = {user.id if user else 'None'}")
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # ユーザー情報を更新
+    user.last_login_at = datetime.utcnow()
+    if x_name:
+        user.profile_name = x_name
+
+    # プロフィール情報も更新
+    profile = update_profile_by_x(db, user.id, x_username)
+    db.commit()
+
+def _insert_company_user(db: Session, company_code: str, user_id: str) -> bool:
+    """企業にユーザーを追加
+
+    Args:
+        db (Session): データベースセッション
+        company_code (str): 企業コード
+        user_id (str): ユーザーID
+
+    Raises:
+        HTTPException: 企業が見つかりません
+
+    Returns:
+        bool: 企業にユーザーを追加
+    """
+    company = get_company_by_code(db, company_code)
+    if not company:
+        raise HTTPException(status_code=404, detail="企業が見つかりません")
+
+    # 親会社と子会社の設定値を追加
+    targets = (
+        [
+            (company.parent_company_id, CompanyFeePercent.PARENT_DEFAULT, False),
+            (company.id, CompanyFeePercent.CHILD_DEFAULT, True),
+        ]
+        # 親会社がない場合は通常の設定値を追加
+        if company.parent_company_id
+        else [(company.id, CompanyFeePercent.DEFAULT, True)]
+    )
+
+    for company_id, fee_percent, is_referrer in targets:
+        add_company_user(db, company_id, user_id, fee_percent, is_referrer)
+
+    return True
+
+def _insert_user_event(db: Session, user_id: str, event_code: str) -> bool:
+    """
+    ユーザーイベントを挿入
+    """
+    event = get_event_by_code(db, event_code)
+    if event:
+        return create_user_event(db, user_id, event.id)
+    return False

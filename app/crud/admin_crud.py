@@ -4,6 +4,7 @@ from sqlalchemy import func, desc, asc
 from datetime import datetime
 from uuid import UUID
 
+from app.models.notifications import Notifications
 from app.models.user import Users
 from app.models.creators import Creators
 from app.models.identity import IdentityVerifications
@@ -16,6 +17,8 @@ from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
 from app.constants.enums import PostStatus, MediaAssetStatus
 import os
+
+from app.schemas.notification import NotificationType
 
 CDN_URL = os.getenv("CDN_BASE_URL")
 
@@ -444,7 +447,7 @@ def update_creator_application_status(db: Session, application_id: str, status: 
         bool: 更新成功フラグ
     """
     try:
-        application = db.query(Creators).filter(Creators.id == application_id).first()
+        application = db.query(Creators).filter(Creators.user_id == application_id).first()
         if not application or application.status != 1:  # 1 = pending
             return False
         
@@ -535,105 +538,6 @@ def update_post_status(db: Session, post_id: str, status: str) -> bool:
         return False
 
 
-def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
-    """
-    投稿IDをキーにして投稿情報、ユーザー情報、メディア情報を取得
-    """
-    try:
-        # UUIDに変換
-        post_uuid = UUID(post_id)
-    except ValueError:
-        return None
-
-    # 投稿情報と関連データを取得
-    result = (
-        db.query(
-            Posts,
-            Users,
-            Profiles,
-            MediaAssets,
-            MediaRenditionJobs.output_key.label('rendition_output_key')
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, Posts.id == MediaAssets.post_id)
-        .outerjoin(MediaRenditionJobs, MediaAssets.id == MediaRenditionJobs.asset_id)
-        .filter(Posts.id == post_uuid)
-        .filter(Posts.deleted_at.is_(None))
-        .all()
-    )
-
-    if not result:
-        return None
-
-    # 最初のレコードから基本情報を取得
-    first_row = result[0]
-    post = first_row.Posts
-    user = first_row.Users
-    profile = first_row.Profiles
-
-    # メディアアセット情報を整理
-    media_assets = []
-    rendition_jobs = []
-
-    for row in result:
-        if row.MediaAssets:
-            media_asset = {
-                'id': str(row.MediaAssets.id),
-                'post_id': str(row.MediaAssets.post_id),
-                'kind': row.MediaAssets.kind,
-                'storage_key': row.MediaAssets.storage_key,
-                'file_size': row.MediaAssets.bytes,
-                'duration': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
-                'orientation': row.MediaAssets.orientation,
-                'created_at': row.MediaAssets.created_at.isoformat() if row.MediaAssets.created_at else None,
-                'updated_at': None
-            }
-            
-            # 重複を避けるため、既に存在するかチェック
-            if not any(ma['id'] == media_asset['id'] for ma in media_assets):
-                media_assets.append(media_asset)
-
-        if row.rendition_output_key:
-            rendition_job = {
-                'output_key': row.rendition_output_key
-            }
-            
-            # 重複を避けるため、既に存在するかチェック
-            if not any(rj['output_key'] == rendition_job['output_key'] for rj in rendition_jobs):
-                rendition_jobs.append(rendition_job)
-
-    # CDN_URLを取得
-    from os import getenv
-
-    CDN_URL = getenv("CDN_BASE_URL", "")
-    MEDIA_ASSETS_CDN_URL = getenv("MEDIA_CDN_URL", "")
-
-    # 指定された内容を返却
-    return {
-        # 投稿情報
-        'id': str(post.id),
-        'description': post.description,
-        'status': post.status,
-        'created_at': post.created_at.isoformat() if post.created_at else None,
-        # ユーザー情報
-        'user_id': str(user.id),
-        'profile_name': user.profile_name,
-        # プロフィール情報
-        'username': profile.username,
-        'profile_avatar_url': f"{CDN_URL}/{profile.avatar_url}" if profile.avatar_url else None,
-        'post_type': post.post_type,
-        # メディアアセット情報
-        'media_assets': {
-            ma['id']: {
-                'kind': ma['kind'],
-                'storage_key': ma['storage_key']
-            }
-            for ma in media_assets if ma['storage_key']
-        }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
-    }
-
-
 def reject_post_with_comments(
     db: Session,
     post_id: str,
@@ -682,3 +586,66 @@ def reject_post_with_comments(
         traceback.print_exc()
         db.rollback()
         return False
+
+def add_notification_for_creator_application(
+    db: Session, 
+    application_id: str, 
+    type: str
+) -> bool:
+    """
+    クリエイター申請に対する通知を追加
+    
+    Args:
+        db: データベースセッション
+        application_id: 申請ID
+        status: ステータス
+    """
+    try:
+        if type == "approved":
+            try:
+                notification = Notifications(
+                    user_id=application_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "クリエイター申請が承認されました",
+                        "subtitle": "クリエイター申請が承認されました",
+                        "avatar": None,
+                        "redirect_url": f"/profile?username={application_id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for creator application approved error: {e}")
+                pass
+        
+        elif type == "rejected":
+            try:
+                notification = Notifications(
+                    user_id=application_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "クリエイター申請が拒否されました",
+                        "subtitle": "クリエイター申請が拒否されました",
+                        "avatar": None,
+                        "redirect_url": f"/profile?username={application_id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for creator application rejected error: {e}")
+                pass
+    except Exception as e:
+        print(f"Add notification for creator application error: {e}")
+        pass

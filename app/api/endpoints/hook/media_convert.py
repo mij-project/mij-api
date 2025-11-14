@@ -10,9 +10,10 @@ from decimal import Decimal
 from app.crud.media_rendition_jobs_crud import update_media_rendition_job, get_media_rendition_job_by_id
 from app.crud.media_assets_crud import get_media_asset_by_id, update_media_asset
 from app.crud.media_rendition_crud import create_media_rendition
-from app.crud.post_crud import update_post_status
+from app.crud.post_crud import add_notification_for_post, update_post_status
 from app.constants.enums import MediaRenditionJobStatus, MediaRenditionKind, PostStatus, MediaAssetStatus
 from app.db.base import get_db
+from app.constants.enums import AuthenticatedFlag
 from app.services.s3.client import MEDIA_BUCKET_NAME, AWS_REGION
 
 # Constants
@@ -176,10 +177,12 @@ def _handle_final_hls_completion(db: Session, webhook_data: dict) -> None:
     update_media_asset(db, asset.id, media_asset_update_data)
     
     # 投稿のステータスを承認に更新
-    post = update_post_status(db, asset.post_id, PostStatus.APPROVED)
+    post = update_post_status(db, asset.post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
     if not post:
         raise HTTPException(404, "Post not found")
-
+    
+    # 投稿に対する通知を追加
+    add_notification_for_post(db, post, post.creator_user_id, type="approved")
 
 def _find_master_file(detail: dict, output_prefix: str) -> Tuple[Optional[str], Optional[int]]:
     """マスターファイルを検索する"""

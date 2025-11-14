@@ -2,16 +2,19 @@ import os
 import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import func, desc, exists
+from sqlalchemy import distinct, distinct, distinct, func, desc, exists, and_
+from app.models.genres import Genres
+from app.models.notifications import Notifications
 from app.models.posts import Posts
-from app.models.social import Likes, Bookmarks, Comments
+from app.models.social import Follows, Follows, Follows, Likes, Bookmarks, Comments
 from uuid import UUID
 from datetime import datetime
-from app.constants.enums import PostStatus, MediaAssetKind
+from app.constants.enums import AccountType, AccountType, AccountType, PostStatus, MediaAssetKind, MediaAssetStatus
+from app.schemas.notification import NotificationType
 from app.schemas.post import PostCreateRequest
 from app.models.post_categories import PostCategories
 from app.models.categories import Categories
-from typing import List
+from typing import List, Dict, Any
 from app.models.user import Users
 from app.models.profiles import Profiles
 from app.models.post_categories import PostCategories
@@ -24,9 +27,11 @@ from app.api.commons.utils import get_video_duration
 from app.constants.enums import PlanStatus
 from app.models.purchases import Purchases
 from app.models.orders import Orders, OrderItems
+from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.constants.enums import PostType
 from datetime import datetime, timedelta
 from app.services.s3.presign import presign_get
+from app.constants.enums import MediaAssetKind, MediaAssetStatus
 
 # エイリアスを定義
 ThumbnailAssets = aliased(MediaAssets)
@@ -254,6 +259,11 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
         .all()
     )
 
+# def get_post_by_id(db: Session, post_id: UUID) -> Posts:
+#     """
+#     投稿をIDで取得
+#     """
+#     return db.query(Posts).filter(Posts.id == post_id).first()
 
 # ========== いいねした投稿用 ==========
 
@@ -490,9 +500,9 @@ def get_recent_posts(db: Session, limit: int = 5):
         .all()
     )
 
-# ========== ランキング用 ==========
+# ========== ランキング用 集合==========
 
-def get_ranking_posts_all_time(db: Session, limit: int = 500):
+def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
     """
     全期間でいいね数が多い投稿を取得
     """
@@ -518,7 +528,7 @@ def get_ranking_posts_all_time(db: Session, limit: int = 500):
         .all()
     )
 
-def get_ranking_posts_monthly(db: Session, limit: int = 50):
+def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
     """
     月間でいいね数が多い投稿を取得
     """
@@ -546,7 +556,7 @@ def get_ranking_posts_monthly(db: Session, limit: int = 50):
         .all()
     )
 
-def get_ranking_posts_weekly(db: Session, limit: int = 50):
+def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
     """
     週間でいいね数が多い投稿を取得
     """
@@ -574,7 +584,7 @@ def get_ranking_posts_weekly(db: Session, limit: int = 50):
         .all()
     )
 
-def get_ranking_posts_daily(db: Session, limit: int = 50):
+def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
     """
     日間でいいね数が多い投稿を取得
     """
@@ -601,7 +611,6 @@ def get_ranking_posts_daily(db: Session, limit: int = 50):
         .limit(limit)
         .all()
     )
-
 
 # ========== 作成・更新・削除系 ==========
 def create_post(db: Session, post_data: dict):
@@ -655,7 +664,7 @@ def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
     db.flush()
     return post
 
-def update_post_status(db: Session, post_id: UUID, status: int):
+def update_post_status(db: Session, post_id: UUID, status: int, authenticated_flg: int = None):
     """
     投稿のステータスを更新
     """
@@ -664,13 +673,14 @@ def update_post_status(db: Session, post_id: UUID, status: int):
         raise HTTPException(status_code=404, detail="Post not found")
     
     post.status = status
+    if authenticated_flg is not None:
+        post.authenticated_flg = authenticated_flg
     post.updated_at = datetime.now()
-    db.add(post)
+    db.add(post)    
     db.flush()
     return post
 
 # ========== 内部関数 ==========
-
 def _is_purchased(db: Session, user_id: UUID | None, post_id: UUID) -> bool:
     """
     ユーザーが投稿を購入しているかどうかを判定
@@ -837,12 +847,13 @@ def _get_media_info_for_creator(db: Session, post_id: str, status: int) -> dict:
                 "reject_comments": media_asset.reject_comments
             }
         elif media_asset.kind == MediaAssetKind.IMAGES:
-            if upload_flg:
+            if upload_flg and media_asset.status in [MediaAssetStatus.PENDING, MediaAssetStatus.RESUBMIT, MediaAssetStatus.CONVERTING]:
                 presign_url = presign_get("ingest", media_asset.storage_key)
                 image_url = presign_url['download_url']
             else:
                 image_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}_1080w.webp"
             images.append({
+                "id": str(media_asset.id),  # IDをstringとして返す
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
                 "url": image_url,
@@ -925,15 +936,6 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
     is_video = result.Posts.post_type == PostType.VIDEO  # PostType.VIDEO = 1
 
     # メディア情報を取得
-    media_info = _get_media_info_for_creator(db, str(post_id), result.Posts.status)
-
-    # カテゴリー情報を取得
-    category_records = db.query(PostCategories).filter(PostCategories.post_id == post_id).all()
-    category_ids = [str(rec.category_id) for rec in category_records]
-
-    # プラン情報を取得
-    plan_records = db.query(PostPlans).filter(PostPlans.post_id == post_id).all()
-    plan_list = [{'id': str(rec.plan_id), 'name': rec.plan.name} for rec in plan_records]
 
     return {
         "post": result.Posts,
@@ -948,10 +950,6 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
         "thumbnail_key": result.thumbnail_key,
         "duration": duration,
         "is_video": is_video,
-        "media_info": media_info,
-        "category_ids": category_ids,
-        "tags": None,  # タグ実装はまだしていない
-        "plan_list": plan_list
     }
 
 
@@ -963,7 +961,18 @@ def update_post_by_creator(
 ) -> Posts | None:
     """
     クリエイターが自分の投稿を更新
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+        creator_user_id: クリエイターのユーザーID
+        update_data: 更新データ（status, visibility, scheduled_at, deleted_atなど）
+
+    Returns:
+        Posts | None: 更新された投稿、または見つからない場合はNone
     """
+    from app.constants.enums import PostStatus
+
     post = (
         db.query(Posts)
         .filter(Posts.id == post_id)
@@ -982,7 +991,3318 @@ def update_post_by_creator(
         if field in allowed_fields and value is not None:
             setattr(post, field, value)
 
+    # ステータスがDELETEDの場合、deleted_atを設定
+    if 'status' in update_data and update_data['status'] == PostStatus.DELETED:
+        post.deleted_at = datetime.now()
+
     post.updated_at = datetime.now()
     db.flush()
 
     return post
+
+
+# ========== ランキング用 各ジャンル==========
+def get_ranking_posts_genres_all_time(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 All time
+    """
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                # Like.created_at >= func.date_trunc("day", func.now()),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_week_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_month_ago = datetime.now() - timedelta(days=7)
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_month_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+
+def get_ranking_posts_detail_overall_all_time(db: Session, page: int = 1, limit: int = 500):
+    """
+    全期間でいいね数が多い投稿を取得
+    """
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
+        .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_monthly(db: Session, page: int = 1, limit: int = 500):
+    """
+    月間でいいね数が多い投稿を取得
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        # .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_month_ago)  # 過去30日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_weekly(db: Session, page: int = 1, limit: int = 500):
+    """
+    週間でいいね数が多い投稿を取得
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_week_ago)  # 過去7日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_daily(db: Session, page: int = 1, limit: int = 500):
+    """
+    日間でいいね数が多い投稿を取得
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_day_ago)  # 過去1日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_genres_all_time(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    全期間でいいね数が多い投稿を取得
+    """
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                # Like.created_at >= func.date_trunc("day", func.now()),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_daily(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_weekly(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_day_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_monthly(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Monthy
+    """
+    one_day_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator overalltime
+    """
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_day_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_week_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator monthly
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_month_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_all_time(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator overalltime
+    """
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_daily(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_day_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_weekly(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_week_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_monthly(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator monthly
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_month_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
+    """
+    投稿IDをキーにして投稿情報、ユーザー情報、メディア情報を取得
+    """
+    try:
+        # UUIDに変換
+        post_uuid = post_id
+    except ValueError:
+        return None
+
+    # 投稿情報と関連データを取得
+    result = (
+        db.query(
+            Posts,
+            Users,
+            Profiles,
+            MediaAssets,
+            MediaRenditionJobs.output_key.label('rendition_output_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, Posts.id == MediaAssets.post_id)
+        .outerjoin(MediaRenditionJobs, MediaAssets.id == MediaRenditionJobs.asset_id)
+        .filter(Posts.id == post_uuid)
+        .filter(Posts.deleted_at.is_(None))
+        .all()
+    )
+
+    if not result:
+        return None
+
+    # 最初のレコードから基本情報を取得
+    first_row = result[0]
+    post = first_row.Posts
+    user = first_row.Users
+    profile = first_row.Profiles
+
+    # メディアアセット情報を整理
+    media_assets = []
+    rendition_jobs = []
+
+    for row in result:
+        if row.MediaAssets:
+            media_asset = {
+                'id': str(row.MediaAssets.id),
+                'status': row.MediaAssets.status,
+                'post_id': str(row.MediaAssets.post_id),
+                'kind': row.MediaAssets.kind,
+                'storage_key': row.MediaAssets.storage_key,
+                'file_size': row.MediaAssets.bytes,
+                'reject_comments': row.MediaAssets.reject_comments,
+                'duration': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
+                'duration_sec': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
+                'orientation': row.MediaAssets.orientation,
+                'sample_type': row.MediaAssets.sample_type,
+                'sample_start_time': float(row.MediaAssets.sample_start_time) if row.MediaAssets.sample_start_time else None,
+                'sample_end_time': float(row.MediaAssets.sample_end_time) if row.MediaAssets.sample_end_time else None,
+                'created_at': row.MediaAssets.created_at.isoformat() if row.MediaAssets.created_at else None,
+                'updated_at': None
+            }
+            
+            # 重複を避けるため、既に存在するかチェック
+            if not any(ma['id'] == media_asset['id'] for ma in media_assets):
+                media_assets.append(media_asset)
+
+        if row.rendition_output_key:
+            rendition_job = {
+                'output_key': row.rendition_output_key
+            }
+            
+            # 重複を避けるため、既に存在するかチェック
+            if not any(rj['output_key'] == rendition_job['output_key'] for rj in rendition_jobs):
+                rendition_jobs.append(rendition_job)
+
+    # 指定された内容を返却
+    return {
+        # 投稿情報
+        'id': str(post.id),
+        'description': post.description,
+        'status': post.status,
+        'created_at': post.created_at.isoformat() if post.created_at else None,
+        'authenticated_flg': post.authenticated_flg,
+        # ユーザー情報
+        'user_id': str(user.id),
+        'profile_name': user.profile_name,
+        # プロフィール情報
+        'username': profile.username,
+        'profile_avatar_url': f"{CDN_BASE_URL}/{profile.avatar_url}" if profile.avatar_url else None,
+        'post_type': post.post_type,
+        # メディアアセット情報
+        'media_assets': {
+            ma['id']: {
+                'kind': ma['kind'],
+                'storage_key': ma['storage_key'],
+                'status': ma['status'],
+                'reject_comments': ma['reject_comments'],
+                'duration_sec': ma.get('duration_sec'),
+                'orientation': ma.get('orientation'),
+                'sample_type': ma.get('sample_type'),
+                'sample_start_time': ma.get('sample_start_time'),
+                'sample_end_time': ma.get('sample_end_time'),
+            }
+            for ma in media_assets if ma['storage_key']
+        }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
+    }
+
+
+# ========== ランキング用 各ジャンル==========
+def get_ranking_posts_genres_all_time(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 All time
+    """
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                # Like.created_at >= func.date_trunc("day", func.now()),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_week_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_month_ago = datetime.now() - timedelta(days=7)
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_month_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+    return result
+
+
+def get_ranking_posts_detail_overall_all_time(db: Session, page: int = 1, limit: int = 500):
+    """
+    全期間でいいね数が多い投稿を取得
+    """
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
+        .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_monthly(db: Session, page: int = 1, limit: int = 500):
+    """
+    月間でいいね数が多い投稿を取得
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        # .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_month_ago)  # 過去30日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_weekly(db: Session, page: int = 1, limit: int = 500):
+    """
+    週間でいいね数が多い投稿を取得
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_week_ago)  # 過去7日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_daily(db: Session, page: int = 1, limit: int = 500):
+    """
+    日間でいいね数が多い投稿を取得
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_day_ago)  # 過去1日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_genres_all_time(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    全期間でいいね数が多い投稿を取得
+    """
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                # Like.created_at >= func.date_trunc("day", func.now()),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_daily(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_weekly(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_day_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_monthly(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Monthy
+    """
+    one_day_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Genres.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Genres)
+        .outerjoin(Categories, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= func.date_trunc("day", one_day_ago),
+            ),
+        )
+        .group_by(
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.genre_id == genre)
+        .order_by(
+            like_counts_subq.c.genre_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator overalltime
+    """
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_day_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_week_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator monthly
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_month_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_all_time(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator overalltime
+    """
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_daily(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_day_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_weekly(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_week_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_monthly(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator monthly
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_month_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+# ========== ランキング用 各ジャンル==========
+def get_ranking_posts_genres_all_time(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 All time
+    """
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                # Likes.created_at >= func.date_trunc("day", func.now()),
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+
+    return result
+
+def get_ranking_posts_genres_daily(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_day_ago,
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+
+    return result
+
+def get_ranking_posts_genres_weekly(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_week_ago,
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+
+    return result
+
+def get_ranking_posts_genres_monthly(db: Session, limit: int = 50):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_month_ago = datetime.now() - timedelta(days=7)
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_month_ago,
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.rn <= limit)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .all()
+    )
+
+    return result
+
+
+def get_ranking_posts_detail_overall_all_time(db: Session, page: int = 1, limit: int = 500):
+    """
+    全期間でいいね数が多い投稿を取得
+    """
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
+        .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_monthly(db: Session, page: int = 1, limit: int = 500):
+    """
+    月間でいいね数が多い投稿を取得
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        # .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_month_ago)  # 過去30日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_weekly(db: Session, page: int = 1, limit: int = 500):
+    """
+    週間でいいね数が多い投稿を取得
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_week_ago)  # 過去7日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_overall_daily(db: Session, page: int = 1, limit: int = 500):
+    """
+    日間でいいね数が多い投稿を取得
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label('likes_count'),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.created_at >= one_day_ago)  # 過去1日以内のいいね
+        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key)
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_posts_detail_genres_all_time(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    全期間でいいね数が多い投稿を取得
+    """
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                # Likes.created_at >= func.date_trunc("day", func.now()),
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.category_id == genre)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_daily(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_day_ago,
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.category_id == genre)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_weekly(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_week_ago,
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.category_id == genre)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_posts_detail_genres_monthly(db: Session, genre: str, page: int = 1, limit: int = 500):
+    """
+    各ジャンルでいいね数が多い投稿を取得 Monthy
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    like_counts_subq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+
+            func.count(Likes.post_id).label("likes_count"),
+
+            func.row_number()
+            .over(
+                partition_by=Categories.id,
+                order_by=func.count(Likes.post_id).desc()
+            )
+            .label("rn"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(
+            Posts,
+            and_(
+                Posts.id == PostCategories.post_id,
+                Posts.status == PostStatus.APPROVED,
+                Posts.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            and_(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            Likes,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_month_ago,
+            ),
+        )
+        .group_by(
+            Categories.id,
+            Categories.name,
+            Genres.id,
+            Genres.name,
+            Posts.id,
+            Posts.creator_user_id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+        )
+        .subquery("like_counts")
+    )
+
+    result = (
+        db.query(like_counts_subq)
+        .filter(like_counts_subq.c.category_id == genre)
+        .order_by(
+            like_counts_subq.c.category_name,
+            like_counts_subq.c.likes_count.desc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return result
+
+def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator overalltime
+    """
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_day_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_week_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
+    """
+    いいね数が多いCreator monthly
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_month_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_all_time(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator overalltime
+    """
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_daily(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator daily
+    """
+    one_day_ago = datetime.now() - timedelta(days=1)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_day_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_weekly(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator weekly
+    """
+    one_week_ago = datetime.now() - timedelta(days=7)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_week_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def get_ranking_creators_overall_detail_monthly(db: Session, page: int = 1, limit: int = 500):
+    """
+    いいね数が多いCreator monthly
+    """
+    one_month_ago = datetime.now() - timedelta(days=30)
+    offset = (page - 1) * limit
+    return (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.count(Follows.creator_user_id).label('followers_count'),
+            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(Follows, Users.id == Follows.creator_user_id)
+        .outerjoin(Posts, Posts.creator_user_id == Users.id)
+        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .filter(Users.role == AccountType.CREATOR)
+        .filter(Likes.created_at >= one_month_ago)
+        .group_by(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+        )
+        .order_by(desc('likes_count'))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+def add_notification_for_post(
+    db: Session, 
+    post: Posts = None, 
+    user_id: UUID = None, 
+    liked_user_id: UUID = None,
+    type: str = "approved"
+) -> None:
+    """ 投稿に対する通知を追加
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+        user_id: ユーザーID
+        type: 通知タイプ "approved" | "rejected" | "like"
+    """
+    try:
+        if type == "approved":
+            try:
+                notification = Notifications(
+                    user_id=post.creator_user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "投稿が承認されました",
+                        "subtitle": "投稿が承認されました",
+                        "avatar": None,
+                        "redirect_url": f"/account/post/{post.id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for post approved error: {e}")
+                pass
+        elif type == "rejected":
+            post = db.query(Posts).filter(Posts.id == post.id).first()
+            if not post:
+                raise Exception("Post not found")
+            try:
+                notification = Notifications(
+                    user_id=post.creator_user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "投稿が拒否されました",
+                        "subtitle": "投稿が拒否されました",
+                        "avatar": None,
+                        "redirect_url": f"/account/post/{post.id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for post rejected error: {e}")
+                pass
+        elif type == "like":
+            liked_user_profile = db.query(Profiles).filter(Profiles.user_id == liked_user_id).first()
+            if not liked_user_profile:
+                raise Exception("Liked user profile not found")
+            try:
+                notification = Notifications(
+                    user_id=post.creator_user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": f"{liked_user_profile.username} が投稿にいいねしました",
+                        "subtitle": f"{liked_user_profile.username} が投稿にいいねしました",
+                        "avatar": liked_user_profile.avatar_url,
+                        "redirect_url": f"/profile?username={liked_user_profile.username}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for post like error: {e}")
+    except Exception as e:
+        print(f"Add notification for post error: {e}")
+        pass

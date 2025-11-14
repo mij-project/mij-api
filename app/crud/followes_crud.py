@@ -1,9 +1,13 @@
+from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from app.models import Notifications, Profiles
 from app.models.social import Follows
 from app.models.user import Users
 from uuid import UUID
 from typing import List
+
+from app.schemas.notification import NotificationType
 
 def get_follower_count(db: Session, user_id: UUID) -> dict:
     """
@@ -133,4 +137,33 @@ def toggle_follow(db: Session, follower_user_id: UUID, creator_user_id: UUID) ->
         follow = Follows(follower_user_id=follower_user_id, creator_user_id=creator_user_id)
         db.add(follow)
         db.commit()
+        add_notification_follow(db, follower_user_id, creator_user_id)
         return {"following": True, "message": "フォローしました"}
+
+def add_notification_follow(db: Session, follower_user_id: UUID, creator_user_id: UUID) -> None:
+    """
+    フォロー通知を追加
+    """
+    try:
+        follower_profile = db.query(Profiles).filter(Profiles.user_id == follower_user_id).first()
+        
+        notification = Notifications(
+            user_id=creator_user_id,
+            type=NotificationType.USERS,
+            payload={
+                "title": f"{follower_profile.username} があなたをフォローしました",
+                "subtitle": f"{follower_profile.username} があなたをフォローしました",
+                "avatar": follower_profile.avatar_url,
+                "redirect_url": f"/profile/username={follower_profile.username}"
+            },
+            is_read=False,
+            read_at=None,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        db.add(notification)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Add notification follow error: {e}")
+        pass

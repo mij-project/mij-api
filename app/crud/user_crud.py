@@ -321,12 +321,14 @@ def update_user_identity_verified_at(db: Session, user_id: str, is_identity_veri
     db.commit()
     return db.query(Users).filter(Users.id==user_id).first()
 
-def update_user_email_verified_at(db: Session, user_id: str) -> Users:
+def update_user_email_verified_at(db: Session, user_id: str, offical_flg: bool) -> Users:
     """
     ユーザーのメールアドレスを検証済みに更新
     """
     db.execute(update(Users).where(Users.id==user_id).values(
-        is_email_verified=True, email_verified_at=datetime.utcnow()
+        is_email_verified=True, 
+        email_verified_at=datetime.utcnow(),
+        offical_flg=offical_flg
     ))
 
 def create_user_by_x(db: Session, user: Users) -> Users:

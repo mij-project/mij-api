@@ -1,5 +1,6 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from app.schemas.user import UserCreate, UserOut, UserProfileResponse
+from app.schemas.user import UserCreate, UserOut, UserProfileResponse, UserRegisterCompany
 from app.db.base import get_db
 from sqlalchemy.orm import Session
 from app.crud.user_crud import (
@@ -7,17 +8,24 @@ from app.crud.user_crud import (
     check_email_exists,
     check_profile_name_exists,
     get_user_profile_by_username,
-    get_plan_details
+    get_plan_details,
 )
+from app.crud.companies_crud import get_company_by_code
+from app.models.profiles import Profiles
+from app.models.user import Users
 from app.api.commons.utils import generate_code
 from app.deps.auth import get_current_user
 from app.crud.profile_crud import create_profile
 from app.schemas.user import ProfilePostResponse, ProfilePlanResponse, ProfilePurchaseResponse, ProfileGachaResponse
 from app.models.posts import Posts
+from app.api.commons.utils import generate_email_verification_url
 import os
 from app.crud.email_verification_crud import issue_verification_token
 from app.services.email.send_email import send_email_verification
-from app.core.config import settings
+from app.constants.number import CompanyFeePercent
+from typing import Tuple, Optional
+from uuid import UUID
+
 router = APIRouter()
 
 BASE_URL = os.getenv("CDN_BASE_URL")
@@ -42,33 +50,41 @@ def register_user(
         UserOut: ユーザー情報
     """
     try:
-        is_email_exists = check_email_exists(db, user_create.email)
-        if is_email_exists:
-            raise HTTPException(status_code=400, detail="存在しているメールアドレスです")
-        is_profile_name_exists = check_profile_name_exists(db, user_create.name)
-        if is_profile_name_exists:
-            raise HTTPException(status_code=400, detail="存在しているユーザー名です")
-
-        for _ in range(10):  # 最大10回リトライ
-            username_code = generate_code(5)
-            is_profile_name_exists = check_profile_name_exists(db, username_code)
-            if not is_profile_name_exists:
-                break
-            raise HTTPException(status_code=500, detail="ユーザー名の生成に失敗しました")
-
-        db_user = create_user(db, user_create)
-        db_profile = create_profile(db, db_user.id, username_code)
-
+        db_user, db_profile = _insert_user(db, user_create.email, user_create.password, user_create.name)
 
         # メールアドレスの認証トークンを発行
-        raw, expires_at = issue_verification_token(db, db_user.id)
-        verify_url = f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={raw}"
-        background.add_task(send_email_verification, db_user.email, verify_url, db_user.display_name if hasattr(db_user, "display_name") else None)
+        _send_email_verification(db, db_user, background)
 
         db.commit()
         db.refresh(db_user)
         db.refresh(db_profile)
 
+        return db_user
+    except Exception as e:
+        print("ユーザー登録エラー: ", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/register/company", response_model=UserOut)
+def get_user_profile_by_company_code(
+    user_register_company: UserRegisterCompany,
+    db: Session = Depends(get_db),
+    background: BackgroundTasks = BackgroundTasks()
+):
+    """
+    企業コードによるユーザープロフィール取得
+    """
+    try:
+        db_user, db_profile = _insert_user(db, user_register_company.email, user_register_company.password, user_register_company.name)
+        _send_email_verification(db, db_user, background, user_register_company.company_code)
+
+        company = get_company_by_code(db, user_register_company.company_code)
+        if not company:
+            raise HTTPException(status_code=404, detail="企業が見つかりません")  
+
+        db.commit()
+        db.refresh(db_user)
+        db.refresh(db_profile)
         return db_user
     except Exception as e:
         print("ユーザー登録エラー: ", e)
@@ -192,6 +208,7 @@ def get_user_profile_by_username_endpoint(
         return UserProfileResponse(
             id=user.id,
             profile_name=user.profile_name,
+            offical_flg=user.offical_flg,
             username=profile.username if profile else None,
             avatar_url=f"{BASE_URL}/{profile.avatar_url}" if profile and profile.avatar_url else None,
             cover_url=f"{BASE_URL}/{profile.cover_url}" if profile and profile.cover_url else None,
@@ -207,4 +224,40 @@ def get_user_profile_by_username_endpoint(
     except Exception as e:
         print("ユーザープロフィール取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
+def _insert_user(db: Session, email: str, password: str, name: str, company_code: Optional[UUID] = None) -> Tuple[Users, Profiles]:
+    """
+    ユーザーを登録
+    """
+    is_email_exists = check_email_exists(db, email)
+    if is_email_exists:
+        raise HTTPException(status_code=400, detail="存在しているメールアドレスです")
+    is_profile_name_exists = check_profile_name_exists(db, name)
+    if is_profile_name_exists:
+        raise HTTPException(status_code=400, detail="存在しているユーザー名です")
+
+    for _ in range(10):  # 最大10回リトライ
+        username_code = generate_code(5)
+        is_profile_name_exists = check_profile_name_exists(db, username_code)
+        if not is_profile_name_exists:
+            break
+        raise HTTPException(status_code=500, detail="ユーザー名の生成に失敗しました")
+
+    db_user = create_user(db, UserCreate(email=email, password=password, name=name))
+    db_profile = create_profile(db, db_user.id, username_code)
+
+    return db_user, db_profile
+
+
+def _send_email_verification(db: Session, user: Users, background: BackgroundTasks, company_code: Optional[UUID] = None) -> None:
+    """
+    メールアドレスの認証トークンを発行
+    """
+    raw, expires_at = issue_verification_token(db, user.id)
+    if company_code:
+        verify_url = generate_email_verification_url(raw, company_code)
+    else:
+        verify_url = generate_email_verification_url(raw)
+    background.add_task(send_email_verification, user.email, verify_url, user.profile_name if hasattr(user, "profile_name") else None)
+

@@ -7,7 +7,17 @@ from typing import List, Optional
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
-    name: str
+    name: str = Field(min_length=1, max_length=20)
+
+class EmailVerificationIn(BaseModel):
+    email: EmailStr
+    code: Optional[UUID] = None
+
+class UserRegisterCompany(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    name: str = Field(min_length=1, max_length=20)
+    company_code: str
 
 class UserOut(BaseModel):
     id: UUID
@@ -55,6 +65,7 @@ class UserProfileResponse(BaseModel):
     id: UUID
     profile_name: str
     username: Optional[str] = None
+    offical_flg: Optional[bool] = None
     avatar_url: Optional[str] = None
     cover_url: Optional[str] = None
     bio: Optional[str] = None
