@@ -5,9 +5,12 @@ from app.constants.enums import IdentityKind
 from datetime import datetime
 from sqlalchemy import desc, asc
 from sqlalchemy.orm import joinedload
+from app.models.notifications import Notifications
 from app.models.user import Users
 from app.models.profiles import Profiles
 from typing import Optional, List
+
+from app.schemas.notification import NotificationType
 
 def create_identity_verification(db: Session, user_id: str, status: int) -> IdentityVerifications:
     """
@@ -270,3 +273,64 @@ def reject_identity_verification(
         print(f"Reject identity verification error: {e}")
         db.rollback()
         return None
+
+def add_notification_for_identity_verification(db: Session, user_id: str, status: int) -> bool:
+    """
+    身分証明のステータスを更新
+
+    Args:
+        db: データベースセッション
+        user_id: ユーザーID
+        status: ステータス
+    """
+    try:
+        profiles = db.query(Profiles).filter(Profiles.user_id == user_id).first()
+        if not profiles:
+            raise Exception("Profileが見つかりません")
+        if status == "approved":
+            try:
+                notification = Notifications(
+                    user_id=user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "身分証明の審査が承認されました",
+                        "subtitle": "身分証明の審査が承認されました",
+                        "avatar": profiles.avatar_url,
+                        "redirect_url": f"/profile?username={profiles.username}",
+                    },
+                    is_read=False,
+                    read_at=None,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                print(f"Add notification for identity verification error: {e}")
+                db.rollback()
+                pass
+        elif status == "rejected":
+            try:
+                notification = Notifications(
+                    user_id=user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "身分証明の審査が拒否されました",
+                        "subtitle": "身分証明の審査が拒否されました",
+                        "avatar": profiles.avatar_url,
+                        "redirect_url": f"/profile?username={profiles.username}",
+                    },
+                    is_read=False,
+                    read_at=None,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                print(f"Add notification for identity verification error: {e}")
+                db.rollback()
+                pass
+    except Exception as e:
+        print(f"Add notification for identity verification error: {e}")
+        pass

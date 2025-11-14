@@ -16,6 +16,7 @@ from app.models.profiles import Profiles
 from app.services.s3.presign import presign_get
 
 from app.crud.identity_crud import (
+    add_notification_for_identity_verification,
     get_identity_verifications_paginated,
     update_identity_verification_status,
     approve_identity_verification,
@@ -138,6 +139,12 @@ def review_identity_verification(
                 )
             except Exception as e:
                 print(f"Email sending failed: {e}")
+
+            try:
+                add_notification_for_identity_verification(db, user.id, review.status)
+            except Exception as e:
+                print(f"Notification sending failed: {e}")
+                pass
 
             return {"message": "身分証明を承認しました", "status": "approved"}
 

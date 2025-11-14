@@ -31,7 +31,7 @@ from app.constants.enums import (
 from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
 from app.crud.media_rendition_crud import create_media_rendition
 from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status
-from app.crud.post_crud import update_post_status
+from app.crud.post_crud import add_notification_for_post, update_post_status
 from app.crud.media_assets_crud import get_media_asset_by_id
 from app.schemas.transcode_mc import TranscodeMCUpdateRequest
 from app.crud.post_crud import get_post_by_id
@@ -247,6 +247,9 @@ def transcode_mc_unified(
                     db.commit()
                     db.refresh(post)
 
+                    # 投稿に対する通知を追加
+                    add_notification_for_post(db, post, row.creator_user_id, type="approved")
+
         return {"status": True, "message": f"Media conversion completed for {type}"}
 
     except HTTPException:
@@ -306,6 +309,9 @@ def transcode_mc_update(
                     post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
                     db.commit()
                     db.refresh(post)
+
+                    # 投稿に対する通知を追加
+                    add_notification_for_post(db, post, asset.creator_user_id, type="approved")
 
         return {"status": True, "message": f"Media conversion completed for {type}"}
 

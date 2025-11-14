@@ -21,6 +21,7 @@ from app.models.profiles import Profiles
 from app.models.admins import Admins
 from app.core.security import hash_password
 from app.crud.admin_crud import (
+    add_notification_for_creator_application,
     get_dashboard_info,
     get_users_paginated,
     update_user_status,
@@ -220,7 +221,7 @@ def get_creator_application(
 ):
     """クリエイター申請詳細を取得"""
     
-    application = db.query(Creators).filter(Creators.id == application_id).first()
+    application = db.query(Creators).filter(Creators.user_id == application_id).first()
     if not application:
         raise HTTPException(status_code=404, detail="申請が見つかりません")
     
@@ -238,6 +239,9 @@ def review_creator_application(
     success = update_creator_application_status(db, application_id, review.status)
     if not success:
         raise HTTPException(status_code=404, detail="申請が見つかりませんまたは既に審査済みです")
+    
+    # クリエイター申請に対する通知を追加
+    add_notification_for_creator_application(db, application_id, type=review.status)
     
     return {"message": "申請審査を完了しました"}
 

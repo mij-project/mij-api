@@ -1,9 +1,13 @@
+from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from app.models import Notifications, Profiles, Users
 from app.models.social import Likes
 from app.models.posts import Posts
 from uuid import UUID
 from typing import List
+
+from app.schemas.notification import NotificationType
 
 def get_likes_count(db: Session, post_id: UUID) -> int:
     """
@@ -107,4 +111,33 @@ def toggle_like(db: Session, user_id: UUID, post_id: UUID) -> dict:
         like = Likes(user_id=user_id, post_id=post_id)
         db.add(like)
         db.commit()
+        add_notification_like(db, user_id, post_id)
         return {"liked": True, "message": "いいねしました"}
+
+def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
+    """
+    いいね通知を追加
+    """
+    try:
+        post = db.query(Posts).filter(Posts.id == post_id).first()
+        liked_user_profile = db.query(Profiles).filter(Profiles.user_id == user_id).first()
+        notification = Notifications(
+            user_id=post.creator_user_id,
+            type=NotificationType.USERS,
+            payload={
+                "title": f"{liked_user_profile.username} があなたの投稿をいいねしました",
+                "subtitle": f"{liked_user_profile.username} があなたの投稿をいいねしました",
+                "avatar": liked_user_profile.avatar_url,
+                "redirect_url": f"/post/detail?post_id={post.id}"
+            },
+            is_read=False,
+            read_at=None,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        db.add(notification)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Add notification like error: {e}")
+        pass
