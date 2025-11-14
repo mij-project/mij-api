@@ -10,7 +10,8 @@ from app.db.base import Base
 from app import models
 
 config = context.config
-fileConfig(config.config_file_name)
+if config.attributes.get("configure_logger", True):
+    fileConfig(config.config_file_name)
 target_metadata = Base.metadata
 
 def run_migrations_offline():

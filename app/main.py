@@ -1,9 +1,11 @@
+from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 from fastapi import Request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from app.db.migrations import run_migrations
 from app.middlewares.csrf import CSRFMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -16,7 +18,18 @@ load_dotenv(dotenv_path=env_file)
 print(f" Loaded FastAPI ENV: {env_file}")
 
 from app.routers import api_router
-app = FastAPI()
+
+# ========================
+# ✅ Auto Alembic Upgrade
+# ========================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- startup ---
+    run_migrations()   # auto alembic upgrade head mỗi lần app start
+
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # ========================
 # CORS

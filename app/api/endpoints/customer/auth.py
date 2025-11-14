@@ -18,7 +18,7 @@ from app.core.security import (
 )
 from app.core.cookies import set_auth_cookies, clear_auth_cookies, REFRESH_COOKIE, CSRF_COOKIE, ACCESS_COOKIE
 from app.core.config import settings
-from app.deps.auth import get_current_user
+from app.deps.auth import get_current_user, get_current_user_for_me
 from datetime import datetime, timedelta
 from requests_oauthlib import OAuth1Session
 from app.deps.auth import issue_app_jwt_for
@@ -228,7 +228,10 @@ def x_callback(
 
 # 認可テスト用の /auth/me
 @router.get("/me")
-def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
+def me(
+    user: Users = Depends(get_current_user_for_me), 
+    db: Session = Depends(get_db)
+):
     """
     ユーザー情報取得
 
@@ -239,6 +242,8 @@ def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
     Returns:
         dict: ユーザー情報
     """
+    if not user:
+        return {"status": "401", "message": "Missing access token"}
     try:
         # 48時間（2日）チェック
         if user.last_login_at:
