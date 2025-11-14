@@ -2,9 +2,11 @@ import random
 import string
 import base64
 import hashlib, bcrypt
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from os import getenv
 from app.constants.enums import MediaAssetKind, MediaAssetStatus
+from uuid import UUID
+import os
 from app.services.s3.presign import presign_get
 
 
@@ -119,3 +121,13 @@ def resolve_media_asset_storage_key(media_asset: Dict[str, Any]) -> str:
             return f"{CDN_URL}/{storage_key}"
 
     return storage_key
+
+
+def generate_email_verification_url(token: str, code: Optional[UUID] = None) -> str:
+    """
+    メールアドレスの認証URLを生成
+    """
+    if code:
+        return f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={token}&code={code}"
+    else:
+        return f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={token}"
