@@ -4,6 +4,7 @@ from sqlalchemy import func, desc, asc
 from datetime import datetime
 from uuid import UUID
 
+from app.models.notifications import Notifications
 from app.models.user import Users
 from app.models.creators import Creators
 from app.models.identity import IdentityVerifications
@@ -16,6 +17,8 @@ from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
 from app.constants.enums import PostStatus, MediaAssetStatus
 import os
+
+from app.schemas.notification import NotificationType
 
 CDN_URL = os.getenv("CDN_BASE_URL")
 
@@ -444,7 +447,7 @@ def update_creator_application_status(db: Session, application_id: str, status: 
         bool: 更新成功フラグ
     """
     try:
-        application = db.query(Creators).filter(Creators.id == application_id).first()
+        application = db.query(Creators).filter(Creators.user_id == application_id).first()
         if not application or application.status != 1:  # 1 = pending
             return False
         
@@ -583,3 +586,66 @@ def reject_post_with_comments(
         traceback.print_exc()
         db.rollback()
         return False
+
+def add_notification_for_creator_application(
+    db: Session, 
+    application_id: str, 
+    type: str
+) -> bool:
+    """
+    クリエイター申請に対する通知を追加
+    
+    Args:
+        db: データベースセッション
+        application_id: 申請ID
+        status: ステータス
+    """
+    try:
+        if type == "approved":
+            try:
+                notification = Notifications(
+                    user_id=application_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "クリエイター申請が承認されました",
+                        "subtitle": "クリエイター申請が承認されました",
+                        "avatar": None,
+                        "redirect_url": f"/profile?username={application_id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for creator application approved error: {e}")
+                pass
+        
+        elif type == "rejected":
+            try:
+                notification = Notifications(
+                    user_id=application_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "クリエイター申請が拒否されました",
+                        "subtitle": "クリエイター申請が拒否されました",
+                        "avatar": None,
+                        "redirect_url": f"/profile?username={application_id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for creator application rejected error: {e}")
+                pass
+    except Exception as e:
+        print(f"Add notification for creator application error: {e}")
+        pass

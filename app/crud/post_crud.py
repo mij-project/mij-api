@@ -4,11 +4,13 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import distinct, distinct, distinct, func, desc, exists, and_
 from app.models.genres import Genres
+from app.models.notifications import Notifications
 from app.models.posts import Posts
 from app.models.social import Follows, Follows, Follows, Likes, Bookmarks, Comments
 from uuid import UUID
 from datetime import datetime
 from app.constants.enums import AccountType, AccountType, AccountType, PostStatus, MediaAssetKind, MediaAssetStatus
+from app.schemas.notification import NotificationType
 from app.schemas.post import PostCreateRequest
 from app.models.post_categories import PostCategories
 from app.models.categories import Categories
@@ -4213,3 +4215,94 @@ def get_ranking_creators_overall_detail_monthly(db: Session, page: int = 1, limi
         .limit(limit)
         .all()
     )
+
+def add_notification_for_post(
+    db: Session, 
+    post: Posts = None, 
+    user_id: UUID = None, 
+    liked_user_id: UUID = None,
+    type: str = "approved"
+) -> None:
+    """ 投稿に対する通知を追加
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+        user_id: ユーザーID
+        type: 通知タイプ "approved" | "rejected" | "like"
+    """
+    try:
+        if type == "approved":
+            try:
+                notification = Notifications(
+                    user_id=post.creator_user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "投稿が承認されました",
+                        "subtitle": "投稿が承認されました",
+                        "avatar": None,
+                        "redirect_url": f"/account/post/{post.id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for post approved error: {e}")
+                pass
+        elif type == "rejected":
+            post = db.query(Posts).filter(Posts.id == post.id).first()
+            if not post:
+                raise Exception("Post not found")
+            try:
+                notification = Notifications(
+                    user_id=post.creator_user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "投稿が拒否されました",
+                        "subtitle": "投稿が拒否されました",
+                        "avatar": None,
+                        "redirect_url": f"/account/post/{post.id}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for post rejected error: {e}")
+                pass
+        elif type == "like":
+            liked_user_profile = db.query(Profiles).filter(Profiles.user_id == liked_user_id).first()
+            if not liked_user_profile:
+                raise Exception("Liked user profile not found")
+            try:
+                notification = Notifications(
+                    user_id=post.creator_user_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": f"{liked_user_profile.username} が投稿にいいねしました",
+                        "subtitle": f"{liked_user_profile.username} が投稿にいいねしました",
+                        "avatar": liked_user_profile.avatar_url,
+                        "redirect_url": f"/profile?username={liked_user_profile.username}",
+                    },
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Add notification for post like error: {e}")
+    except Exception as e:
+        print(f"Add notification for post error: {e}")
+        pass
