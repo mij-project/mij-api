@@ -7,7 +7,8 @@ from app.api.endpoints.customer import (
     creater, gender, plans, categories, post,
     transcode_mc, top, category, ranking, social,
     purchases, preregistrations, account, auth_email_verify,
-    conversations, order, sms_verifications, banners, video_temp, notifications as customer_notifications
+    conversations, order, sms_verifications, banners, video_temp, notifications as customer_notifications,
+    search
 )
 
 # Admin routes
@@ -66,6 +67,7 @@ api_router.include_router(sms_verifications.router, prefix="/sms-verifications",
 api_router.include_router(banners.router, prefix="/banners", tags=["Banners"])
 api_router.include_router(video_temp.router, prefix="", tags=["Video Temp"])
 api_router.include_router(customer_notifications.router, prefix="/notifications", tags=["Notifications"])
+api_router.include_router(search.router, prefix="", tags=["Search"])
 
 # Admin routes
 api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin Auth"])
