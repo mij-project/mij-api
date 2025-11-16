@@ -84,6 +84,7 @@ def kyc_presign_upload(
 
         return VerifyPresignResponse(verification_id=verification.id, uploads=uploads)
     except Exception as e:
+        db.rollback()
         print("認証情報作成エラーが発生しました", e)
         # エラーが発生した場合は自動的にロールバックされるため、明示的なrollbackは不要
         raise HTTPException(500, f"Failed to issue presigned URL: {e}")
@@ -122,7 +123,7 @@ def kyc_complete(
                 raise HTTPException(400, f"missing uploaded file: {f.kind}")
 
         update_identity_verification(
-            db, body.verification_id, VerificationStatus.APPROVED, datetime.now()
+            db, body.verification_id, VerificationStatus.WAITING, datetime.now()
         )
 
         users = update_user_identity_verified_at(db, user.id ,True, datetime.now())

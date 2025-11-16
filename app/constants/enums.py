@@ -157,6 +157,11 @@ class ConversationType:
     GROUP = 3 # グループ
     DELUSION = 4 # 妄想の間
 
+# 会話参加者の種類
+class ParticipantType:
+    USER = 1 # 一般ユーザー
+    ADMIN = 2 # 管理者
+
 # メディアアセットの向き
 class MediaAssetOrientation:
     PORTRAIT = 1 # 縦

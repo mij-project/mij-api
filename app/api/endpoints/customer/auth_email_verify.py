@@ -32,7 +32,7 @@ from app.api.commons.utils import generate_email_verification_url
 router = APIRouter()
 
 
-@router.post("/verify")
+@router.post("/verify/")
 def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db)):
     """メールアドレスの認証
 
@@ -83,7 +83,7 @@ def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db
         print("メールアドレスの認証エラーが発生しました", e)
         raise HTTPException(500, f"Failed to verify: {e}")
 
-@router.post("/resend")
+@router.post("/resend/")
 def verify_email(
     email_verification_in: EmailVerificationIn, 
     db: Session = Depends(get_db),     background: BackgroundTasks = BackgroundTasks()

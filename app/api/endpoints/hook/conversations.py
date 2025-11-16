@@ -9,7 +9,9 @@ from app.db.base import get_db
 from app.core.security import decode_token
 from app.core.cookies import ACCESS_COOKIE
 from app.models.user import Users
+from app.models.admins import Admins
 from app.crud.user_crud import get_user_by_id
+from app.crud.admin_crud import get_admin_by_id
 from app.crud import conversations_crud
 
 BASE_URL = os.getenv("CDN_BASE_URL")
@@ -85,6 +87,33 @@ async def get_user_from_cookie(websocket: WebSocket, db: Session) -> Optional[Us
         return None
 
 
+async def get_admin_from_cookie(websocket: WebSocket, db: Session) -> Optional[Admins]:
+    """Cookieから管理者IDを取得"""
+    try:
+        # WebSocketのCookieヘッダーから access_token を取得
+        cookies = websocket.cookies
+        access_token = cookies.get(ACCESS_COOKIE)
+
+        if not access_token:
+            print("❌ No access token found in cookies")
+            return None
+
+        payload = decode_token(access_token)
+
+        if payload.get("type") != "access":
+            print("❌ Invalid token type")
+            return None
+
+        admin_id = payload.get("sub")
+        admin = get_admin_by_id(db, admin_id)
+        return admin
+    except Exception as e:
+        print(f"❌ Admin authentication error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 @router.websocket("/conversations/delusion")
 async def websocket_delusion_endpoint(
     websocket: WebSocket,
@@ -154,7 +183,8 @@ async def websocket_delusion_endpoint(
                     "message": {
                         "id": str(message.id),
                         "conversation_id": str(message.conversation_id),
-                        "sender_user_id": str(message.sender_user_id),
+                        "sender_user_id": str(message.sender_user_id) if message.sender_user_id else None,
+                        "sender_admin_id": None,
                         "body_text": message.body_text,
                         "created_at": message.created_at.isoformat(),
                         "sender_username": user.profile_name if hasattr(user, 'profile_name') else None,
@@ -188,9 +218,9 @@ async def websocket_admin_delusion_endpoint(
     - 特定の会話に接続
     - リアルタイムでメッセージを送受信
     """
-    # トークン検証
-    user = await get_user_from_cookie(websocket, db)
-    if not user or user.role != 3:  # 管理人権限チェック
+    # トークン検証（管理者テーブルから取得）
+    admin = await get_admin_from_cookie(websocket, db)
+    if not admin:  # 管理者認証チェック
         await websocket.close(code=4003, reason="Admin access required")
         return
 
@@ -225,11 +255,11 @@ async def websocket_admin_delusion_endpoint(
                     })
                     continue
 
-                # メッセージをDBに保存
+                # メッセージをDBに保存（管理者メッセージとして保存）
                 message = conversations_crud.create_message(
                     db=db,
                     conversation_id=UUID(conversation_id),
-                    sender_user_id=user.id,
+                    sender_admin_id=admin.id,
                     body_text=body_text
                 )
 
@@ -239,12 +269,13 @@ async def websocket_admin_delusion_endpoint(
                     "message": {
                         "id": str(message.id),
                         "conversation_id": str(message.conversation_id),
-                        "sender_user_id": str(message.sender_user_id),
+                        "sender_user_id": None,
+                        "sender_admin_id": str(message.sender_admin_id),
                         "body_text": message.body_text,
                         "created_at": message.created_at.isoformat(),
-                        "sender_username": user.profile_name,
-                        "sender_avatar": f"{BASE_URL}/{user.profile.avatar_url}" if user.profile and user.profile.avatar_url else None,
-                        "sender_profile_name": user.profile_name
+                        "sender_username": "運営",
+                        "sender_avatar": None,
+                        "sender_profile_name": "運営"
                     }
                 })
 
@@ -255,7 +286,7 @@ async def websocket_admin_delusion_endpoint(
                     conversations_crud.mark_as_read(
                         db=db,
                         conversation_id=UUID(conversation_id),
-                        user_id=user.id,
+                        user_id=admin.id,
                         message_id=UUID(message_id)
                     )
                     await websocket.send_json({

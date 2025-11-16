@@ -35,7 +35,7 @@ def create_submission(
         user_id=user_id,
         image_type=image_type,
         storage_key=storage_key,
-        status=1,  # pending
+        status=ProfileImageStatus.PENDING,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
     )

@@ -15,6 +15,7 @@ from app.models.subscriptions import Subscriptions
 from app.models.media_assets import MediaAssets
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
+from app.models.profile_image_submissions import ProfileImageSubmissions
 from app.constants.enums import PostStatus, MediaAssetStatus
 import os
 
@@ -149,23 +150,31 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
             .filter(Posts.status == 1)
             .count()
         )
-        
+
+        # プロフィール画像審査中件数（status=1が審査待ち）
+        pending_profile_reviews = (
+            db.query(ProfileImageSubmissions)
+            .filter(ProfileImageSubmissions.status == 1)
+            .count()
+        )
+
         # 月間売上（仮の値 - 実際のOrdersテーブルから計算する場合）
         monthly_revenue = 100000
-        
+
         # アクティブな購読数
         active_subscriptions = (
             db.query(Subscriptions)
             .filter(Subscriptions.status == 1)  # アクティブな購読
             .count()
         )
-        
+
         return {
             "total_users": total_users,
             "total_posts": total_posts,
             "pending_identity_verifications": pending_identity_verifications,
             "pending_creator_applications": pending_creator_applications,
             "pending_post_reviews": pending_post_reviews,
+            "pending_profile_reviews": pending_profile_reviews,
             "monthly_revenue": monthly_revenue,
             "active_subscriptions": active_subscriptions
         }
@@ -178,6 +187,7 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
             "pending_identity_verifications": 0,
             "pending_creator_applications": 0,
             "pending_post_reviews": 0,
+            "pending_profile_reviews": 0,
             "monthly_revenue": 0,
             "active_subscriptions": 0
         }

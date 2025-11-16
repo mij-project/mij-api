@@ -4,8 +4,9 @@
 import os
 import uuid
 import subprocess
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form
-from fastapi.responses import FileResponse
+import time
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
@@ -124,6 +125,11 @@ def _get_video_duration(video_path: str) -> Optional[float]:
     ffprobeを使用して動画の長さを取得
     """
     try:
+        # ファイルの存在確認
+        if not os.path.exists(video_path):
+            print(f"動画ファイルが見つかりません: {video_path}")
+            return None
+
         cmd = [
             "ffprobe",
             "-v", "error",
@@ -131,8 +137,16 @@ def _get_video_duration(video_path: str) -> Optional[float]:
             "-of", "default=noprint_wrappers=1:nokey=1",
             video_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+        print(f"ffprobeコマンド: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+        if result.returncode != 0:
+            print(f"ffprobeエラー (return code: {result.returncode}): {result.stderr}")
+            return None
+
         duration = float(result.stdout.strip())
+        print(f"動画の長さ: {duration}秒")
         return duration
     except Exception as e:
         print(f"動画の長さ取得エラー: {e}")
@@ -145,6 +159,18 @@ def _cut_video(input_path: str, output_path: str, start_time: float, end_time: f
     """
     try:
         duration = end_time - start_time
+
+        # 入力ファイルの存在確認
+        if not os.path.exists(input_path):
+            raise Exception(f"入力ファイルが見つかりません: {input_path}")
+
+        # 出力ディレクトリの存在確認と作成
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        print(f"動画切り取り開始: {input_path} -> {output_path}")
+        print(f"開始時間: {start_time}秒, 終了時間: {end_time}秒, 長さ: {duration}秒")
 
         cmd = [
             "ffmpeg",
@@ -159,36 +185,98 @@ def _cut_video(input_path: str, output_path: str, start_time: float, end_time: f
             output_path
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        print(f"ffmpegコマンド: {' '.join(cmd)}")
+
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+        # 標準出力と標準エラーを出力（デバッグ用）
+        if result.stdout:
+            print(f"ffmpeg stdout: {result.stdout[-500:]}")  # 最後の500文字のみ
+        if result.stderr:
+            print(f"ffmpeg stderr: {result.stderr[-500:]}")  # 最後の500文字のみ
 
         if result.returncode != 0:
-            raise Exception(f"ffmpegエラー: {result.stderr}")
+            raise Exception(f"ffmpegエラー (return code: {result.returncode}): {result.stderr[-500:]}")
+
+        # 出力ファイルの存在確認
+        if not os.path.exists(output_path):
+            raise Exception(f"出力ファイルが生成されませんでした: {output_path}")
+
+        print(f"動画切り取り完了: {output_path} (サイズ: {os.path.getsize(output_path)} bytes)")
 
     except subprocess.CalledProcessError as e:
-        print(f"動画切り取りエラー: {e.stderr}")
-        raise Exception(f"動画の切り取りに失敗しました: {e.stderr}")
+        print(f"動画切り取りエラー (CalledProcessError): {e.stderr}")
+        raise Exception(f"動画の切り取りに失敗しました: {e.stderr[-500:]}")
     except Exception as e:
         print(f"動画切り取りエラー: {e}")
         raise Exception(f"動画の切り取りに失敗しました: {str(e)}")
 
 
-@router.get("/temp-videos/{filename:path}")
-async def serve_temp_video(filename: str):
+@router.delete("/video-temp/cleanup/{temp_video_id}")
+async def cleanup_temp_files(
+    temp_video_id: str,
+    user: Users = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
     """
-    一時動画ファイルを配信する
+    一時ファイルを削除（投稿完了後のクリーンアップ用）
+    """
+    try:
+        deleted_files = []
+
+        # 本編動画の削除
+        main_video_path = _find_temp_video_file(temp_video_id)
+        if main_video_path and os.path.exists(main_video_path):
+            os.remove(main_video_path)
+            deleted_files.append(os.path.basename(main_video_path))
+            print(f"本編動画を削除: {main_video_path}")
+
+        # サンプル動画の削除（temp_video_idから生成された全てのmp4ファイル）
+        # 注: サンプル動画IDは別途生成されるため、パターンマッチングで探索
+        for file in os.listdir(TEMP_VIDEO_DIR):
+            file_path = os.path.join(TEMP_VIDEO_DIR, file)
+            # UUIDパターンにマッチするファイルを削除対象とする
+            if os.path.isfile(file_path) and file.endswith('.mp4'):
+                # ファイル名がUUIDパターンの場合のみ削除（安全性のため）
+                try:
+                    uuid.UUID(os.path.splitext(file)[0])
+                    # 作成時刻が古いファイル（1時間以上前）のみ削除
+                    if os.path.getctime(file_path) < (time.time() - 3600):
+                        os.remove(file_path)
+                        deleted_files.append(file)
+                        print(f"古いサンプル動画を削除: {file_path}")
+                except ValueError:
+                    # UUIDでない場合はスキップ
+                    pass
+
+        return {
+            "message": "一時ファイルを削除しました",
+            "deleted_files": deleted_files
+        }
+
+    except Exception as e:
+        print(f"一時ファイル削除エラー: {e}")
+        # エラーが発生してもクライアント側の処理は継続させる（削除失敗は致命的ではない）
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/temp-videos/{filename:path}")
+async def serve_temp_video(filename: str, request: Request):
+    """
+    一時動画ファイルを配信する（Range Request対応）
 
     Args:
         filename: ファイル名（拡張子含む）
+        request: HTTPリクエスト
 
     Returns:
-        FileResponse: 動画ファイル
+        StreamingResponse: 動画ファイル（Range Request対応）
     """
     try:
         # ファイルパスを構築
         file_path = os.path.join(TEMP_VIDEO_DIR, filename)
 
         # セキュリティ: パストラバーサル攻撃を防ぐ
-        # 正規化されたパスがTEMP_VIDEO_DIR内にあることを確認
         normalized_path = os.path.normpath(file_path)
         if not normalized_path.startswith(os.path.normpath(TEMP_VIDEO_DIR)):
             raise HTTPException(status_code=403, detail="アクセスが拒否されました")
@@ -197,7 +285,7 @@ async def serve_temp_video(filename: str):
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="ファイルが見つかりません")
 
-        # ファイルが通常のファイルであることを確認（ディレクトリではない）
+        # ファイルが通常のファイルであることを確認
         if not os.path.isfile(file_path):
             raise HTTPException(status_code=400, detail="無効なファイルです")
 
@@ -212,11 +300,75 @@ async def serve_temp_video(filename: str):
         }
         media_type = media_type_mapping.get(ext, "application/octet-stream")
 
-        # ファイルを返す
-        return FileResponse(
-            path=file_path,
-            media_type=media_type,
-            filename=filename
+        # ファイルサイズを取得
+        file_size = os.path.getsize(file_path)
+
+        # Range Requestの処理
+        range_header = request.headers.get("range")
+
+        if range_header:
+            try:
+                # Range: bytes=start-end の形式をパース
+                range_match = range_header.replace("bytes=", "").strip().split("-")
+                start = int(range_match[0]) if range_match[0] else 0
+                end = int(range_match[1]) if len(range_match) > 1 and range_match[1] else file_size - 1
+
+                # endがfile_sizeを超える場合は調整
+                end = min(end, file_size - 1)
+
+                # 範囲の検証
+                if start < 0 or start >= file_size or end < start:
+                    raise HTTPException(status_code=416, detail="範囲が不正です")
+
+                chunk_size = end - start + 1
+
+                async def file_iterator():
+                    with open(file_path, "rb") as f:
+                        f.seek(start)
+                        remaining = chunk_size
+                        while remaining > 0:
+                            read_size = min(65536, remaining)  # 64KBずつ読み込み
+                            chunk = f.read(read_size)
+                            if not chunk:
+                                break
+                            remaining -= len(chunk)
+                            yield chunk
+
+                headers = {
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(chunk_size),
+                }
+
+                return StreamingResponse(
+                    file_iterator(),
+                    status_code=206,
+                    headers=headers,
+                    media_type=media_type
+                )
+            except ValueError as e:
+                print(f"Range header parse error: {e}, header: {range_header}")
+                # Range headerのパースに失敗した場合は全体を返す
+                pass
+
+        # 通常のレスポンス（Range headerなし、またはパース失敗時）
+        async def file_iterator():
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)  # 64KBずつ読み込み
+                    if not chunk:
+                        break
+                    yield chunk
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        }
+
+        return StreamingResponse(
+            file_iterator(),
+            headers=headers,
+            media_type=media_type
         )
 
     except HTTPException:

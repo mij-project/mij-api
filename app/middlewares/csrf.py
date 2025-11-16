@@ -8,8 +8,8 @@ EXCLUDE_PATHS = {
     "/auth/login", "/auth/refresh", "/auth/logout",
     "/users/register", "/webhooks/mediaconvert", "/admin/users",
     "/admin/auth/login", "/admin/auth/logout", "/admin/auth/me",
-    "/transcodes/transcode_mc", "/preregistrations", "/auth/email/resend",
-    "/auth/email/verify", "/_debug/send-email",
+    "/transcodes/transcode_mc", "/preregistrations", "/auth/email/resend", "/auth/email/resend/",
+    "/auth/email/verify", "/auth/email/verify/", "/_debug/send-email",
     "/admin/conversations", "/admin/create-admin", "/users/register/company",
 }
 

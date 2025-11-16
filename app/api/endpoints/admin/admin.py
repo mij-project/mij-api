@@ -52,6 +52,7 @@ def get_dashboard_stats(
         pending_creator_applications=stats["pending_creator_applications"],
         pending_identity_verifications=stats["pending_identity_verifications"],
         pending_post_reviews=stats["pending_post_reviews"],
+        pending_profile_reviews=stats["pending_profile_reviews"],
         total_posts=stats["total_posts"],
         monthly_revenue=stats["monthly_revenue"],
         active_subscriptions=stats["active_subscriptions"]
@@ -118,7 +119,6 @@ def create_admin_user(
             email=admin_data.email,
             password_hash=hashed_password,
             role=admin_data.role,
-            status=admin_data.status
         )
 
         if not new_admin:

@@ -56,7 +56,7 @@ class Users(Base):
     creator_type: Mapped[List["CreatorType"]] = relationship("CreatorType", back_populates="user", cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
     genders: Mapped[List["Gender"]] = relationship("Gender", secondary="creator_type", viewonly=True, lazy="selectin")
     email_verification_tokens: Mapped[List["EmailVerificationTokens"]] = relationship("EmailVerificationTokens", back_populates="user")
-    conversations: Mapped[List["ConversationMessages"]] = relationship("ConversationMessages", back_populates="sender")
+    conversations: Mapped[List["ConversationMessages"]] = relationship("ConversationMessages", back_populates="sender_user", foreign_keys="ConversationMessages.sender_user_id")
     participants: Mapped[List["ConversationParticipants"]] = relationship("ConversationParticipants", back_populates="user")
     sms_verifications: Mapped[List["SMSVerifications"]] = relationship("SMSVerifications", back_populates="user")
     banners: Mapped[List["Banners"]] = relationship("Banners", back_populates="creator")

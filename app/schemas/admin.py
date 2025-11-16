@@ -21,6 +21,7 @@ class AdminDashboardStats(BaseModel):
     pending_creator_applications: int
     pending_identity_verifications: int
     pending_post_reviews: int  # 投稿申請中件数を追加
+    pending_profile_reviews: int  # プロフィール画像申請中件数を追加
     total_posts: int
     monthly_revenue: float
     active_subscriptions: int
