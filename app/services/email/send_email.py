@@ -225,6 +225,26 @@ def send_identity_rejection_email(to: str, display_name: str | None = None, note
         tags={"category": "identity_rejection"},
     )
 
+def send_password_reset_email(to: str, reset_url: str, display_name: str | None = None) -> None:
+    """パスワードリセットメール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】パスワードリセットのご案内"
+    ctx = {
+        "name": display_name or "",
+        "reset_url": reset_url,
+        "brand": "mijfans",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+        "expire_hours": os.getenv("PASSWORD_RESET_TTL_HOURS", "1"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="password_reset.html",
+        ctx=ctx,
+        tags={"category": "password_reset"},
+    )
+
 # --------------------------
 # 実体：バックエンド切替
 # --------------------------
