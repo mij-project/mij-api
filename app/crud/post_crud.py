@@ -3,6 +3,7 @@ import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import distinct, distinct, distinct, func, desc, exists, and_
+from app.models import UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
 from app.models.posts import Posts
@@ -30,6 +31,8 @@ from app.models.orders import Orders, OrderItems
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.constants.enums import PostType
 from datetime import datetime, timedelta
+from app.schemas.user_settings import UserSettingsType
+from app.services.email.send_email import send_post_approval_email, send_post_rejection_email
 from app.services.s3.presign import presign_get
 from app.constants.enums import MediaAssetKind, MediaAssetStatus
 
@@ -4306,3 +4309,49 @@ def add_notification_for_post(
     except Exception as e:
         print(f"Add notification for post error: {e}")
         pass
+
+def add_mail_notification_for_post(
+    db: Session, 
+    post_id: UUID = None, 
+    type: str = "approved"
+) -> None:
+    """ 投稿に対するメール通知を追加
+
+    Args:
+        db: データベースセッション
+        user_id: ユーザーID
+        type: 通知タイプ "approved" | "rejected"
+    """
+    try:
+        user = (
+            db.query(
+                Users,
+                Profiles.username,
+                Posts,
+                UserSettings.settings,
+            )
+            .join(Profiles, Users.id == Profiles.user_id)
+            .join(Posts, Users.id == Posts.creator_user_id)
+            .outerjoin(
+                UserSettings,
+                and_(
+                    Users.id == UserSettings.user_id,
+                    UserSettings.type == UserSettingsType.EMAIL,
+                ),
+            )
+            .filter(Posts.id == post_id)
+            .first()
+        )
+
+        if not user:
+            raise Exception("Can not query user settings")
+        if type == "approved":
+            if ((user.settings is None) or (user.settings.get("postApprove", True) == True) or (user.settings.get("postApprove", True) is None)):
+                send_post_approval_email(user.email, user.profile.username)
+        elif type == "rejected":
+            if ((user.settings is None) or (user.settings.get("postApprove", True) == True) or (user.settings.get("postApprove", True) is None)):
+                send_post_rejection_email(user.email, user.username, user.Posts.reject_comments)
+    except Exception as e:
+        print(f"Add mail notification for post error: {e}")
+        pass
+               

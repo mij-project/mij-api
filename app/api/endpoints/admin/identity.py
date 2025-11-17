@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
+from app.models import UserSettings
 from app.schemas.admin import (
     AdminIdentityVerificationResponse, 
     PaginatedResponse, 
@@ -13,6 +14,7 @@ from app.schemas.admin import (
 from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.models.user import Users
 from app.models.profiles import Profiles
+from app.schemas.user_settings import UserSettingsType
 from app.services.s3.presign import presign_get
 
 from app.crud.identity_crud import (
@@ -133,10 +135,12 @@ def review_identity_verification(
 
             # 承認メール送信
             try:
-                send_identity_approval_email(
-                    to=user.email,
-                    display_name=user.profile.username if user.profile else user.profile_name
-                )
+                email_settings = db.query(UserSettings).filter(UserSettings.user_id == user.id, UserSettings.type == UserSettingsType.EMAIL).first()
+                if (not email_settings or (email_settings.settings.get("identityApprove", True) == True)):
+                    send_identity_approval_email(
+                        to=user.email,
+                        display_name=user.profile.username if user.profile else user.profile_name
+                    )
             except Exception as e:
                 print(f"Email sending failed: {e}")
 
@@ -161,11 +165,13 @@ def review_identity_verification(
 
             # 拒否メール送信
             try:
-                send_identity_rejection_email(
-                    to=user.email,
-                    display_name=user.profile.username if user.profile else user.profile_name,
-                    notes=review.notes
-                )
+                email_settings = db.query(UserSettings).filter(UserSettings.user_id == user.id, UserSettings.type == UserSettingsType.EMAIL).first()
+                if (not email_settings or (email_settings.settings.get("identityApprove", True) == True)):
+                    send_identity_rejection_email(
+                        to=user.email,
+                        display_name=user.profile.username if user.profile else user.profile_name,
+                        notes=review.notes
+                    )
 
                 users = update_user_identity_verified_at(db, user.id, False, datetime.now())
                 if not users:

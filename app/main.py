@@ -8,6 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from app.db.migrations import run_migrations
 from app.middlewares.csrf import CSRFMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from app.db.migrations import run_migrations
+
 
 # ========================
 # ✅ .env スイッチング処理

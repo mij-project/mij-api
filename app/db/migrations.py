@@ -15,11 +15,14 @@ def run_migrations() -> None:
     cfg.attributes["configure_logger"] = False
     script = ScriptDirectory.from_config(cfg)
     head_rev = script.get_current_head()
-
-    engine = create_engine(SQLALCHEMY_DATABASE_URL)
-    with engine.connect() as conn:
-        context = MigrationContext.configure(conn)
-        current_rev = context.get_current_revision()
-    if current_rev == head_rev:
-        return
+    try:
+        engine = create_engine(SQLALCHEMY_DATABASE_URL)
+        with engine.connect() as conn:
+            context = MigrationContext.configure(conn)
+            current_rev = context.get_current_revision()
+        if current_rev == head_rev:
+            return
+    except Exception as e:
+        print(f"Error running migrations: {e}")
+        pass
     command.upgrade(cfg, "head")
