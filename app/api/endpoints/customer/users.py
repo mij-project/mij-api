@@ -107,10 +107,6 @@ def get_user_profile_by_username_endpoint(
         user = profile_data["user"]
         profile = profile_data["profile"]
         
-        website_url = None
-        if profile and profile.links and isinstance(profile.links, dict):
-            website_url = profile.links.get("website")
-        
         # モデルオブジェクトをスキーマオブジェクトに変換
         profile_posts = []
         for post_data in profile_data["posts"]:
@@ -213,7 +209,7 @@ def get_user_profile_by_username_endpoint(
             avatar_url=f"{BASE_URL}/{profile.avatar_url}" if profile and profile.avatar_url else None,
             cover_url=f"{BASE_URL}/{profile.cover_url}" if profile and profile.cover_url else None,
             bio=profile.bio if profile else None,
-            website_url=website_url,
+            links=profile.links if profile else None,
             post_count=len(profile_data["posts"]),
             follower_count=profile_data["follower_count"],
             posts=profile_posts,

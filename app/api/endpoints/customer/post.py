@@ -402,7 +402,7 @@ def _format_creator_info(creator: dict, creator_profile: dict):
     return {
         "username": creator_profile.username if creator_profile else creator.email,
         "profile_name": creator.profile_name if creator_profile else creator.email,
-        "avatar": f"{BASE_URL}/{creator_profile.avatar_url}" if creator_profile else None,
+        "avatar": f"{BASE_URL}/{creator_profile.avatar_url}" if creator_profile.avatar_url else None,
     }
 
 def _format_categories_info(categories: list):

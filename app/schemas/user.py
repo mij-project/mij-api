@@ -69,6 +69,7 @@ class UserProfileResponse(BaseModel):
     avatar_url: Optional[str] = None
     cover_url: Optional[str] = None
     bio: Optional[str] = None
+    links: Optional[dict] = None
     website_url: Optional[str] = None
     post_count: int
     follower_count: int
