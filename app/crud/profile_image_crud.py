@@ -4,12 +4,15 @@ from sqlalchemy import desc, asc
 from datetime import datetime
 from uuid import UUID
 
+from app.models import Notifications
 from app.models.profile_image_submissions import ProfileImageSubmissions
 from app.models.user import Users
 from app.models.profiles import Profiles
 from app.models.admins import Admins
 from app.constants.enums import ProfileImage, ProfileImageStatus
 import os
+
+from app.schemas.notification import NotificationType
 
 CDN_URL = os.getenv("CDN_BASE_URL", "")
 
@@ -353,3 +356,45 @@ def get_user_submissions(
         "avatar_submission": avatar_submission,
         "cover_submission": cover_submission
     }
+
+def add_notification_for_profile_image_submission(
+    db: Session,
+    submission_id: UUID,
+    type: str,
+) -> None:
+    """
+    プロフィール画像申請に対する通知を追加
+    """
+    try:
+        submission = get_submission_by_id(db, submission_id)
+        if not submission:
+            return
+        profile = db.query(Profiles).filter(
+            Profiles.user_id == submission.user_id
+        ).first()
+        if type == "approved":
+            title = "プロフィール画像申請が承認されました"
+            subtitle = "プロフィール画像申請が承認されました"
+        elif type == "rejected":
+            title = "プロフィール画像申請が却下されました"
+            subtitle = "プロフィール画像申請が却下されました"
+        else:
+            return
+        if not profile:
+            return
+        notification = Notifications(
+            user_id=profile.user_id,
+            type=NotificationType.USERS,
+            payload={
+                "title": title,
+                "subtitle": subtitle,
+                "avatar": profile.avatar_url,
+                "redirect_url": f"/profile?username={profile.username}"
+            }
+        )
+        db.add(notification)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print("プロフィール画像申請に対する通知を追加エラー:", e)
+        return

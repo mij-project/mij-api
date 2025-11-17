@@ -100,7 +100,11 @@ def approve_profile_image_submission(
         )
 
     db.commit()
-
+    profile_image_crud.add_notification_for_profile_image_submission(
+        db=db,
+        submission_id=submission_id,
+        type="approved"
+    )
     return {
         "success": True,
         "message": "画像申請を承認しました。プロフィールが更新されました。"
@@ -135,7 +139,11 @@ def reject_profile_image_submission(
         )
 
     db.commit()
-
+    profile_image_crud.add_notification_for_profile_image_submission(
+        db=db,
+        submission_id=submission_id,
+        type="rejected"
+    )
     return {
         "success": True,
         "message": "画像申請を却下しました。"
