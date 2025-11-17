@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;padding:20px;background-color:#f9fafb;">
+    <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+      <h2 style="color:#111827;margin-bottom:20px;">{{ brand }} いいね通知</h2>
+
+      <p style="color:#374151;line-height:1.6;">{{ name }} 様</p>
+
+      <p style="color:#374151;line-height:1.6;">
+        {{ username }} があなたの投稿をいいねしました
+      </p>
+
+      <a href="{{ redirect_url }}" style="color:#2563eb;text-decoration:none;">{{ redirect_url }}</a>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <p style="color:#6b7280;font-size:14px;line-height:1.6;">
+        お問い合わせ: <a href="mailto:{{ support_email }}" style="color:#2563eb;text-decoration:none;">{{ support_email }}</a>
+      </p>
+
+      <p style="color:#9ca3af;font-size:12px;margin-top:20px;">
+        このメールは自動送信されています。返信はできません。
+      </p>
+    </div>
+  </body>
+</html>

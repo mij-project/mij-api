@@ -100,6 +100,11 @@ def approve_profile_image_submission(
         )
 
     db.commit()
+    profile_image_crud.add_mail_notification_for_profile_image_submission(
+        db=db,
+        submission_id=submission_id,
+        type="approved"
+    )
     profile_image_crud.add_notification_for_profile_image_submission(
         db=db,
         submission_id=submission_id,
@@ -139,6 +144,11 @@ def reject_profile_image_submission(
         )
 
     db.commit()
+    profile_image_crud.add_mail_notification_for_profile_image_submission(
+        db=db,
+        submission_id=submission_id,
+        type="rejected"
+    )
     profile_image_crud.add_notification_for_profile_image_submission(
         db=db,
         submission_id=submission_id,

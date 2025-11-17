@@ -16,7 +16,7 @@ from app.crud.admin_crud import (
     update_post_status,
     reject_post_with_comments,
 )
-from app.crud.post_crud import add_notification_for_post, get_post_by_id
+from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, get_post_by_id
 from app.api.commons.utils import resolve_media_asset_storage_key
 
 router = APIRouter()
@@ -84,6 +84,8 @@ def reject_post(
     if not success:
         raise HTTPException(status_code=404, detail="投稿が見つかりません")
 
+    # Email通知を追加
+    add_mail_notification_for_post(db, post_id=post_id, type="rejected")
     # 投稿に対する通知を追加
     add_notification_for_post(db, post_id=post_id, type="rejected")
     

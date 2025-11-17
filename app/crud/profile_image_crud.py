@@ -1,10 +1,10 @@
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, asc
+from sqlalchemy import and_, desc, asc
 from datetime import datetime
 from uuid import UUID
 
-from app.models import Notifications
+from app.models import Notifications, Posts, UserSettings
 from app.models.profile_image_submissions import ProfileImageSubmissions
 from app.models.user import Users
 from app.models.profiles import Profiles
@@ -13,6 +13,8 @@ from app.constants.enums import ProfileImage, ProfileImageStatus
 import os
 
 from app.schemas.notification import NotificationType
+from app.schemas.user_settings import UserSettingsType
+from app.services.email.send_email import send_profile_image_approval_email, send_profile_image_rejection_email
 
 CDN_URL = os.getenv("CDN_BASE_URL", "")
 
@@ -397,4 +399,45 @@ def add_notification_for_profile_image_submission(
     except Exception as e:
         db.rollback()
         print("プロフィール画像申請に対する通知を追加エラー:", e)
+        return
+
+def add_mail_notification_for_profile_image_submission(
+    db: Session,
+    submission_id: UUID,
+    type: str,
+) -> None:
+    """
+    プロフィール画像申請に対するメール通知を追加
+    """
+    try:
+        user = (
+            db.query(
+                Users,
+                Profiles,
+                ProfileImageSubmissions,
+                UserSettings.settings,
+            )
+            .join(Profiles, Users.id == Profiles.user_id)
+            .join(ProfileImageSubmissions, Profiles.user_id == ProfileImageSubmissions.user_id)
+            .outerjoin(
+                UserSettings,
+                and_(
+                    Users.id == UserSettings.user_id,
+                    UserSettings.type == UserSettingsType.EMAIL,
+                ),
+            )
+            .filter(ProfileImageSubmissions.id == submission_id)
+            .first()
+        )
+        if not user:
+            raise Exception("Can not query user settings")
+        if type == "approved":
+            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
+                send_profile_image_approval_email(user.email, user.Profiles.username)
+        elif type == "rejected":
+            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
+                send_profile_image_rejection_email(user.email, user.Profiles.username, user.ProfileImageSubmissions.rejection_reason)
+
+    except Exception as e:
+        print("プロフィール画像申請に対するメール通知を追加エラー:", e)
         return

@@ -245,6 +245,128 @@ def send_password_reset_email(to: str, reset_url: str, display_name: str | None 
         tags={"category": "password_reset"},
     )
 
+def send_post_approval_email(to: str, display_name: str | None = None) -> None:
+    """投稿承認完了メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】投稿が承認されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "post_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="post_notification.html",
+        ctx=ctx,
+        tags={"category": "post_approval"},
+    )
+
+def send_post_rejection_email(to: str, display_name: str | None = None, notes: str | None = None) -> None:
+    """投稿拒否通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】投稿が拒否されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "notes": notes or "申請内容を再度ご確認ください。",
+        "post_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="post_notification.html",
+        ctx=ctx,
+        tags={"category": "post_rejection"},
+    )
+
+def send_profile_image_approval_email(to: str, display_name: str | None = None) -> None:
+    """プロフィール画像承認完了メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】プロフィール画像が承認されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "profile_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="profile_notification.html",
+        ctx=ctx,
+        tags={"category": "profile_image_approval"},
+    )
+
+def send_profile_image_rejection_email(to: str, display_name: str | None = None, notes: str | None = None) -> None:
+    """プロフィール画像拒否通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】プロフィール画像が拒否されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "notes": notes or "申請内容を再度ご確認ください。",
+        "profile_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="profile_notification.html",
+        ctx=ctx,
+        tags={"category": "profile_image_rejection"},
+    )
+
+def send_follow_notification_email(to: str, name: str | None = None, username: str | None = None, redirect_url: str | None = None) -> None:
+    """フォロー通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】フォロー通知"
+    ctx = {
+        "name": name or "", 
+        "brand": "mijfans",
+        "username": username or "",
+        "redirect_url": redirect_url or os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="follow_notification.html",
+        ctx=ctx,
+        tags={"category": "follow_notification"},
+    )
+
+def send_like_notification_email(to: str, name: str | None = None, username: str | None = None, redirect_url: str | None = None) -> None:
+    """いいね通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】いいね通知"
+    ctx = {
+        "name": name or "",
+        "brand": "mijfans",
+        "username": username or "",
+        "redirect_url": redirect_url or os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="like_notification.html",
+        ctx=ctx,
+        tags={"category": "follow_notification"},
+    )
+
 # --------------------------
 # 実体：バックエンド切替
 # --------------------------
