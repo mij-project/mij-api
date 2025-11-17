@@ -207,7 +207,13 @@ def transcode_mc_unified(
         }
         type = type_mapping.get(post_type, "video")  # デフォルトはvideo
 
+        # サブメディアアセットを更新
         update_sub_media_asset(db, post_id)
+
+        # 投稿ステータスを変換中に更新
+        post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
+        if not post:
+            raise HTTPException(status_code=404, detail="Post status not updated")
 
         # メディアアセットの取得
         assets = get_media_asset_by_post_id(db, post_id, post_type)
@@ -280,6 +286,11 @@ def transcode_mc_update(
         media_asset_ids = update_request.media_assets
         post_type = update_request.post_type
 
+        post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
+
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+
         type_mapping = {
             PostType.VIDEO: "video",  # 動画投稿
             PostType.IMAGE: "image",  # 画像投稿
@@ -333,3 +344,12 @@ def update_sub_media_asset(db: Session, post_id: str) -> Optional[Any]:
     kind_list = [MediaAssetKind.THUMBNAIL, MediaAssetKind.OGP]
     media_assets = update_sub_media_assets_status(db, post_id, kind_list, MediaAssetStatus.APPROVED)
     return True
+
+def _update_post_status_for_convert(db: Session, post_id: str, status: int) -> Optional[Any]:
+    """
+    投稿ステータスを変換中に更新する
+    """
+    post = update_post_status(db, post_id, status)
+    db.commit()
+    db.refresh(post)
+    return post

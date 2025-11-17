@@ -43,6 +43,7 @@ class PostStatus:
     DELETED = 4 # 削除
     APPROVED = 5 # 公開
     RESUBMIT = 6 # 再申請
+    CONVERTING = 7 # 変換中
 
 # 投稿の種類
 class PostType:
