@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, func, and_
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.models.events import Events, UserEvents
@@ -186,7 +186,7 @@ def update_event(
         if value is not None:
             setattr(event, key, value)
 
-    event.updated_at = datetime.utcnow()
+    event.updated_at = datetime.now(timezone.utc)
     db.flush()
     return event
 

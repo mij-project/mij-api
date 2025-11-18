@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from app.models.search_history import SearchHistory
@@ -28,7 +28,7 @@ def create_or_update_search_history(
     )
 
     if existing:
-        existing.created_at = datetime.utcnow()
+        existing.created_at = datetime.now(timezone.utc)
         existing.search_type = search_type
         existing.filters = filters
         db.commit()
@@ -113,7 +113,7 @@ def cleanup_expired_histories(db: Session, days: int = 90) -> int:
     """
     期限切れの検索履歴を削除 (バッチ処理用)
     """
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
     count = (
         db.query(SearchHistory)
         .filter(SearchHistory.created_at < cutoff_date)

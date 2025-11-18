@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.models.banners import Banners
@@ -65,7 +65,7 @@ def get_active_banners(
     Returns:
         List[Dict]: バナーリスト
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     results = (
         db.query(Banners, Profiles.username, Profiles.cover_url, Profiles.avatar_url, Users.profile_name)
@@ -271,7 +271,7 @@ def update_banner(
     if priority is not None:
         banner.priority = priority
 
-    banner.updated_at = datetime.utcnow()
+    banner.updated_at = datetime.now(timezone.utc)
     db.flush()
     return banner
 
@@ -290,7 +290,7 @@ def update_banner_image(
         return None
 
     banner.image_key = image_key
-    banner.updated_at = datetime.utcnow()
+    banner.updated_at = datetime.now(timezone.utc)
     banner.image_source = image_source
     db.flush()
     return banner
@@ -336,7 +336,7 @@ def reorder_banners(
         banner = get_banner_by_id(db, banner_ids)
         if banner:
             banner.display_order = index
-            banner.updated_at = datetime.utcnow()
+            banner.updated_at = datetime.now(timezone.utc)
 
     db.flush()
     return True

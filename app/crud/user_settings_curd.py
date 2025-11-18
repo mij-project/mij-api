@@ -17,8 +17,8 @@ def update_user_settings_by_user_id(db: Session, user_id: UUID, type: UserSettin
                 user_id=user_id, 
                 type=type, 
                 settings=settings,
-                created_at=datetime.now(),
-                updated_at=datetime.now()
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
             )
             db.add(user_settings)
             db.commit()
@@ -26,7 +26,7 @@ def update_user_settings_by_user_id(db: Session, user_id: UUID, type: UserSettin
             return user_settings
         else:
             user_settings.settings = settings
-            user_settings.updated_at = datetime.now()
+            user_settings.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(user_settings)
             return user_settings

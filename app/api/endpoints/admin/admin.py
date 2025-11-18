@@ -1,7 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 from os import getenv
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
@@ -155,7 +155,7 @@ def create_test_admin(
             password_hash=hashed_password,
             role=3,  # admin
             status=1,  # active
-            email_verified_at=datetime.utcnow()
+            email_verified_at=datetime.now(timezone.utc)
         )
         
         db.add(test_admin)
@@ -165,8 +165,8 @@ def create_test_admin(
         admin_profile = Profiles(
             user_id=test_admin.id,
             username="Test Admin",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         
         db.add(admin_profile)

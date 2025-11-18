@@ -173,7 +173,7 @@ def review_identity_verification(
                         notes=review.notes
                     )
 
-                users = update_user_identity_verified_at(db, user.id, False, datetime.now())
+                users = update_user_identity_verified_at(db, user.id, False, datetime.now(timezone.utc))
                 if not users:
                     raise HTTPException(500, "身分証明の更新に失敗しました。")
             except Exception as e:

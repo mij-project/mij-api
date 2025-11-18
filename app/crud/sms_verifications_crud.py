@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.sms_verifications import SMSVerifications
 from app.constants.enums import SMSStatus, SMSPurpose
-from datetime import datetime
+from datetime import datetime, timezone
 def get_latest_sms_verification(db: Session, phone_e164: str, purpose: int, user_id: str) -> SMSVerifications:
     """
     SMS認証を取得する
@@ -11,7 +11,7 @@ def get_latest_sms_verification(db: Session, phone_e164: str, purpose: int, user
         SMSVerifications.phone_e164 == phone_e164,
         SMSVerifications.purpose == purpose,
         SMSVerifications.status != SMSStatus.PENDING,
-        SMSVerifications.expires_at > datetime.now()
+        SMSVerifications.expires_at > datetime.now(timezone.utc)
     ).order_by(SMSVerifications.created_at.desc()).first()
 
 
@@ -63,7 +63,7 @@ def update_sms_verification_status(db: Session, sms_verification_id: str, status
     ).update({
         "status": status,
         "attempts": attempts,
-        "updated_at": datetime.now()
+        "updated_at": datetime.now(timezone.utc)
     })
     
     # 更新されたオブジェクトを取得して返す

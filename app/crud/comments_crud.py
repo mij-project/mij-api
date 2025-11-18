@@ -4,7 +4,7 @@ from app.models.social import Comments
 from app.models.user import Users
 from uuid import UUID
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 def create_comment(
     db: Session, 
@@ -113,7 +113,7 @@ def update_comment(
     
     if comment:
         comment.body = body
-        comment.updated_at = datetime.now()
+        comment.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(comment)
     
@@ -140,7 +140,7 @@ def delete_comment(
     )
     
     if comment:
-        comment.deleted_at = datetime.now()
+        comment.deleted_at = datetime.now(timezone.utc)
         db.commit()
         return True
     

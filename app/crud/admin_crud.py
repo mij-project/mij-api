@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc, asc
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.models.notifications import Notifications
@@ -103,8 +103,8 @@ def create_admin(
             password_hash=password_hash,
             role=role,
             status=status,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
         db.add(new_admin)
@@ -436,7 +436,7 @@ def update_user_status(db: Session, user_id: str, status: str) -> bool:
         
         # ステータス更新（実装に応じて調整）
         user.status = 2 if status == "suspended" else 1
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         db.commit()
         return True
     except Exception as e:
@@ -465,14 +465,14 @@ def update_creator_application_status(db: Session, application_id: str, status: 
         # 申請ステータス更新
         status_map = {"approved": 2, "rejected": 3}
         application.status = status_map[status]
-        application.updated_at = datetime.utcnow()
+        application.updated_at = datetime.now(timezone.utc)
         
         # 承認の場合、ユーザーのロールをクリエイターに更新
         if status == "approved":
             user = db.query(Users).filter(Users.id == application.user_id).first()
             if user:
                 user.role = 2  # 2 = creator
-                user.updated_at = datetime.utcnow()
+                user.updated_at = datetime.now(timezone.utc)
         
         db.commit()
         return True
@@ -504,7 +504,7 @@ def update_identity_verification_status(db: Session, verification_id: str, statu
         # 審査ステータス更新
         status_map = {"approved": 2, "rejected": 3}
         verification.status = status_map[status]
-        verification.updated_at = datetime.utcnow()
+        verification.updated_at = datetime.now(timezone.utc)
         
         db.commit()
         return True
@@ -539,7 +539,7 @@ def update_post_status(db: Session, post_id: str, status: str) -> bool:
             "pending": PostStatus.PENDING,
         }
         post.status = status_map.get(status, PostStatus.PENDING)
-        post.updated_at = datetime.utcnow()
+        post.updated_at = datetime.now(timezone.utc)
         
         db.commit()
         return True
@@ -576,7 +576,7 @@ def reject_post_with_comments(
         # 投稿のステータスを拒否に更新し、拒否理由を保存
         post.status = PostStatus.REJECTED
         post.reject_comments = post_reject_comment
-        post.updated_at = datetime.utcnow()
+        post.updated_at = datetime.now(timezone.utc)
 
         # メディア別の拒否理由を保存
         if media_reject_comments:
@@ -623,8 +623,8 @@ def add_notification_for_creator_application(
                         "avatar": None,
                         "redirect_url": f"/profile?username={application_id}",
                     },
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
                     is_read=False,
                     read_at=None,
                 )
@@ -646,8 +646,8 @@ def add_notification_for_creator_application(
                         "avatar": None,
                         "redirect_url": f"/profile?username={application_id}",
                     },
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
                     is_read=False,
                     read_at=None,
                 )

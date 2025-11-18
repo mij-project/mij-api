@@ -3,7 +3,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from app.db.session import SQLALCHEMY_DATABASE_URL
 from alembic.runtime.migration import MigrationContext
 

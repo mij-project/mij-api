@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func, desc
 from typing import Optional, List, Tuple, Union
 from uuid import UUID
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 from app.models.conversations import Conversations
 from app.models.conversation_messages import ConversationMessages
@@ -214,7 +214,7 @@ def delete_message(db: Session, message_id: UUID) -> bool:
     if not message:
         return False
 
-    message.deleted_at = datetime.now()
+    message.deleted_at = datetime.now(timezone.utc)
     db.commit()
     return True
 

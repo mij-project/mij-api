@@ -39,7 +39,7 @@ def now_utc() -> dt.datetime:
     """
     現在のUTC時刻を取得する
     """
-    return dt.datetime.utcnow()
+    return dt.datetime.now(dt.timezone.utc)
 
 def create_access_token(sub: str) -> str:
     """

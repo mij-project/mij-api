@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.constants.enums import IdentityKind
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import desc, asc
 from sqlalchemy.orm import joinedload
 from app.models.notifications import Notifications
@@ -174,7 +174,7 @@ def update_identity_verification_status(db: Session, verification_id: str, statu
         # 審査ステータス更新
         status_map = {"approved": 2, "rejected": 3}
         verification.status = status_map[status]
-        verification.updated_at = datetime.utcnow()
+        verification.updated_at = datetime.now(timezone.utc)
 
         db.commit()
         return True
@@ -215,12 +215,12 @@ def approve_identity_verification(
         if user:
             user.role = 2
             user.is_identity_verified = True
-            user.identity_verified_at = datetime.utcnow()
+            user.identity_verified_at = datetime.now(timezone.utc)
 
         # 審査情報を更新
         verification.status = 3  # APPROVED
         verification.approved_by = admin_id
-        verification.checked_at = datetime.utcnow()
+        verification.checked_at = datetime.now(timezone.utc)
         if notes:
             verification.notes = notes
 
@@ -262,7 +262,7 @@ def reject_identity_verification(
         # 審査情報を更新
         verification.status = 2  # REJECTED
         verification.approved_by = admin_id
-        verification.checked_at = datetime.utcnow()
+        verification.checked_at = datetime.now(timezone.utc)
         if notes:
             verification.notes = notes
 
@@ -300,8 +300,8 @@ def add_notification_for_identity_verification(db: Session, user_id: str, status
                     },
                     is_read=False,
                     read_at=None,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
                 )
                 db.add(notification)
                 db.commit()
@@ -322,8 +322,8 @@ def add_notification_for_identity_verification(db: Session, user_id: str, status
                     },
                     is_read=False,
                     read_at=None,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
                 )
                 db.add(notification)
                 db.commit()
