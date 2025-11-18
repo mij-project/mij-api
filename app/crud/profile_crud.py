@@ -5,6 +5,8 @@ from uuid import UUID
 from app.schemas.account import AccountUpdateRequest
 from datetime import datetime
 from typing import Optional, Dict
+import os
+CDN_BASE_URL = os.getenv("CDN_BASE_URL")
 
 def create_profile(db: Session, user_id: UUID, username: str) -> Profiles:
     """
@@ -120,3 +122,16 @@ def update_profile_by_x(db: Session, user_id: UUID, username: str):
     db.add(profile)
     db.flush()
     return profile
+def get_profile_ogp_image_url(db: Session, user_id: UUID) -> str | None:
+    """
+    ユーザーのOGP画像URLを取得（プロフィール画像）
+    """
+    profile = db.query(Profiles).filter(Profiles.user_id == user_id).first()
+    
+    if not profile:
+        return None
+    
+    if profile.avatar_url:
+        return f"{CDN_BASE_URL}/{profile.avatar_url}"
+    
+    return None

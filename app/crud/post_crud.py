@@ -4310,6 +4310,40 @@ def add_notification_for_post(
         print(f"Add notification for post error: {e}")
         pass
 
+# ========== OGP画像取得 ==========
+def get_post_ogp_image_url(db: Session, post_id: str) -> str | None:
+    """
+    投稿のOGP画像URLを取得
+    優先順位: kind=1のメディアアセット → クリエイタープロフィール画像 → None
+    """
+    # 投稿を取得
+    post = db.query(Posts).filter(Posts.id == post_id).first()
+    if not post:
+        return None
+
+    # kind=1のメディアアセットを取得
+    media_asset = db.query(MediaAssets).filter(
+        and_(
+            MediaAssets.post_id == post_id,
+            MediaAssets.kind == MediaAssetKind.OGP,
+        )
+    ).first()
+
+    # メディアアセットがある場合はそのURLを返す
+    if media_asset and media_asset.storage_key:
+        return f"{CDN_BASE_URL}/{media_asset.storage_key}"
+
+    # メディアアセットがない場合、クリエイターのプロフィール画像を取得
+    creator_profile = db.query(Profiles).filter(
+        Profiles.user_id == post.creator_user_id
+    ).first()
+
+    if creator_profile and creator_profile.avatar_url:
+        return f"{CDN_BASE_URL}/{creator_profile.avatar_url}"
+
+    # プロフィール画像もない場合はNoneを返す
+    return None
+
 def add_mail_notification_for_post(
     db: Session, 
     post_id: UUID = None, 

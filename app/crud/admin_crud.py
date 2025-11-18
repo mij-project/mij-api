@@ -395,6 +395,7 @@ def get_posts_paginated(
             "resubmit": PostStatus.RESUBMIT,
             "deleted": PostStatus.DELETED,
             "pending": PostStatus.PENDING,
+            "converting": PostStatus.CONVERTING,
         }
         query = query.filter(Posts.status == status_map.get(status, PostStatus.PENDING))
     
