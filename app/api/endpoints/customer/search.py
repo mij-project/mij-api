@@ -28,7 +28,7 @@ router = APIRouter()
 @router.get("/search", response_model=SearchResponse)
 def search(
     query: str = Query(..., min_length=1, description="検索クエリ"),
-    type: str = Query("all", regex="^(all|users|posts|hashtags)$", description="検索タイプ"),
+    type: str = Query("all", regex="^(all|users|posts|hashtags|creators|paid_posts)$", description="検索タイプ"),
     sort: str = Query("relevance", regex="^(relevance|popularity)$", description="ソート基準"),
     category_ids: Optional[List[UUID]] = Query(None, description="カテゴリフィルター"),
     post_type: Optional[int] = Query(None, ge=1, le=2, description="投稿タイプ (1=VIDEO, 2=IMAGE)"),
@@ -52,27 +52,41 @@ def search(
         }
 
         # クリエイター検索
-        if type in ["all", "users"]:
+        if type in ["all", "users", "creators"]:
+            # creators タブの場合は最新投稿も取得
+            include_recent_posts = (type == "creators")
+
             creators_results, creators_total = search_crud.search_creators(
                 db,
                 query=query,
                 sort=sort,
                 limit=5 if type == "all" else per_page,
-                offset=0 if type == "all" else offset
+                offset=0 if type == "all" else offset,
+                include_recent_posts=include_recent_posts
             )
 
-            creators_items = [
-                CreatorSearchResult(
-                    id=r.id,
-                    profile_name=r.profile_name,
-                    username=r.username,
-                    avatar_url=f"{BASE_URL}/{r.avatar_url}" if r.avatar_url else None,
-                    bio=r.bio,
-                    followers_count=r.followers_count,
-                    is_verified=r.is_verified,
-                    posts_count=r.posts_count,
-                ) for r in creators_results
-            ]
+            creators_items = []
+            for r in creators_results:
+                recent_posts = []
+                if hasattr(r, 'recent_posts'):
+                    recent_posts = [
+                        {"id": p["id"], "thumbnail_url": f"{BASE_URL}/{p['thumbnail_url']}" if p.get('thumbnail_url') else None}
+                        for p in r.recent_posts
+                    ]
+
+                creators_items.append(
+                    CreatorSearchResult(
+                        id=r.id,
+                        profile_name=r.profile_name,
+                        username=r.username,
+                        avatar_url=f"{BASE_URL}/{r.avatar_url}" if r.avatar_url else None,
+                        bio=r.bio,
+                        followers_count=r.followers_count,
+                        is_verified=r.is_verified,
+                        posts_count=r.posts_count,
+                        recent_posts=recent_posts
+                    )
+                )
 
             response_data["creators"] = SearchSectionResponse(
                 total=creators_total,
@@ -82,13 +96,16 @@ def search(
             total_results += creators_total
 
         # 投稿検索
-        if type in ["all", "posts"]:
+        if type in ["all", "posts", "paid_posts"]:
+            paid_only = (type == "paid_posts")
+
             posts_results, posts_total = search_crud.search_posts(
                 db,
                 query=query,
                 sort=sort,
                 category_ids=[str(cid) for cid in category_ids] if category_ids else None,
                 post_type=post_type,
+                paid_only=paid_only,
                 limit=10 if type == "all" else per_page,
                 offset=0 if type == "all" else offset
             )
@@ -101,6 +118,7 @@ def search(
                     visibility=r.visibility,
                     likes_count=r.likes_count,
                     thumbnail_key=f"{BASE_URL}/{r.thumbnail_key}" if r.thumbnail_key else None,
+                    video_duration=int(r.video_duration) if r.video_duration else None,
                     creator=PostCreatorInfo(
                         id=r.creator_id,
                         profile_name=r.profile_name,

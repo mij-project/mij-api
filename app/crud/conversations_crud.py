@@ -58,19 +58,43 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
     db.flush()
 
     # ウェルカムメッセージを自動挿入（システムメッセージ）
+    base_timestamp = datetime.utcnow()
     welcome_message = ConversationMessages(
         conversation_id=conversation.id,
         sender_user_id=None,  # システムメッセージはsender_user_idをNULLに
         type=0,  # システムメッセージタイプ
         body_text=WelcomeMessage.MESSAGE,
-        moderation=1  # 自動承認
+        moderation=1,  # 自動承認
+        created_at=base_timestamp
     )
     db.add(welcome_message)
     db.flush()
 
+
+    # 管理人メッセージを挿入（管理人が存在しない場合はシステムメッセージとして挿入）
+    admin = (
+        db.query(Admins)
+        .filter(Admins.status == 1, Admins.deleted_at.is_(None))
+        .order_by(Admins.created_at.asc())
+        .first()
+    )
+
+    admin_message = ConversationMessages(
+        conversation_id=conversation.id,
+        sender_user_id=None if admin is None else None,
+        sender_admin_id=admin.id if admin else None,
+        type=1 if admin else 0,
+        body_text=WelcomeMessage.SECOND_MESSAGE,
+        moderation=1,  # 自動承認
+        created_at=base_timestamp + timedelta(microseconds=1)
+    )
+    db.add(admin_message)
+    db.flush()
+
     # 会話の最終メッセージ情報を更新
-    conversation.last_message_id = welcome_message.id
-    conversation.last_message_at = welcome_message.created_at
+    last_message = admin_message or welcome_message
+    conversation.last_message_id = last_message.id
+    conversation.last_message_at = last_message.created_at
 
     db.commit()
     db.refresh(conversation)
