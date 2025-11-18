@@ -1,6 +1,6 @@
 # app/services/s3/keygen.py
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 def video_key(creator_id: str, filename: str) -> str:
     """
@@ -14,7 +14,7 @@ def video_key(creator_id: str, filename: str) -> str:
         str: ビデオキー
     """
     uid = uuid.uuid4()
-    d = datetime.utcnow()
+    d = datetime.now(timezone.utc)
     return f"{creator_id}/videos/{d.year}/{d.month:02d}/{d.day:02d}/{uid}/raw/{filename}"
 
 def identity_key(creator_id: str, submission_id: str, kind: str, ext: str) -> str:
@@ -43,7 +43,7 @@ def account_asset_key(creator_id: str, kind: str, ext: str) -> str:
     Returns:
         str: アバターキー
     """
-    return f"profiles/{creator_id}/{kind}/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4()}.{ext}"
+    return f"profiles/{creator_id}/{kind}/{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4()}.{ext}"
 
 def post_media_image_key(kind: str, creator_id: str, post_id: str, ext: str) -> str:
     """

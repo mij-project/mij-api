@@ -123,10 +123,10 @@ def kyc_complete(
                 raise HTTPException(400, f"missing uploaded file: {f.kind}")
 
         update_identity_verification(
-            db, body.verification_id, VerificationStatus.WAITING, datetime.now()
+            db, body.verification_id, VerificationStatus.WAITING, datetime.now(timezone.utc)
         )
 
-        users = update_user_identity_verified_at(db, user.id ,True, datetime.now())
+        users = update_user_identity_verified_at(db, user.id ,True, datetime.now(timezone.utc))
         if not users:
             raise HTTPException(500, "身分証明の更新に失敗しました。")
         db.commit()

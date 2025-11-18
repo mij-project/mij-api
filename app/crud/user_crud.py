@@ -304,7 +304,7 @@ def update_user_phone_verified_at(db: Session, user_id: str) -> Users:
     # まず更新を実行
     db.query(Users).filter(Users.id==user_id).update({
         "is_phone_verified": True, 
-        "phone_verified_at": datetime.now()
+        "phone_verified_at": datetime.now(timezone.utc)
     })
     
     # 更新されたオブジェクトを取得して返す
@@ -327,7 +327,7 @@ def update_user_email_verified_at(db: Session, user_id: str, offical_flg: bool) 
     """
     db.execute(update(Users).where(Users.id==user_id).values(
         is_email_verified=True, 
-        email_verified_at=datetime.utcnow(),
+        email_verified_at=datetime.now(timezone.utc),
         offical_flg=offical_flg
     ))
 

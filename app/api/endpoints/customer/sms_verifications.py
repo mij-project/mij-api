@@ -19,7 +19,7 @@ from app.crud.creater_crud import create_creator
 from app.crud.user_crud import update_user_phone_verified_at
 from app.services.s3.sms_auth import send_sms
 from app.constants.enums import SMSStatus, SMSPurpose, CreatorStatus
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 router = APIRouter()
 
 RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
@@ -48,7 +48,7 @@ def send_sms_verification(
         latest_sms_verification = get_latest_sms_verification(db, sms_verification_request.phone_e164, sms_verification_request.purpose, user_id)
 
         # クールダウン
-        if latest_sms_verification and (datetime.now() - latest_sms_verification.last_sent_at).total_seconds() < RESEND_COOLDOWN:
+        if latest_sms_verification and (datetime.now(timezone.utc) - latest_sms_verification.last_sent_at.replace(tzinfo=timezone.utc)).total_seconds() < RESEND_COOLDOWN:
             raise HTTPException(status_code=429, detail="送信間隔が短すぎます。しばらくしてから再試行してください。")
 
         # 既存PENDINGは無効化（同一目的で並行利用させない）
@@ -96,7 +96,7 @@ def verify_sms_verification(
     """
     try:
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         db_sms_verification = get_sms_verification_by_phone_e164_and_purpose(db, sms_verification_request.phone_e164, sms_verification_request.purpose)
 
@@ -141,7 +141,7 @@ def _insert_sms_verification(db: Session, phone_e164: str, user_id: str, code: s
         purpose=purpose,
         user_id=user_id,
         code_hash=generete_hash(str(code)),
-        expires_at=datetime.now() + timedelta(seconds=SMS_TTL),
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=SMS_TTL),
     )
 
     return insert_sms_verification(db, db_sms_verification)

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.base import get_db
 from app.core.security import verify_password, create_access_token, create_refresh_token, new_csrf_token
@@ -45,7 +45,7 @@ async def admin_login(
         )
 
     # ログイン時刻を更新
-    admin.last_login_at = datetime.utcnow()
+    admin.last_login_at = datetime.now(timezone.utc)
     db.commit()
 
     # JWTトークン生成
