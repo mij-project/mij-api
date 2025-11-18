@@ -113,7 +113,7 @@ def get_current_user_for_me(
         return None
     try:
         payload = decode_token(access_token)
-    except Exception:
+    except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid or expired access token")
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")

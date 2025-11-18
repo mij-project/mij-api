@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -136,8 +136,8 @@ def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
             },
             is_read=False,
             read_at=None,
-            created_at=datetime.now(),
-            updated_at=datetime.now()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(notification)
         db.commit()

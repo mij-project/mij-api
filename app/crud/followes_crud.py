@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -162,8 +162,8 @@ def add_notification_follow(db: Session, follower_user_id: UUID, creator_user_id
             },
             is_read=False,
             read_at=None,
-            created_at=datetime.now(),
-            updated_at=datetime.now()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(notification)
         db.commit()

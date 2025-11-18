@@ -20,7 +20,7 @@ from app.models.tags import Tags
 from typing import List
 import os
 from os import getenv
-from datetime import datetime
+from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
 
 router = APIRouter()
@@ -352,7 +352,7 @@ def _create_price(db: Session, post_id: str, price: int):
         "currency": "JPY",
         "is_active": True,
         "price": price,
-        "starts_at": datetime.now(),
+        "starts_at": datetime.now(timezone.utc),
     }
     return create_price(db, price_data)
 

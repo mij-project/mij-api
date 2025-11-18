@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, desc, asc
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.models import Notifications, Posts, UserSettings
@@ -41,8 +41,8 @@ def create_submission(
         image_type=image_type,
         storage_key=storage_key,
         status=ProfileImageStatus.PENDING,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     db.add(submission)
     db.flush()
@@ -287,13 +287,13 @@ def approve_submission(
     elif submission.image_type == ProfileImage.COVER:
         profile.cover_url = submission.storage_key
 
-    profile.updated_at = datetime.utcnow()
+    profile.updated_at = datetime.now(timezone.utc)
 
     # 申請ステータス更新
     submission.status = ProfileImageStatus.APPROVED
     submission.approved_by = admin_id
-    submission.checked_at = datetime.utcnow()
-    submission.updated_at = datetime.utcnow()
+    submission.checked_at = datetime.now(timezone.utc)
+    submission.updated_at = datetime.now(timezone.utc)
 
     db.flush()
     return True
@@ -323,9 +323,9 @@ def reject_submission(
     # 申請ステータス更新
     submission.status = ProfileImageStatus.REJECTED
     submission.approved_by = admin_id
-    submission.checked_at = datetime.utcnow()
+    submission.checked_at = datetime.now(timezone.utc)
     submission.rejection_reason = rejection_reason
-    submission.updated_at = datetime.utcnow()
+    submission.updated_at = datetime.now(timezone.utc)
 
     db.flush()
     return True
