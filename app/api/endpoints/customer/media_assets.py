@@ -17,7 +17,7 @@ from app.deps.auth import get_current_user
 from app.db.base import get_db
 from app.services.s3.keygen import post_media_image_key, post_media_video_key
 from app.schemas.commons import PresignResponseItem
-from typing import Dict, List, Union, Tuple, Set
+from typing import Dict, List, Union, Tuple, Set, Any
 from app.services.s3.client import delete_ffmpeg_directory, delete_hls_directory_full
 from app.services.s3.presign import delete_object
 from app.crud.media_assets_crud import (
@@ -29,6 +29,7 @@ from app.crud.media_assets_crud import (
 from app.crud.media_rendition_jobs_crud import delete_media_rendition_job
 from app.crud.post_crud import get_post_by_id
 from app.models.posts import Posts
+from app.models.user import Users
 from app.constants.enums import MediaAssetKind, MediaAssetOrientation, MediaAssetStatus, PostStatus
 from app.constants.enums import AuthenticatedFlag
 
@@ -235,6 +236,51 @@ def delete_existing_media_file(
         print(f"Failed to delete old file from S3: {e}")
 
 
+def _determine_resource_for_asset(
+    asset_kind: MediaAssetKind,
+    authenticated_flg: AuthenticatedFlag
+) -> Resource:
+    """
+    メディアアセットの種類と認証フラグからリソースを決定
+
+    Args:
+        asset_kind (MediaAssetKind): メディアアセットの種類
+        authenticated_flg (AuthenticatedFlag): 認証フラグ
+
+    Returns:
+        Resource: リソース名
+    """
+    if asset_kind in [MediaAssetKind.OGP, MediaAssetKind.THUMBNAIL]:
+        return "public"
+    elif asset_kind == MediaAssetKind.IMAGES:
+        return get_image_resource_and_approved_flag("images", authenticated_flg)
+    elif asset_kind in [MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
+        return get_video_resource_and_approved_flag(authenticated_flg)
+    else:
+        return "ingest"
+
+
+def _verify_post_ownership(
+    post: Dict[str, Any],
+    user: Users
+) -> None:
+    """
+    投稿の所有権を確認
+
+    Args:
+        post (Dict[str, Any]): 投稿情報（辞書形式）
+        user (Users): 現在のユーザー
+
+    Raises:
+        HTTPException: 所有権がない場合
+    """
+    if str(post['user_id']) != str(user.id):
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized: you are not the owner of this post"
+        )
+
+
 # ==================== エンドポイント ====================
 
 @router.post("/presign-image-upload")
@@ -382,11 +428,6 @@ async def presign_update_image_upload(
                 db, str(request.post_id), KIND_MAPPING[f.kind]
             )
 
-            if not existing_assets:
-                raise HTTPException(
-                    404, f"media assets not found: {request.post_id}, {f.kind}"
-                )
-
             # 新しいstorage_keyとpresigned URLを生成
             response = generate_image_presign(
                 f.kind, str(user.id), str(request.post_id), f.ext, f.content_type
@@ -398,20 +439,22 @@ async def presign_update_image_upload(
                 f.kind, post['authenticated_flg']
             )
 
-            # 既存ファイルをS3から削除
-            delete_existing_media_file(
-                existing_assets.storage_key, resource, post['authenticated_flg'], is_video=False
-            )
+            # 既存のメディアアセットがある場合は削除
+            if existing_assets:
+                # 既存ファイルをS3から削除
+                delete_existing_media_file(
+                    existing_assets.storage_key, resource, post['authenticated_flg'], is_video=False
+                )
 
-            # 古いメディアアセットをDBから削除
-            delete_media_asset(db, existing_assets.id)
+                # 古いメディアアセットをDBから削除
+                delete_media_asset(db, existing_assets.id)
 
             # レスポンスに追加
             uploads[f.kind] = create_presign_response_item(response)
 
             # 新しいメディアアセットを作成
             media_asset_data = create_media_asset_data(
-                str(request.post_id), f.kind, new_key, f.orientation, 
+                str(request.post_id), f.kind, new_key, f.orientation,
                 f.content_type, MediaAssetStatus.RESUBMIT
             )
             create_media_asset(db, media_asset_data)
@@ -505,6 +548,83 @@ async def presign_update_video_upload(
         print(f"アップロードURL更新エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/media-asset/{media_asset_id}")
+async def delete_media_asset_by_id(
+    media_asset_id: str,
+    user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, str]:
+    """メディアアセットを削除
+
+    Args:
+        media_asset_id (str): メディアアセットID
+        user (Users): 現在のユーザー
+        db (Session): データベースセッション
+
+    Returns:
+        Dict[str, str]: 削除結果
+
+    Raises:
+        HTTPException: メディアアセットが見つからない場合、投稿が見つからない場合、
+                       所有権がない場合、削除処理でエラーが発生した場合
+    """
+    try:
+        # メディアアセットを取得
+        asset = get_media_asset_by_id(db, media_asset_id)
+        if not asset:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Media asset not found: {media_asset_id}"
+            )
+
+        # 投稿を取得
+        post = get_post_by_id(db, str(asset.post_id))
+        if not post:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Post not found: {asset.post_id}"
+            )
+
+        # 投稿の所有権を確認
+        _verify_post_ownership(post, user)
+
+        # リソースを決定
+        resource = _determine_resource_for_asset(
+            asset.kind,
+            post['authenticated_flg']
+        )
+
+        # S3から削除
+        is_video = asset.kind in [
+            MediaAssetKind.MAIN_VIDEO,
+            MediaAssetKind.SAMPLE_VIDEO
+        ]
+        delete_existing_media_file(
+            asset.storage_key,
+            resource,
+            post['authenticated_flg'],
+            is_video=is_video
+        )
+
+        # DBから削除
+        delete_media_asset(db, asset.id)
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Media asset deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"メディアアセット削除エラー: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete media asset"
+        )
 
 @router.put("/update-images")
 async def update_images(

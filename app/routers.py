@@ -8,7 +8,7 @@ from app.api.endpoints.customer import (
     transcode_mc, top, category, ranking, social,
     purchases, preregistrations, account, auth_email_verify,
     conversations, order, sms_verifications, banners, video_temp, notifications as customer_notifications,
-    search
+    search, creator_type, password_reset, user_settings
 )
 
 # Admin routes
@@ -45,6 +45,7 @@ api_router.include_router(payment_hook, prefix="/webhook", tags=["Payment"])
 api_router.include_router(videos.router, prefix="/videos", tags=["Videos"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
+api_router.include_router(password_reset.router, prefix="/auth/password-reset", tags=["Password Reset"])
 api_router.include_router(creater.router, prefix="/creators", tags=["Creators"])
 api_router.include_router(identity.router, prefix="/identity", tags=["Identity"])
 api_router.include_router(gender.router, prefix="/gender", tags=["Gender"])
@@ -68,6 +69,8 @@ api_router.include_router(banners.router, prefix="/banners", tags=["Banners"])
 api_router.include_router(video_temp.router, prefix="", tags=["Video Temp"])
 api_router.include_router(customer_notifications.router, prefix="/notifications", tags=["Notifications"])
 api_router.include_router(search.router, prefix="", tags=["Search"])
+api_router.include_router(creator_type.router, prefix="/creator-type", tags=["Creator Type"])
+api_router.include_router(user_settings.router, prefix="/user-settings", tags=["User Settings"])
 
 # Admin routes
 api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin Auth"])

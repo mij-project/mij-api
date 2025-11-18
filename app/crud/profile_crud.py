@@ -3,8 +3,10 @@ from app.models.profiles import Profiles
 from app.models.user import Users
 from uuid import UUID
 from app.schemas.account import AccountUpdateRequest
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict
+import os
+CDN_BASE_URL = os.getenv("CDN_BASE_URL")
 
 def create_profile(db: Session, user_id: UUID, username: str) -> Profiles:
     """
@@ -108,7 +110,7 @@ def update_profile(db: Session, user_id: UUID, update_data: AccountUpdateRequest
     profile.links = update_data.links
     profile.avatar_url = update_data.avatar_url
     profile.cover_url = update_data.cover_url
-    profile.updated_at = datetime.now()
+    profile.updated_at = datetime.now(timezone.utc)
     db.add(profile)
     db.flush()
     return profile
@@ -116,7 +118,20 @@ def update_profile(db: Session, user_id: UUID, update_data: AccountUpdateRequest
 def update_profile_by_x(db: Session, user_id: UUID, username: str):
     profile = db.query(Profiles).filter(Profiles.user_id == user_id).first()
     profile.username = username
-    profile.updated_at = datetime.now()
+    profile.updated_at = datetime.now(timezone.utc)
     db.add(profile)
     db.flush()
     return profile
+def get_profile_ogp_image_url(db: Session, user_id: UUID) -> str | None:
+    """
+    ユーザーのOGP画像URLを取得（プロフィール画像）
+    """
+    profile = db.query(Profiles).filter(Profiles.user_id == user_id).first()
+    
+    if not profile:
+        return None
+    
+    if profile.avatar_url:
+        return f"{CDN_BASE_URL}/{profile.avatar_url}"
+    
+    return None

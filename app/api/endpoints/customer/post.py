@@ -7,7 +7,7 @@ from app.constants.enums import PostStatus
 from app.models.user import Users
 from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse, PostUpdateRequest
 from app.constants.enums import PostVisibility, PostType, PlanStatus, PriceType, MediaAssetKind
-from app.crud.post_crud import create_post, get_post_detail_by_id, update_post
+from app.crud.post_crud import create_post, get_post_detail_by_id, update_post, get_post_ogp_image_url
 from app.crud.plan_crud import create_plan
 from app.crud.price_crud import create_price, delete_price_by_post_id
 from app.crud.post_plans_crud import create_post_plan, delete_plan_by_post_id
@@ -20,7 +20,7 @@ from app.models.tags import Tags
 from typing import List
 import os
 from os import getenv
-from datetime import datetime
+from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
 
 router = APIRouter()
@@ -211,6 +211,21 @@ async def get_new_arrivals(
         print("新着投稿取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/{post_id}/ogp-image")
+async def get_post_ogp_image(
+    post_id: str,
+    db: Session = Depends(get_db)
+):
+    """投稿のOGP画像URLを取得する"""
+    try:
+        ogp_image_url = get_post_ogp_image_url(db, post_id)
+        return {
+            "ogp_image_url": ogp_image_url
+        }
+    except Exception as e:
+        print("OGP画像URL取得エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 # utils
 def _determine_visibility(single: bool, plan: bool) -> int:
     """投稿の可視性を判定する"""
@@ -337,7 +352,7 @@ def _create_price(db: Session, post_id: str, price: int):
         "currency": "JPY",
         "is_active": True,
         "price": price,
-        "starts_at": datetime.now(),
+        "starts_at": datetime.now(timezone.utc),
     }
     return create_price(db, price_data)
 
@@ -387,7 +402,7 @@ def _format_creator_info(creator: dict, creator_profile: dict):
     return {
         "username": creator_profile.username if creator_profile else creator.email,
         "profile_name": creator.profile_name if creator_profile else creator.email,
-        "avatar": f"{BASE_URL}/{creator_profile.avatar_url}" if creator_profile else None,
+        "avatar": f"{BASE_URL}/{creator_profile.avatar_url}" if creator_profile.avatar_url else None,
     }
 
 def _format_categories_info(categories: list):

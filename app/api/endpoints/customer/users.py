@@ -15,7 +15,7 @@ from app.models.profiles import Profiles
 from app.models.user import Users
 from app.api.commons.utils import generate_code
 from app.deps.auth import get_current_user
-from app.crud.profile_crud import create_profile
+from app.crud.profile_crud import create_profile, get_profile_ogp_image_url
 from app.schemas.user import ProfilePostResponse, ProfilePlanResponse, ProfilePurchaseResponse, ProfileGachaResponse
 from app.models.posts import Posts
 from app.api.commons.utils import generate_email_verification_url
@@ -106,10 +106,6 @@ def get_user_profile_by_username_endpoint(
         
         user = profile_data["user"]
         profile = profile_data["profile"]
-        
-        website_url = None
-        if profile and profile.links and isinstance(profile.links, dict):
-            website_url = profile.links.get("website")
         
         # モデルオブジェクトをスキーマオブジェクトに変換
         profile_posts = []
@@ -213,7 +209,7 @@ def get_user_profile_by_username_endpoint(
             avatar_url=f"{BASE_URL}/{profile.avatar_url}" if profile and profile.avatar_url else None,
             cover_url=f"{BASE_URL}/{profile.cover_url}" if profile and profile.cover_url else None,
             bio=profile.bio if profile else None,
-            website_url=website_url,
+            links=profile.links if profile else None,
             post_count=len(profile_data["posts"]),
             follower_count=profile_data["follower_count"],
             posts=profile_posts,
@@ -223,6 +219,21 @@ def get_user_profile_by_username_endpoint(
         )
     except Exception as e:
         print("ユーザープロフィール取得エラー: ", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{user_id}/ogp-image")
+async def get_user_ogp_image(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """ユーザーのOGP画像URLを取得する"""
+    try:
+        ogp_image_url = get_profile_ogp_image_url(db, user_id)
+        return {
+            "ogp_image_url": ogp_image_url
+        }
+    except Exception as e:
+        print("OGP画像URL取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

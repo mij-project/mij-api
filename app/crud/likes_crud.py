@@ -1,13 +1,16 @@
-from datetime import datetime
+from datetime import datetime, timezone
+import os
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from app.models import Notifications, Profiles, Users
+from app.models import Notifications, Profiles, UserSettings, Users
 from app.models.social import Likes
 from app.models.posts import Posts
 from uuid import UUID
 from typing import List
 
 from app.schemas.notification import NotificationType
+from app.schemas.user_settings import UserSettingsType
+from app.services.email.send_email import send_like_notification_email
 
 def get_likes_count(db: Session, post_id: UUID) -> int:
     """
@@ -112,6 +115,7 @@ def toggle_like(db: Session, user_id: UUID, post_id: UUID) -> dict:
         db.add(like)
         db.commit()
         add_notification_like(db, user_id, post_id)
+        add_mail_notification_like(db, user_id, post_id)
         return {"liked": True, "message": "いいねしました"}
 
 def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
@@ -132,12 +136,48 @@ def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
             },
             is_read=False,
             read_at=None,
-            created_at=datetime.now(),
-            updated_at=datetime.now()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(notification)
         db.commit()
     except Exception as e:
         db.rollback()
         print(f"Add notification like error: {e}")
+        pass
+
+def add_mail_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
+    """
+    いいね通知メールを追加
+    """
+    try:
+        user = (
+            db.query(
+                Users,
+                Profiles,
+                Posts,
+                UserSettings.settings
+            )
+            .join(Profiles, Users.id == Profiles.user_id)
+            .join(Posts, Users.id == Posts.creator_user_id)
+            .outerjoin(
+                UserSettings,
+                and_(
+                    Users.id == UserSettings.user_id,
+                    UserSettings.type == UserSettingsType.EMAIL,
+                ),
+            )
+            .filter(Posts.id == post_id)
+            .first()
+        )
+        liked_user_profile = db.query(Profiles).filter(Profiles.user_id == user_id).first()
+        if (not user.settings) or (user.settings is None) or (user.settings.get("like", True) == True):
+            send_like_notification_email(
+                user.Users.email, 
+                user.Profiles.username, 
+                liked_user_profile.username, 
+                f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp')}/post/detail?post_id={post_id}"
+            )
+    except Exception as e:
+        print(f"Add mail notification like error: {e}")
         pass

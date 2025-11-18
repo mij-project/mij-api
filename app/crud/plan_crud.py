@@ -5,7 +5,7 @@ from uuid import UUID
 from typing import List, Optional
 from app.schemas.plan import PlanCreateRequest, PlanResponse, SubscribedPlanResponse
 from app.constants.enums import PlanStatus, PlanLifecycleStatus
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.profiles import Profiles
 from app.models.plans import PostPlans
 from app.models.posts import Posts
@@ -389,7 +389,7 @@ def update_plan(db: Session, plan_id: UUID, update_data: dict) -> Optional[Plans
         if hasattr(plan, key) and value is not None:
             setattr(plan, key, value)
     
-    plan.updated_at = datetime.now()
+    plan.updated_at = datetime.now(timezone.utc)
     db.flush()
     return plan
 
@@ -402,7 +402,7 @@ def request_plan_deletion(db: Session, plan_id: UUID) -> Optional[Plans]:
         return None
     
     plan.status = PlanLifecycleStatus.DELETE_REQUESTED
-    plan.updated_at = datetime.now()
+    plan.updated_at = datetime.now(timezone.utc)
     db.flush()
     return plan
 
@@ -510,7 +510,7 @@ def reorder_plans(db: Session, creator_user_id: UUID, plan_orders: List) -> bool
 
         if plan:
             plan.display_order = display_order
-            plan.updated_at = datetime.now()
+            plan.updated_at = datetime.now(timezone.utc)
 
     db.flush()
     return True

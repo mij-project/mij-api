@@ -50,7 +50,7 @@ def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db
     try:
         token_hash = hashlib.sha256(body.token.encode()).hexdigest()
         rec = get_verification_token(db, token_hash)
-        if not rec or rec.consumed_at is not None or rec.expires_at < datetime.utcnow():
+        if not rec or rec.consumed_at is not None or rec.expires_at < datetime.now(timezone.utc):
             raise HTTPException(status_code=400, detail="リンクが無効か、期限切れです。")
 
         # 事前登録判定

@@ -31,7 +31,7 @@ from app.constants.enums import (
 from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
 from app.crud.media_rendition_crud import create_media_rendition
 from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status
-from app.crud.post_crud import add_notification_for_post, update_post_status
+from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, update_post_status
 from app.crud.media_assets_crud import get_media_asset_by_id
 from app.schemas.transcode_mc import TranscodeMCUpdateRequest
 from app.crud.post_crud import get_post_by_id
@@ -207,7 +207,13 @@ def transcode_mc_unified(
         }
         type = type_mapping.get(post_type, "video")  # デフォルトはvideo
 
+        # サブメディアアセットを更新
         update_sub_media_asset(db, post_id)
+
+        # 投稿ステータスを変換中に更新
+        post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
+        if not post:
+            raise HTTPException(status_code=404, detail="Post status not updated")
 
         # メディアアセットの取得
         assets = get_media_asset_by_post_id(db, post_id, post_type)
@@ -247,6 +253,8 @@ def transcode_mc_unified(
                     db.commit()
                     db.refresh(post)
 
+                    # Email通知を追加
+                    add_mail_notification_for_post(db, post_id=post_id, type="approved")
                     # 投稿に対する通知を追加
                     add_notification_for_post(db, post, row.creator_user_id, type="approved")
 
@@ -280,6 +288,11 @@ def transcode_mc_update(
         media_asset_ids = update_request.media_assets
         post_type = update_request.post_type
 
+        post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
+
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+
         type_mapping = {
             PostType.VIDEO: "video",  # 動画投稿
             PostType.IMAGE: "image",  # 画像投稿
@@ -310,6 +323,8 @@ def transcode_mc_update(
                     db.commit()
                     db.refresh(post)
 
+                    # Email通知を追加
+                    add_mail_notification_for_post(db, post_id=post_id, type="approved")
                     # 投稿に対する通知を追加
                     add_notification_for_post(db, post, asset.creator_user_id, type="approved")
 
@@ -333,3 +348,12 @@ def update_sub_media_asset(db: Session, post_id: str) -> Optional[Any]:
     kind_list = [MediaAssetKind.THUMBNAIL, MediaAssetKind.OGP]
     media_assets = update_sub_media_assets_status(db, post_id, kind_list, MediaAssetStatus.APPROVED)
     return True
+
+def _update_post_status_for_convert(db: Session, post_id: str, status: int) -> Optional[Any]:
+    """
+    投稿ステータスを変換中に更新する
+    """
+    post = update_post_status(db, post_id, status)
+    db.commit()
+    db.refresh(post)
+    return post

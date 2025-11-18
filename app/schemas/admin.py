@@ -145,6 +145,7 @@ class AdminPostResponse(BaseModel):
             PostStatus.DELETED: "deleted",       # 4 -> "deleted"
             PostStatus.APPROVED: "approved",     # 5 -> "approved"
             PostStatus.RESUBMIT: "resubmit",     # 6 -> "resubmit"
+            PostStatus.CONVERTING: "converting", # 7 -> "converting"
         }
         status_str = status_map.get(post.status, "pending")
         

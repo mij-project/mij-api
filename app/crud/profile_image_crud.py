@@ -1,15 +1,20 @@
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, asc
-from datetime import datetime
+from sqlalchemy import and_, desc, asc
+from datetime import datetime, timezone
 from uuid import UUID
 
+from app.models import Notifications, Posts, UserSettings
 from app.models.profile_image_submissions import ProfileImageSubmissions
 from app.models.user import Users
 from app.models.profiles import Profiles
 from app.models.admins import Admins
 from app.constants.enums import ProfileImage, ProfileImageStatus
 import os
+
+from app.schemas.notification import NotificationType
+from app.schemas.user_settings import UserSettingsType
+from app.services.email.send_email import send_profile_image_approval_email, send_profile_image_rejection_email
 
 CDN_URL = os.getenv("CDN_BASE_URL", "")
 
@@ -36,8 +41,8 @@ def create_submission(
         image_type=image_type,
         storage_key=storage_key,
         status=ProfileImageStatus.PENDING,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     db.add(submission)
     db.flush()
@@ -282,13 +287,13 @@ def approve_submission(
     elif submission.image_type == ProfileImage.COVER:
         profile.cover_url = submission.storage_key
 
-    profile.updated_at = datetime.utcnow()
+    profile.updated_at = datetime.now(timezone.utc)
 
     # 申請ステータス更新
     submission.status = ProfileImageStatus.APPROVED
     submission.approved_by = admin_id
-    submission.checked_at = datetime.utcnow()
-    submission.updated_at = datetime.utcnow()
+    submission.checked_at = datetime.now(timezone.utc)
+    submission.updated_at = datetime.now(timezone.utc)
 
     db.flush()
     return True
@@ -318,9 +323,9 @@ def reject_submission(
     # 申請ステータス更新
     submission.status = ProfileImageStatus.REJECTED
     submission.approved_by = admin_id
-    submission.checked_at = datetime.utcnow()
+    submission.checked_at = datetime.now(timezone.utc)
     submission.rejection_reason = rejection_reason
-    submission.updated_at = datetime.utcnow()
+    submission.updated_at = datetime.now(timezone.utc)
 
     db.flush()
     return True
@@ -353,3 +358,86 @@ def get_user_submissions(
         "avatar_submission": avatar_submission,
         "cover_submission": cover_submission
     }
+
+def add_notification_for_profile_image_submission(
+    db: Session,
+    submission_id: UUID,
+    type: str,
+) -> None:
+    """
+    プロフィール画像申請に対する通知を追加
+    """
+    try:
+        submission = get_submission_by_id(db, submission_id)
+        if not submission:
+            return
+        profile = db.query(Profiles).filter(
+            Profiles.user_id == submission.user_id
+        ).first()
+        if type == "approved":
+            title = "プロフィール画像申請が承認されました"
+            subtitle = "プロフィール画像申請が承認されました"
+        elif type == "rejected":
+            title = "プロフィール画像申請が却下されました"
+            subtitle = "プロフィール画像申請が却下されました"
+        else:
+            return
+        if not profile:
+            return
+        notification = Notifications(
+            user_id=profile.user_id,
+            type=NotificationType.USERS,
+            payload={
+                "title": title,
+                "subtitle": subtitle,
+                "avatar": profile.avatar_url,
+                "redirect_url": f"/profile?username={profile.username}"
+            }
+        )
+        db.add(notification)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print("プロフィール画像申請に対する通知を追加エラー:", e)
+        return
+
+def add_mail_notification_for_profile_image_submission(
+    db: Session,
+    submission_id: UUID,
+    type: str,
+) -> None:
+    """
+    プロフィール画像申請に対するメール通知を追加
+    """
+    try:
+        user = (
+            db.query(
+                Users,
+                Profiles,
+                ProfileImageSubmissions,
+                UserSettings.settings,
+            )
+            .join(Profiles, Users.id == Profiles.user_id)
+            .join(ProfileImageSubmissions, Profiles.user_id == ProfileImageSubmissions.user_id)
+            .outerjoin(
+                UserSettings,
+                and_(
+                    Users.id == UserSettings.user_id,
+                    UserSettings.type == UserSettingsType.EMAIL,
+                ),
+            )
+            .filter(ProfileImageSubmissions.id == submission_id)
+            .first()
+        )
+        if not user:
+            raise Exception("Can not query user settings")
+        if type == "approved":
+            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
+                send_profile_image_approval_email(user.email, user.Profiles.username)
+        elif type == "rejected":
+            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
+                send_profile_image_rejection_email(user.email, user.Profiles.username, user.ProfileImageSubmissions.rejection_reason)
+
+    except Exception as e:
+        print("プロフィール画像申請に対するメール通知を追加エラー:", e)
+        return

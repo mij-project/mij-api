@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 from typing import Optional
 from uuid import UUID
@@ -49,8 +49,8 @@ def create_notification_admin(db: Session, notification: NotificationCreateReque
       type=notification.type,
       payload=notification.payload,
       is_read=False,
-      created_at=datetime.now(),
-      updated_at=datetime.now()
+      created_at=datetime.now(timezone.utc),
+      updated_at=datetime.now(timezone.utc)
     )
     db.add(new_notification)
     db.commit()
@@ -71,7 +71,7 @@ def update_notification_admin(db: Session, notification_id: UUID, notification_u
       "message": notification_update.payload["message"],
     }
     update_values = {
-      "updated_at": datetime.now(),
+      "updated_at": datetime.now(timezone.utc),
     }
     if update_fields:
       pairs: list[object] = []
@@ -99,18 +99,18 @@ def update_notification_admin(db: Session, notification_id: UUID, notification_u
     db.rollback()
     return None
 
-def get_notifications_paginated(db: Session, user_id: UUID, type: NotificationType, page: int = 1, limit: int = 20) -> tuple[List[Notifications], int]:
+def get_notifications_paginated(db: Session, user: Users, type: NotificationType, page: int = 1, limit: int = 20) -> tuple[List[Notifications], int]:
   """
   通知をページングで取得
   """
   try:  
     skip = (page - 1) * limit
     if type == NotificationType.ADMIN:
-      query = db.query(Notifications).filter(Notifications.type == type).order_by(desc(Notifications.created_at))
+      query = db.query(Notifications).filter(Notifications.type == type, Notifications.created_at >= user.created_at).order_by(desc(Notifications.created_at))
     elif type == NotificationType.USERS:
-      query = db.query(Notifications).filter(Notifications.user_id == user_id, Notifications.type == type).order_by(desc(Notifications.created_at))
+      query = db.query(Notifications).filter(Notifications.user_id == user.id, Notifications.type == type, Notifications.created_at >= user.created_at).order_by(desc(Notifications.created_at))
     elif type == NotificationType.PAYMENTS:
-      query = db.query(Notifications).filter(Notifications.user_id == user_id, Notifications.type == type).order_by(desc(Notifications.created_at))
+      query = db.query(Notifications).filter(Notifications.user_id == user.id, Notifications.type == type, Notifications.created_at >= user.created_at).order_by(desc(Notifications.created_at))
 
     total = query.count()
     notifications = query.offset(skip).limit(limit).all()
@@ -163,7 +163,7 @@ def __mark_notification_as_read_admin(db: Session, notification_id: UUID, user_i
               '{users}',          
               users_array_expr,
           ),
-          updated_at=datetime.now(),
+          updated_at=datetime.now(timezone.utc),
       )
       .returning(Notifications)
   )
@@ -190,7 +190,7 @@ def __mark_notification_as_read_users(db: Session, notification_id: UUID, user_i
       exec = (
         update(Notifications)
         .where(Notifications.id == notification_id)
-        .values(is_read=True, read_at=datetime.now(), updated_at=datetime.now())
+        .values(is_read=True, read_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
         .returning(Notifications)
       )
       result = db.execute(exec)
@@ -214,7 +214,7 @@ def __mark_notification_as_read_payments(db: Session, notification_id: UUID, use
       exec = (
         update(Notifications)
         .where(Notifications.id == notification_id)
-        .values(is_read=True, read_at=datetime.now(), updated_at=datetime.now())
+        .values(is_read=True, read_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
         .returning(Notifications)
       )
       result = db.execute(exec)

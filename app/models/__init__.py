@@ -34,6 +34,8 @@ from .banners import Banners
 from .events import Events, UserEvents
 from .companies import Companies, CompanyUsers
 from .search_history import SearchHistory
+from .password_reset_token import PasswordResetToken
+from .user_settings import UserSettings
 
 __all__ = [
     "Users", "Profiles", "Creators", "Genres", "Categories", "Posts", "PostCategories",
@@ -44,5 +46,5 @@ __all__ = [
     "CreatorType", "Gender", "MediaRenditionJobs", "Preregistrations",
     "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants",
     "Admins", "PaymentEvents", "SMSVerifications", "Banners", "Events", "UserEvents", "Companies", "CompanyUsers",
-    "SearchHistory"
+    "SearchHistory", "PasswordResetToken", "UserSettings"
 ]

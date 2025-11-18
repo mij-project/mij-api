@@ -28,10 +28,10 @@ def issue_verification_token(db: Session, user_id: uuid.UUID, ttl_hours=24, rota
         result = db.execute(
             update(EmailVerificationTokens)
             .where(EmailVerificationTokens.user_id==user_id, EmailVerificationTokens.consumed_at.is_(None))
-            .values(consumed_at=datetime.utcnow())
+            .values(consumed_at=datetime.now(timezone.utc))
         )
     raw, token_hash = generate_email_verification_token()
-    expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
     rec = EmailVerificationTokens(id=uuid.uuid4(), user_id=user_id, token_hash=token_hash, expires_at=expires_at)
     db.add(rec)
     db.commit()
@@ -52,7 +52,7 @@ def update_verification_token(db: Session, user_id: uuid.UUID):
     db.execute(
         update(EmailVerificationTokens)
         .where(EmailVerificationTokens.user_id==user_id, EmailVerificationTokens.consumed_at.is_(None))
-        .values(consumed_at=datetime.utcnow())
+        .values(consumed_at=datetime.now(timezone.utc))
     )
 
 def remake_email_verification_token(db: Session, user_id: uuid.UUID):
@@ -73,14 +73,14 @@ def remake_email_verification_token(db: Session, user_id: uuid.UUID):
         select(EmailVerificationTokens).where(EmailVerificationTokens.user_id==user_id, EmailVerificationTokens.consumed_at.is_(None)
     ).order_by(EmailVerificationTokens.last_sent_at.desc()))
     t = result.scalars().first()
-    if t and (datetime.utcnow() - t.last_sent_at).total_seconds() < cooldown:
+    if t and (datetime.now(timezone.utc) - t.last_sent_at.replace(tzinfo=timezone.utc)).total_seconds() < cooldown:
         raise HTTPException(status_code=429, detail="少し待ってから再度お試しください。")
 
     raw, expires_at = issue_verification_token(db, user_id, ttl_hours=24)
     db.execute(
         update(EmailVerificationTokens)
         .where(EmailVerificationTokens.token_hash == hashlib.sha256(raw.encode()).hexdigest())
-        .values(sent_count=(t.sent_count+1 if t else 1), last_sent_at=datetime.utcnow())
+        .values(sent_count=(t.sent_count+1 if t else 1), last_sent_at=datetime.now(timezone.utc))
     )
 
     return raw, expires_at

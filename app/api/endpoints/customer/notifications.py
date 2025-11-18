@@ -35,7 +35,7 @@ async def get_notifications(
     Returns:
         NotificationUserResponse: 通知リスト
     """
-    notifications, total, has_next = get_notifications_paginated(db, current_user.id, type, page, limit)
+    notifications, total, has_next = get_notifications_paginated(db, current_user, type, page, limit)
 
     return PaginatedNotificationUserResponse(
         notifications=[NotificationCreateResponse(

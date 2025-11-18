@@ -10,6 +10,7 @@ from app.models.tags import Tags, PostTags
 from app.models.post_categories import PostCategories
 from app.models.social import Follows, Likes
 from app.models.media_assets import MediaAssets
+from app.models.prices import Prices
 from app.constants.enums import PostStatus, AccountType, MediaAssetKind
 
 
@@ -18,7 +19,8 @@ def search_creators(
     query: str,
     sort: str = "relevance",
     limit: int = 5,
-    offset: int = 0
+    offset: int = 0,
+    include_recent_posts: bool = False
 ) -> Tuple[List, int]:
     """
     クリエイター検索
@@ -29,6 +31,7 @@ def search_creators(
         sort: ソート基準 ('relevance' or 'popularity')
         limit: 取得件数
         offset: オフセット
+        include_recent_posts: 最新投稿4件を含めるかどうか
 
     Returns:
         (結果リスト, 総件数)
@@ -109,6 +112,62 @@ def search_creators(
     # ページネーション
     results = base_query.limit(limit).offset(offset).all()
 
+    # 最新投稿を取得する場合
+    if include_recent_posts and results:
+        # クリエイターIDのリストを取得
+        creator_ids = [r.id for r in results]
+
+        # 各クリエイターの最新投稿4件を取得
+        recent_posts_query = (
+            db.query(
+                Posts.id,
+                Posts.creator_user_id,
+                MediaAssets.storage_key.label('thumbnail_url')
+            )
+            .join(MediaAssets, Posts.id == MediaAssets.post_id)
+            .filter(Posts.creator_user_id.in_(creator_ids))
+            .filter(Posts.deleted_at.is_(None))
+            .filter(Posts.status == PostStatus.APPROVED)
+            .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+            .order_by(Posts.creator_user_id, desc(Posts.created_at))
+        ).all()
+
+        # クリエイターIDごとに最新投稿をグループ化
+        posts_by_creator = {}
+        for post in recent_posts_query:
+            if post.creator_user_id not in posts_by_creator:
+                posts_by_creator[post.creator_user_id] = []
+            if len(posts_by_creator[post.creator_user_id]) < 4:
+                posts_by_creator[post.creator_user_id].append({
+                    'id': post.id,
+                    'thumbnail_url': post.thumbnail_url
+                })
+
+        # 結果に最新投稿を追加
+        from collections import namedtuple
+
+        # 元の結果フィールドにrecent_postsを追加
+        CreatorWithPosts = namedtuple('CreatorWithPosts', [
+            'id', 'profile_name', 'username', 'avatar_url', 'bio',
+            'followers_count', 'is_verified', 'posts_count', 'recent_posts'
+        ])
+
+        enhanced_results = []
+        for r in results:
+            enhanced_results.append(CreatorWithPosts(
+                id=r.id,
+                profile_name=r.profile_name,
+                username=r.username,
+                avatar_url=r.avatar_url,
+                bio=r.bio,
+                followers_count=r.followers_count,
+                is_verified=r.is_verified,
+                posts_count=r.posts_count,
+                recent_posts=posts_by_creator.get(r.id, [])
+            ))
+
+        return enhanced_results, total
+
     return results, total
 
 
@@ -118,6 +177,7 @@ def search_posts(
     sort: str = "relevance",
     category_ids: Optional[List[str]] = None,
     post_type: Optional[int] = None,
+    paid_only: bool = False,
     limit: int = 10,
     offset: int = 0
 ) -> Tuple[List, int]:
@@ -130,6 +190,7 @@ def search_posts(
         sort: ソート基準
         category_ids: カテゴリIDフィルター
         post_type: 投稿タイプフィルター (1=VIDEO, 2=IMAGE)
+        paid_only: 単品販売のみ (price > 0)
         limit: 取得件数
         offset: オフセット
 
@@ -139,6 +200,21 @@ def search_posts(
     query_lower = query.lower().strip()
     tsquery = func.plainto_tsquery('simple', query)
 
+    # サブクエリでサムネイル取得
+    from sqlalchemy import select
+    thumbnail_subq = (
+        select(MediaAssets.post_id, MediaAssets.storage_key)
+        .where(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+        .subquery()
+    )
+
+    # サブクエリで動画アセット(kind=4)のduration取得
+    video_asset_subq = (
+        select(MediaAssets.post_id, MediaAssets.duration_sec)
+        .where(MediaAssets.kind == 4)
+        .subquery()
+    )
+
     # ベースクエリ
     base_query = (
         db.query(
@@ -147,28 +223,41 @@ def search_posts(
             Posts.post_type,
             Posts.visibility,
             Posts.created_at,
+            video_asset_subq.c.duration_sec.label('video_duration'),
             Users.id.label('creator_id'),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
+            thumbnail_subq.c.storage_key.label('thumbnail_key'),
             func.count(Likes.post_id).label('likes_count'),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .join(MediaAssets, Posts.id == MediaAssets.post_id)
+        .join(thumbnail_subq, Posts.id == thumbnail_subq.c.post_id)
+        .outerjoin(video_asset_subq, Posts.id == video_asset_subq.c.post_id)
         .outerjoin(Likes, Posts.id == Likes.post_id)
+    )
+
+    # 単品販売フィルタ
+    if paid_only:
+        base_query = base_query.join(Prices, and_(
+            Posts.id == Prices.post_id,
+            Prices.is_active == True
+        ))
+
+    base_query = (
+        base_query
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
         .filter(Posts.visibility.in_([1, 2, 3]))  # 公開範囲
-        .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
         .group_by(
             Posts.id,
             Users.id,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key,
+            thumbnail_subq.c.storage_key,
+            video_asset_subq.c.duration_sec,
         )
     )
 

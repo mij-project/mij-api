@@ -11,6 +11,7 @@ class RankingPostsAllTimeResponse(BaseModel):
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
+    duration: Optional[str] = None
 
 class RankingPostsMonthlyResponse(BaseModel):
     id: str
@@ -21,6 +22,7 @@ class RankingPostsMonthlyResponse(BaseModel):
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
+    duration: Optional[str] = None
 
 class RankingPostsWeeklyResponse(BaseModel):
     id: str
@@ -31,7 +33,8 @@ class RankingPostsWeeklyResponse(BaseModel):
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
-
+    duration: Optional[str] = None
+    
 class RankingPostsDailyResponse(BaseModel):
     id: str
     description: str
@@ -41,7 +44,7 @@ class RankingPostsDailyResponse(BaseModel):
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
-
+    duration: Optional[str] = None
 class RankingOverallResponse(BaseModel):
     all_time: List[RankingPostsAllTimeResponse]
     monthly: List[RankingPostsMonthlyResponse]
@@ -50,7 +53,7 @@ class RankingOverallResponse(BaseModel):
 
 # For ranking by genres
 
-class RankingPostsGenresDetailResponse(BaseModel):
+class RankingPostsCategoriesDetailResponse(BaseModel):
     id: str
     description: str
     thumbnail_url: Optional[str] = None
@@ -59,17 +62,18 @@ class RankingPostsGenresDetailResponse(BaseModel):
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
+    duration: Optional[str] = None  
 
-class RankingPostsGenresResponse(BaseModel):
-    genre_id: str
-    genre_name: str
-    posts: List[RankingPostsGenresDetailResponse]
+class RankingPostsCategoriesResponse(BaseModel):
+    category_id: str
+    category_name: str
+    posts: List[RankingPostsCategoriesDetailResponse]
 
-class RankingGenresResponse(BaseModel):
-    all_time: List [RankingPostsGenresResponse]
-    monthly: List [RankingPostsGenresResponse]
-    weekly: List [RankingPostsGenresResponse]
-    daily: List [RankingPostsGenresResponse]
+class RankingCategoriesResponse(BaseModel):
+    all_time: List [RankingPostsCategoriesResponse]
+    monthly: List [RankingPostsCategoriesResponse]
+    weekly: List [RankingPostsCategoriesResponse]
+    daily: List [RankingPostsCategoriesResponse]
 
 # For ranking by genres detail
 class RankingPostsDetailDailyResponse(BaseModel):
@@ -81,6 +85,7 @@ class RankingPostsDetailDailyResponse(BaseModel):
     username: Optional[str] = None
     creator_avatar_url: Optional[str] = None
     rank: int
+    duration: Optional[str] = None
 
 class RankingPostsDetailResponse(BaseModel):
     posts: List[RankingPostsDetailDailyResponse]
@@ -113,4 +118,14 @@ class RankingCreatorsDetailResponse(BaseModel):
     previous_page: int | None = None
     has_next: bool = False
     has_previous: bool = False
-    
+
+class RankingCreatorsCategories(BaseModel):
+    category_id: str
+    category_name: str
+    creators: List[RankingCreators]
+
+class RankingCreatorsCategoriesResponse(BaseModel):
+    all_time: List [RankingCreatorsCategories]
+    monthly: List [RankingCreatorsCategories]
+    weekly: List [RankingCreatorsCategories]
+    daily: List [RankingCreatorsCategories]

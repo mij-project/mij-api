@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc, func
 from app.models.profiles import Profiles
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.models.companies import Companies, CompanyUsers
@@ -280,7 +280,7 @@ def update_company(
     if parent_company_id is not None:
         company.parent_company_id = parent_company_id
 
-    company.updated_at = datetime.utcnow()
+    company.updated_at = datetime.now(timezone.utc)
     db.flush()
     return company
 
@@ -321,7 +321,7 @@ def delete_company(
     if child_count > 0:
         return False
 
-    company.deleted_at = datetime.utcnow()
+    company.deleted_at = datetime.now(timezone.utc)
     db.flush()
     return True
 
@@ -548,7 +548,7 @@ def update_company_user_fee(
         return None
 
     company_user.company_fee_percent = company_fee_percent
-    company_user.updated_at = datetime.utcnow()
+    company_user.updated_at = datetime.now(timezone.utc)
     db.flush()
     return company_user
 
@@ -578,7 +578,7 @@ def remove_company_user(
     if not company_user:
         return False
 
-    company_user.deleted_at = datetime.utcnow()
+    company_user.deleted_at = datetime.now(timezone.utc)
     db.flush()
     return True
 

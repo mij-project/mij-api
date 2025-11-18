@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .banners import Banners
     from .events import UserEvents
     from .companies import CompanyUsers
+    from .password_reset_token import PasswordResetToken
 
 class Users(Base):
     __tablename__ = "users"
@@ -62,3 +63,4 @@ class Users(Base):
     banners: Mapped[List["Banners"]] = relationship("Banners", back_populates="creator")
     user_events: Mapped[List["UserEvents"]] = relationship("UserEvents", back_populates="user")
     company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
+    password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship("PasswordResetToken", back_populates="user")

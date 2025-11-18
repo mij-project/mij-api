@@ -18,8 +18,8 @@ from app.core.security import (
 )
 from app.core.cookies import set_auth_cookies, clear_auth_cookies, REFRESH_COOKIE, CSRF_COOKIE, ACCESS_COOKIE
 from app.core.config import settings
-from app.deps.auth import get_current_user
-from datetime import datetime, timedelta
+from app.deps.auth import get_current_user, get_current_user_for_me
+from datetime import datetime, timedelta, timezone
 from requests_oauthlib import OAuth1Session
 from app.deps.auth import issue_app_jwt_for
 from app.crud.user_crud import create_user_by_x
@@ -64,13 +64,12 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
         password = payload.password
         user = get_user_by_email(db, email)
         if not user or not verify_password(password, user.password_hash):
-
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
         if getattr(user, "is_active", True) is False:
             raise HTTPException(status_code=403, detail="User is not active")
         
         # ログイン時刻を更新
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         db.commit()
         
         access = create_access_token(str(user.id))
@@ -228,7 +227,10 @@ def x_callback(
 
 # 認可テスト用の /auth/me
 @router.get("/me")
-def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
+def me(
+    user: Users = Depends(get_current_user_for_me), 
+    db: Session = Depends(get_db)
+):
     """
     ユーザー情報取得
 
@@ -239,10 +241,12 @@ def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
     Returns:
         dict: ユーザー情報
     """
+    if not user:
+        return {"status": "401", "message": "Missing access token"}
     try:
         # 48時間（2日）チェック
         if user.last_login_at:
-            time_since_last_login = datetime.utcnow() - user.last_login_at
+            time_since_last_login = datetime.now(timezone.utc) - user.last_login_at.replace(tzinfo=timezone.utc)
             if time_since_last_login > timedelta(hours=48):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, 
@@ -250,7 +254,7 @@ def me(user: Users = Depends(get_current_user), db: Session = Depends(get_db)):
                 )
         
         # アクセス時刻を更新
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         db.commit()
         
         return {
@@ -374,11 +378,11 @@ def _create_user_and_profile(db: Session, x_email: str, x_username: str, x_name:
     user = Users(
         profile_name=x_name,  # Xの名前
         email=x_email,
-        email_verified_at=datetime.utcnow(),
+        email_verified_at=datetime.now(timezone.utc),
         password_hash=None,
         role=AccountType.GENERAL_USER,
         status=AccountStatus.ACTIVE,
-        last_login_at=datetime.utcnow(),
+        last_login_at=datetime.now(timezone.utc),
         offical_flg=offical_flg
     )
     user = create_user_by_x(db, user)
@@ -415,7 +419,7 @@ def _update_user_and_profile(db: Session, user: Users, x_username: str, x_name: 
         raise HTTPException(status_code=404, detail="User not found")
 
     # ユーザー情報を更新
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     if x_name:
         user.profile_name = x_name
 

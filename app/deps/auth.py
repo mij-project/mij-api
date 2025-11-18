@@ -104,3 +104,21 @@ def issue_app_jwt_for(x_user_id: str, handle: str|None, name: str|None):
         "provider": "x"
     }
     return jwt.encode(payload, os.getenv("SECRET_KEY"), algorithm="HS256")
+
+def get_current_user_for_me(
+    db: Session = Depends(get_db),
+    access_token: str | None = Cookie(default=None, alias=ACCESS_COOKIE),
+):
+    if not access_token:
+        return None
+    try:
+        payload = decode_token(access_token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token")
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    user_id = payload.get("sub")
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
