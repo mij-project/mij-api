@@ -5,6 +5,14 @@ from typing import Optional, List
 
 # --- 検索結果スキーマ ---
 
+class RecentPostThumbnail(BaseModel):
+    id: UUID
+    thumbnail_url: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class CreatorSearchResult(BaseModel):
     id: UUID
     profile_name: str
@@ -14,7 +22,8 @@ class CreatorSearchResult(BaseModel):
     followers_count: Optional[int] = None
     is_verified: Optional[bool] = None
     posts_count: Optional[int] = None
-    
+    recent_posts: Optional[List[RecentPostThumbnail]] = []
+
     class Config:
         from_attributes = True
 
@@ -33,6 +42,7 @@ class PostSearchResult(BaseModel):
     visibility: int
     likes_count: int
     thumbnail_key: Optional[str] = None
+    video_duration: Optional[int] = None
     creator: PostCreatorInfo
     created_at: str
 
