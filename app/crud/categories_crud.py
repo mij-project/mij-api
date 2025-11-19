@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from app.constants.enums import PostStatus
 from app.models.categories import Categories
 from app.models.genres import Genres
 from app.models.post_categories import PostCategories
@@ -6,7 +7,7 @@ from app.models.posts import Posts
 from typing import List
 from uuid import UUID
 import random
-from sqlalchemy import func, desc
+from sqlalchemy import and_, func, desc, or_
 
 def get_categories(db: Session) -> List[Categories]:
     return db.query(Categories).filter(Categories.is_active == True).order_by(Categories.sort_order).all()
@@ -29,6 +30,14 @@ def get_top_categories(db: Session, limit: int = 8):
     """
     投稿数上位のカテゴリを取得
     """
+    now = func.now()
+    active_post_cond = and_(
+        Posts.status == PostStatus.APPROVED,
+        Posts.deleted_at.is_(None),
+        or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
+        or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
+    )
+    
     return (
         db.query(
             Categories.id,
@@ -37,6 +46,8 @@ def get_top_categories(db: Session, limit: int = 8):
             func.count(PostCategories.post_id).label('post_count')
         )
         .join(PostCategories, Categories.id == PostCategories.category_id)
+        .join(Posts, Posts.id == PostCategories.post_id)
+        .filter(active_post_cond)
         .group_by(Categories.id, Categories.name, Categories.slug)
         .order_by(desc('post_count'))
         .limit(limit)

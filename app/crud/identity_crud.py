@@ -1,3 +1,4 @@
+import os
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.identity import IdentityVerifications, IdentityDocuments
@@ -11,6 +12,43 @@ from app.models.profiles import Profiles
 from typing import Optional, List
 
 from app.schemas.notification import NotificationType
+from app.core.logger import Logger
+logger = Logger.get_logger()
+
+IDENTITY_APPROVED_MESSAGE = """## Mijfans 身分証明書の審査が完了しました
+
+-name- 様
+
+身分証明書の審査が完了いたしました。
+
+> ✅ **審査結果: 承認**  
+> おめでとうございます！クリエイターとしての活動を開始できます。
+
+沢山のファンがあなたのコンテンツを楽しみにお待ちしています。  
+ぜひ素敵なコンテンツをお届けください。
+
+お問い合わせ: support@mijfans.jp
+
+※ このメールは自動送信されています。返信はできません。
+"""
+
+IDENTITY_REJECTED_MESSAGE = """##Mijfans 身分証明書の審査が完了しました
+
+{{ name }} 様
+
+身分証明書の審査が完了いたしました。
+
+> ❌ **審査結果: 拒否**  
+> 誠に申し訳ございませんが、今回の申請は承認されませんでした。
+
+書類を再確認の上、再度申請をお願いいたします。
+ご不明な点がございましたら、サポートまでお問い合わせください。
+
+お問い合わせ: support@mijfans.jp
+
+※ このメールは自動送信されています。返信はできません。
+"""
+
 
 def create_identity_verification(db: Session, user_id: str, status: int) -> IdentityVerifications:
     """
@@ -179,7 +217,7 @@ def update_identity_verification_status(db: Session, verification_id: str, statu
         db.commit()
         return True
     except Exception as e:
-        print(f"Update identity verification status error: {e}")
+        logger.error(f"Update identity verification status error: {e}")
         db.rollback()
         return False
 
@@ -228,7 +266,7 @@ def approve_identity_verification(
         db.refresh(verification)
         return verification
     except Exception as e:
-        print(f"Approve identity verification error: {e}")
+        logger.error(f"Approve identity verification error: {e}")
         db.rollback()
         return None
 
@@ -270,7 +308,7 @@ def reject_identity_verification(
         db.refresh(verification)
         return verification
     except Exception as e:
-        print(f"Reject identity verification error: {e}")
+        logger.error(f"Reject identity verification error: {e}")
         db.rollback()
         return None
 
@@ -289,13 +327,16 @@ def add_notification_for_identity_verification(db: Session, user_id: str, status
             raise Exception("Profileが見つかりません")
         if status == "approved":
             try:
+                message = IDENTITY_APPROVED_MESSAGE.replace("-name-", profiles.username)
                 notification = Notifications(
                     user_id=user_id,
                     type=NotificationType.USERS,
                     payload={
+                        "type": "identity",
                         "title": "身分証明の審査が承認されました",
                         "subtitle": "身分証明の審査が承認されました",
-                        "avatar": profiles.avatar_url,
+                        "message": message,
+                        "avatar": f"{os.environ.get('CDN_BASE_URL')}/{profiles.avatar_url}",
                         "redirect_url": f"/profile?username={profiles.username}",
                     },
                     is_read=False,
@@ -306,18 +347,21 @@ def add_notification_for_identity_verification(db: Session, user_id: str, status
                 db.add(notification)
                 db.commit()
             except Exception as e:
-                print(f"Add notification for identity verification error: {e}")
+                logger.error(f"Add notification for identity verification error: {e}")
                 db.rollback()
                 pass
         elif status == "rejected":
             try:
+                message = IDENTITY_REJECTED_MESSAGE.replace("-name-", profiles.username)
                 notification = Notifications(
                     user_id=user_id,
                     type=NotificationType.USERS,
                     payload={
+                        "type": "identity",
                         "title": "身分証明の審査が拒否されました",
                         "subtitle": "身分証明の審査が拒否されました",
-                        "avatar": profiles.avatar_url,
+                        "message": message,
+                        "avatar": "",
                         "redirect_url": f"/profile?username={profiles.username}",
                     },
                     is_read=False,
@@ -328,9 +372,9 @@ def add_notification_for_identity_verification(db: Session, user_id: str, status
                 db.add(notification)
                 db.commit()
             except Exception as e:
-                print(f"Add notification for identity verification error: {e}")
+                logger.error(f"Add notification for identity verification error: {e}")
                 db.rollback()
                 pass
     except Exception as e:
-        print(f"Add notification for identity verification error: {e}")
+        logger.error(f"Add notification for identity verification error: {e}")
         pass

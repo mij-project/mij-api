@@ -1,23 +1,21 @@
 from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
-from fastapi import Request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from app.db.migrations import run_migrations
 from app.middlewares.csrf import CSRFMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from app.db.migrations import run_migrations
-
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 # ========================
 # ✅ .env スイッチング処理
 # ========================
 env = os.getenv("ENV", "development")
 env_file = f".env.{env}"
 load_dotenv(dotenv_path=env_file)
-print(f" Loaded FastAPI ENV: {env_file}")
+logger.info(f" Loaded FastAPI ENV: {env_file}")
 
 from app.routers import api_router
 

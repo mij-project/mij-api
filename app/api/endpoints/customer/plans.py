@@ -35,7 +35,9 @@ from app.crud.price_crud import create_price
 from uuid import UUID
 from typing import Optional
 import os
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 BASE_URL = os.getenv("CDN_BASE_URL")
 
@@ -107,7 +109,7 @@ def create_user_plan(
 
         return plan_response
     except Exception as e:
-        print("プラン作成エラーが発生しました", e)
+        logger.error("プラン作成エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/list", response_model=PlanListResponse)
@@ -124,7 +126,7 @@ def get_plans(
 
         return PlanListResponse(plans=plans)
     except Exception as e:
-        print("プラン取得エラーが発生しました", e)
+        logger.error("プラン取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{plan_id}/posts", response_model=PlanPostsResponse)
@@ -165,7 +167,7 @@ def get_plan_posts(
 
         return PlanPostsResponse(posts=posts)
     except Exception as e:
-        print("プラン投稿一覧取得エラーが発生しました", e)
+        logger.error("プラン投稿一覧取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{plan_id}", response_model=PlanDetailResponse)
@@ -187,7 +189,7 @@ def get_plan_detail_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        print("プラン詳細取得エラーが発生しました", e)
+        logger.error("プラン詳細取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{plan_id}/posts-paginated", response_model=PlanPostsPaginatedResponse)
@@ -222,7 +224,7 @@ def get_plan_posts_paginated_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        print("プラン投稿一覧取得エラーが発生しました", e)
+        logger.error("プラン投稿一覧取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/reorder")
@@ -235,19 +237,27 @@ def reorder_user_plans(
     プランの並び順を更新
     """
     try:
-        print(f"受信データ: {request_data}")
-        print(f"plan_orders: {request_data.plan_orders}")
-        print(f"plan_orders型: {type(request_data.plan_orders)}")
+        logger.info(f"受信データ: {request_data}")
+        logger.info(f"plan_orders: {request_data.plan_orders}")
+        logger.info(f"plan_orders型: {type(request_data.plan_orders)}")
         if request_data.plan_orders:
-            print(f"最初の要素: {request_data.plan_orders[0]}")
-            print(f"最初の要素の型: {type(request_data.plan_orders[0])}")
+            logger.error(f"最初の要素: {request_data.plan_orders[0]}")
+            logger.error(f"最初の要素の型: {type(request_data.plan_orders[0])}")
+        reorder_plans(db, current_user.id, request_data.plan_orders)
+        db.commit()
+        return {"message": "プランの並び順を更新しました"}
+    except Exception as e:
+        logger.error(f"plan_orders型: {type(request_data.plan_orders)}")
+        if request_data.plan_orders:
+            logger.info(f"最初の要素: {request_data.plan_orders[0]}")
+            logger.info(f"最初の要素の型: {type(request_data.plan_orders[0])}")
 
         reorder_plans(db, current_user.id, request_data.plan_orders)
         db.commit()
 
         return {"message": "プランの並び順を更新しました"}
     except Exception as e:
-        print("プラン並び替えエラーが発生しました", e)
+        logger.error("プラン並び替えエラーが発生しました", e)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -333,7 +343,7 @@ def update_user_plan(
     except HTTPException:
         raise
     except Exception as e:
-        print("プラン更新エラーが発生しました", e)
+        logger.error("プラン更新エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{plan_id}/delete-request")
@@ -361,7 +371,7 @@ def request_plan_delete(
     except HTTPException:
         raise
     except Exception as e:
-        print("プラン削除申請エラーが発生しました", e)
+        logger.error("プラン削除申請エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{plan_id}/subscribers", response_model=PlanSubscriberListResponse)
@@ -389,7 +399,7 @@ def get_plan_subscribers(
     except HTTPException:
         raise
     except Exception as e:
-        print("加入者一覧取得エラーが発生しました", e)
+        logger.error("加入者一覧取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/posts/for-plan", response_model=CreatorPostsForPlanResponse)
@@ -405,5 +415,5 @@ def get_posts_for_plan(
         posts = get_creator_posts_for_plan(db, current_user.id, plan_id)
         return CreatorPostsForPlanResponse(posts=posts)
     except Exception as e:
-        print("投稿一覧取得エラーが発生しました", e)
+        logger.error("投稿一覧取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))

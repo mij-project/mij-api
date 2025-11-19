@@ -12,7 +12,8 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from app.core.config import settings  # pydantic Settings想定
 import os
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 # --------------------------
 # Jinja2
 # --------------------------
@@ -245,7 +246,7 @@ def send_password_reset_email(to: str, reset_url: str, display_name: str | None 
         tags={"category": "password_reset"},
     )
 
-def send_post_approval_email(to: str, display_name: str | None = None) -> None:
+def send_post_approval_email(to: str, display_name: str | None = None, post_id: str | None = None) -> None:
     """投稿承認完了メール"""
     if not getattr(settings, "EMAIL_ENABLED", True):
         return
@@ -254,7 +255,7 @@ def send_post_approval_email(to: str, display_name: str | None = None) -> None:
         "name": display_name or "",
         "brand": "mijfans",
         "status": 1,  # 承認
-        "post_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "post_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/post/detail?post_id={post_id}",
         "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
     }
     send_templated_email(
@@ -265,7 +266,7 @@ def send_post_approval_email(to: str, display_name: str | None = None) -> None:
         tags={"category": "post_approval"},
     )
 
-def send_post_rejection_email(to: str, display_name: str | None = None, notes: str | None = None) -> None:
+def send_post_rejection_email(to: str, display_name: str | None = None, notes: str | None = None, post_id: str | None = None) -> None:
     """投稿拒否通知メール"""
     if not getattr(settings, "EMAIL_ENABLED", True):
         return
@@ -275,7 +276,7 @@ def send_post_rejection_email(to: str, display_name: str | None = None, notes: s
         "brand": "mijfans",
         "status": 0,  # 拒否
         "notes": notes or "申請内容を再度ご確認ください。",
-        "post_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "post_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/post/{post_id}",
         "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
     }
     send_templated_email(
@@ -386,4 +387,4 @@ def _send_backend(to: str, subject: str, html: str, tags: dict[str, str] | None 
             raise RuntimeError(f"Unsupported EMAIL_BACKEND: {backend}")
     except Exception as e:
         # 必要に応じて構造化ログへ
-        print(f"[email] send failed backend={backend} to={to} err={e}")
+        logger.error(f"[email] send failed backend={backend} to={to} err={e}")

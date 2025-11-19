@@ -19,7 +19,9 @@ from app.services.email.send_email import send_password_reset_email
 from app.core.security import hash_password
 from app.core.config import settings
 import os
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 
@@ -62,7 +64,7 @@ def request_password_reset(
             display_name=user.profile_name or ""
         )
     except Exception as e:
-        print(f"[password_reset] Failed to send email: {e}")
+        logger.error(f"[password_reset] Failed to send email: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="メール送信に失敗しました"

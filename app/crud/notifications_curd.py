@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.models import Users
 from app.models.notifications import Notifications
 from app.schemas.notification import NotificationCreateRequest, NotificationType
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 
 def get_notifications_admin_paginated(db: Session, page: int = 1, limit: int = 20, search: Optional[str] = None, sort: str = "created_at_desc") -> tuple[List[Notifications], int]:
   """
@@ -56,7 +57,7 @@ def create_notification_admin(db: Session, notification: NotificationCreateReque
     db.commit()
     return new_notification
   except Exception as e:
-    print(f"Create notification error: {e}")
+    logger.error(f"Create notification error: {e}")
     db.rollback()
     return None
 
@@ -95,7 +96,7 @@ def update_notification_admin(db: Session, notification_id: UUID, notification_u
     db.commit()
     return notification
   except Exception as e:
-    print(f"Update notification error: {e}")
+    logger.error(f"Update notification error: {e}")
     db.rollback()
     return None
 
@@ -117,7 +118,7 @@ def get_notifications_paginated(db: Session, user: Users, type: NotificationType
     has_next = (skip + limit) < total
     return notifications, total, has_next
   except Exception as e:
-    print(f"Get notifications paginated error: {e}")
+    logger.error(f"Get notifications paginated error: {e}")
     return [], 0, False
 
 def mark_notification_as_read(db: Session, notification_id: UUID, user_id: UUID, type: NotificationType) -> Notifications:
@@ -135,7 +136,7 @@ def mark_notification_as_read(db: Session, notification_id: UUID, user_id: UUID,
       return None
 
   except Exception as e:
-    print(f"Mark notification as read error: {e}")
+    logger.error(f"Mark notification as read error: {e}")
     return None
 
 def __mark_notification_as_read_admin(db: Session, notification_id: UUID, user_id: UUID) -> bool:
@@ -177,7 +178,7 @@ def __mark_notification_as_read_admin(db: Session, notification_id: UUID, user_i
       db.commit()
       return notification
   except Exception as e:
-      print(f"Mark notification as read error: {e}")
+      logger.error(f"Mark notification as read error: {e}")
       db.rollback()
       return None
 
@@ -201,7 +202,7 @@ def __mark_notification_as_read_users(db: Session, notification_id: UUID, user_i
       db.commit()
       return notification
   except Exception as e:
-      print(f"Mark notification as read users error: {e}")
+      logger.error(f"Mark notification as read users error: {e}")
       db.rollback()
       return None
 
@@ -225,7 +226,7 @@ def __mark_notification_as_read_payments(db: Session, notification_id: UUID, use
       db.commit()
       return notification
   except Exception as e:
-      print(f"Mark notification as read payments error: {e}")
+      logger.error(f"Mark notification as read payments error: {e}")
       db.rollback()
       return None 
 
@@ -267,7 +268,7 @@ def get_unread_count(db: Session, user: Users) -> int:
       )
     return admin_count, users_count, payments_count
   except Exception as e:
-    print(f"Get unread count error: {e}")
+    logger.error(f"Get unread count error: {e}")
     return 0, 0, 0
 
 def __has_user_expr(user_id: str):
