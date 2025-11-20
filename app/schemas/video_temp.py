@@ -9,11 +9,28 @@ class CreateSampleRequest(BaseModel):
     start_time: float  # 秒
     end_time: float    # 秒
 
-class TempVideoResponse(BaseModel):
-    temp_video_id: str
-    temp_video_url: str
-    duration: Optional[float] = None
+class TempVideoMultipartInitResponse(BaseModel):
+    s3_key: str
+    bucket: str
+    upload_id: str
+    expires_in: int
 
 class SampleVideoResponse(BaseModel):
     sample_video_url: str
     duration: float
+
+class TempVideoPartPresignResponse(BaseModel):
+    s3_key: str
+    upload_id: str
+    part_number: int
+    upload_url: str
+    expires_in: int
+
+class CompletedPart(BaseModel):
+    part_number: int
+    etag: str  # フロントで各PUTレスポンスのETagを取ってもらう
+
+class TempVideoMultipartCompleteRequest(BaseModel):
+    s3_key: str
+    upload_id: str
+    parts: list[CompletedPart]
