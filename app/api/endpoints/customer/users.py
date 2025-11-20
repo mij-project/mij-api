@@ -1,6 +1,6 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from app.schemas.user import UserCreate, UserOut, UserProfileResponse, UserRegisterCompany
+from app.schemas.user import UserCreate, UserOut, UserProfileResponse, UserRegisterCompany, UserOGPResponse
 from app.db.base import get_db
 from sqlalchemy.orm import Session
 from app.crud.user_crud import (
@@ -15,7 +15,7 @@ from app.models.profiles import Profiles
 from app.models.user import Users
 from app.api.commons.utils import generate_code
 from app.deps.auth import get_current_user
-from app.crud.profile_crud import create_profile, get_profile_ogp_image_url
+from app.crud.profile_crud import create_profile, get_profile_ogp_image_url, get_profile_ogp_data
 from app.schemas.user import ProfilePostResponse, ProfilePlanResponse, ProfilePurchaseResponse, ProfileGachaResponse
 from app.models.posts import Posts
 from app.api.commons.utils import generate_email_verification_url
@@ -223,17 +223,23 @@ def get_user_profile_by_username_endpoint(
         logger.error("ユーザープロフィール取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{user_id}/ogp-image")
+@router.get("/{user_id}/ogp-image", response_model=UserOGPResponse)
 async def get_user_ogp_image(
     user_id: str,
     db: Session = Depends(get_db)
 ):
-    """ユーザーのOGP画像URLを取得する"""
+    """ユーザーのOGP情報を取得する（Lambda@Edge用）"""
     try:
-        ogp_image_url = get_profile_ogp_image_url(db, user_id)
-        return {
-            "ogp_image_url": ogp_image_url
-        }
+        # OGP情報を取得（プロフィール詳細 + 統計情報 + OGP画像）
+        ogp_data = get_profile_ogp_data(db, user_id)
+
+        if not ogp_data:
+            raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
+
+        return ogp_data
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("OGP画像URL取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))

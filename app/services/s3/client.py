@@ -269,3 +269,33 @@ SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
 # バナー画像
 BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
 BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")
+
+
+def upload_ogp_image_to_s3(s3_key: str, image_data: bytes) -> str:
+    """
+    OGP画像をS3（ASSETS_BUCKET_NAME）にアップロード
+
+    Args:
+        s3_key: S3キー
+        image_data: 画像バイナリデータ
+
+    Returns:
+        str: アップロードしたS3キー
+
+    Raises:
+        Exception: アップロード失敗時
+    """
+    try:
+        client = s3_client()
+        client.put_object(
+            Bucket=ASSETS_BUCKET_NAME,
+            Key=s3_key,
+            Body=image_data,
+            ContentType='image/png',
+            CacheControl='public, max-age=31536000, immutable'
+        )
+        print(f"Successfully uploaded OGP image to S3: {ASSETS_BUCKET_NAME}/{s3_key}")
+        return s3_key
+    except Exception as e:
+        print(f"Failed to upload OGP image to S3: {e}")
+        raise

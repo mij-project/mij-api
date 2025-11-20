@@ -239,3 +239,7 @@ class EventStatus:
     INACTIVE = 0 # 無効
     ACTIVE = 1 # 有効
     DRAFT = 2 # 下書き
+
+class GenerationMediaKind:
+    PROFILE_IMAGE = 1 # プロフィール画像
+    POST_IMAGE = 2 # 投稿画像

@@ -3,17 +3,24 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
 import math
+import os
 
 from app.deps.auth import get_current_admin_user
 from app.db.base import get_db
 from app.models.admins import Admins
 from app.crud import profile_image_crud
+from app.crud.generation_media_crud import upsert_generation_media_by_user
 from app.schemas.profile_image import (
     ProfileImageSubmissionDetail,
     ProfileImageSubmissionListResponse,
     ProfileImageApprovalRequest,
     ProfileImageRejectionRequest
 )
+from app.services.s3.image_screening import generate_profile_ogp_image
+from app.services.s3.client import upload_ogp_image_to_s3
+from app.services.s3.keygen import account_asset_key
+from app.models.profiles import Profiles
+from app.models.user import Users
 
 router = APIRouter()
 
@@ -100,6 +107,58 @@ def approve_profile_image_submission(
         )
 
     db.commit()
+
+    # プロフィールOGP画像を生成（エラーが発生しても処理は継続）
+    try:
+        # 申請情報を取得
+        submission = profile_image_crud.get_submission_by_id(db, submission_id)
+        if submission:
+            # ユーザー情報とプロフィール情報を取得
+            user = db.query(Users).filter(Users.id == submission.user_id).first()
+            profile = db.query(Profiles).filter(Profiles.user_id == submission.user_id).first()
+
+            if user and profile:
+                # 環境変数からCDN_BASE_URLを取得
+                CDN_BASE_URL = os.getenv("CDN_BASE_URL")
+
+                # カバー画像URLとアバターURLを生成
+                cover_url = f"{CDN_BASE_URL}/{profile.cover_url}" if profile.cover_url else None
+                avatar_url = f"{CDN_BASE_URL}/{profile.avatar_url}" if profile.avatar_url else None
+                profile_name = user.profile_name if user.profile_name else user.email
+                username = profile.username if profile.username else user.email
+
+                # プロフィールOGP画像を生成
+                ogp_image_data = generate_profile_ogp_image(
+                    cover_url=cover_url,
+                    avatar_url=avatar_url,
+                    profile_name=profile_name,
+                    username=username
+                )
+
+                # S3キーを生成
+                s3_key = account_asset_key(
+                    creator_id=str(user.id),
+                    kind="profile-ogp",
+                    ext="png"
+                )
+
+                # S3にアップロード
+                upload_ogp_image_to_s3(s3_key, ogp_image_data)
+
+                # generation_mediaに保存（既存がある場合は上書き）
+                upsert_generation_media_by_user(db, str(user.id), s3_key)
+                db.commit()
+
+                print(f"Profile OGP image generated for user {user.id}: {s3_key}")
+
+    except Exception as e:
+        print(f"Failed to generate profile OGP image: {e}")
+        # エラーが発生しても処理は継続（承認処理には影響させない）
+        db.rollback()
+        # 承認は完了しているので、再度commitだけ実行
+        db.commit()
+
+    # 通知送信
     profile_image_crud.add_mail_notification_for_profile_image_submission(
         db=db,
         submission_id=submission_id,
