@@ -15,7 +15,8 @@ import os
 from app.schemas.notification import NotificationType
 from app.schemas.user_settings import UserSettingsType
 from app.services.email.send_email import send_profile_image_approval_email, send_profile_image_rejection_email
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 CDN_URL = os.getenv("CDN_BASE_URL", "")
 
 def create_submission(
@@ -398,7 +399,7 @@ def add_notification_for_profile_image_submission(
         db.commit()
     except Exception as e:
         db.rollback()
-        print("プロフィール画像申請に対する通知を追加エラー:", e)
+        logger.error(f"プロフィール画像申請に対する通知を追加エラー: {e}")
         return
 
 def add_mail_notification_for_profile_image_submission(
@@ -439,5 +440,5 @@ def add_mail_notification_for_profile_image_submission(
                 send_profile_image_rejection_email(user.email, user.Profiles.username, user.ProfileImageSubmissions.rejection_reason)
 
     except Exception as e:
-        print("プロフィール画像申請に対するメール通知を追加エラー:", e)
+        logger.error(f"プロフィール画像申請に対するメール通知を追加エラー: {e}")
         return

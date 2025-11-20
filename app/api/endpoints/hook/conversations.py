@@ -13,7 +13,9 @@ from app.models.admins import Admins
 from app.crud.user_crud import get_user_by_id
 from app.crud.admin_crud import get_admin_by_id
 from app.crud import conversations_crud
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 BASE_URL = os.getenv("CDN_BASE_URL")
 
 router = APIRouter()
@@ -68,20 +70,20 @@ async def get_user_from_cookie(websocket: WebSocket, db: Session) -> Optional[Us
         access_token = cookies.get(ACCESS_COOKIE)
 
         if not access_token:
-            print("❌ No access token found in cookies")
+            logger.error("❌ No access token found in cookies")
             return None
 
         payload = decode_token(access_token)
 
         if payload.get("type") != "access":
-            print("❌ Invalid token type")
+            logger.error("❌ Invalid token type")
             return None
 
         user_id = payload.get("sub")
         user = get_user_by_id(db, user_id)
         return user
     except Exception as e:
-        print(f"❌ Authentication error: {e}")
+        logger.error(f"❌ Authentication error: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -95,20 +97,20 @@ async def get_admin_from_cookie(websocket: WebSocket, db: Session) -> Optional[A
         access_token = cookies.get(ACCESS_COOKIE)
 
         if not access_token:
-            print("❌ No access token found in cookies")
+            logger.error("❌ No access token found in cookies")
             return None
 
         payload = decode_token(access_token)
 
         if payload.get("type") != "access":
-            print("❌ Invalid token type")
+            logger.error("❌ Invalid token type")
             return None
 
         admin_id = payload.get("sub")
         admin = get_admin_by_id(db, admin_id)
         return admin
     except Exception as e:
-        print(f"❌ Admin authentication error: {e}")
+        logger.error(f"❌ Admin authentication error: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -129,7 +131,7 @@ async def websocket_delusion_endpoint(
     # トークン検証
     user = await get_user_from_cookie(websocket, db)
     if not user:
-        print("❌ Authentication failed, closing connection")
+        logger.error("❌ Authentication failed, closing connection")
         await websocket.close(code=4001, reason="Invalid token")
         return
 
@@ -163,19 +165,19 @@ async def websocket_delusion_endpoint(
 
                 if not body_text:
                     error_msg = {"type": "error", "message": "body_text is required"}
-                    print(f"❌ Sending error: {error_msg}")
+                    logger.error(f"❌ Sending error: {error_msg}")
                     await websocket.send_json(error_msg)
                     continue
 
                 # メッセージをDBに保存
-                print(f"💾 Saving message to DB...")
+                logger.info(f"💾 Saving message to DB...")
                 message = conversations_crud.create_message(
                     db=db,
                     conversation_id=UUID(conversation_id),
                     sender_user_id=user.id,
                     body_text=body_text
                 )
-                print(f"✅ Message saved with ID: {message.id}")
+                logger.info(f"✅ Message saved with ID: {message.id}")
 
                 # 会話に接続している全員に配信
                 broadcast_data = {
@@ -201,7 +203,7 @@ async def websocket_delusion_endpoint(
     except WebSocketDisconnect:
         manager.disconnect(websocket, conversation_id)
     except Exception as e:
-        print(f"❌ WebSocket error: {e}")
+        logger.error(f"❌ WebSocket error: {e}")
         import traceback
         traceback.print_exc()
         manager.disconnect(websocket, conversation_id)
@@ -300,5 +302,5 @@ async def websocket_admin_delusion_endpoint(
     except WebSocketDisconnect:
         manager.disconnect(websocket, conversation_id)
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket, conversation_id)

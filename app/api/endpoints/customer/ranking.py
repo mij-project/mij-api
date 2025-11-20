@@ -53,7 +53,9 @@ from app.schemas.ranking import (
     RankingPostsDailyResponse,
 )
 from os import getenv
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 BASE_URL = getenv("CDN_BASE_URL")
 
 router = APIRouter()
@@ -70,7 +72,7 @@ async def get_ranking_posts(
             return _get_ranking_posts_categories(db)
 
     except Exception as e:
-        print('エラーが発生しました', e)
+        logger.error('エラーが発生しました', e)
         raise HTTPException(status_code=500, detail=str(e))
 
 def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
@@ -231,7 +233,7 @@ async def get_ranking_posts_detail(
         else:
             return _get_ranking_posts_categories_detail(db, category, page, per_page, term)
     except Exception as e:
-        print('エラーが発生しました', e)
+        logger.error("エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 def _get_ranking_posts_overall_detail(db: Session, page: int, per_page: int, term: str) -> RankingOverallResponse | HTTPException:
@@ -427,7 +429,7 @@ def _get_ranking_creators_overall(db: Session) -> RankingCreatorsResponse:
             ) for idx, creator in enumerate(ranking_creators_daily)],
         )
     except Exception as e:
-        print('エラーが発生しました', e)
+        logger.error("エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 def _get_ranking_creators_categories(db: Session):
@@ -519,7 +521,7 @@ def _get_ranking_creators_detail_overall(db: Session, term: str, page: int, per_
             has_previous=has_previous
         )
     except Exception as e:
-        print('エラーが発生しました', e)
+        logger.error('エラーが発生しました', e)
         raise HTTPException(status_code=500, detail=str(e))
 
 def _get_ranking_creators_detail_categories(db: Session, category: str, term: str, page: int, per_page: int) -> RankingCreatorsDetailResponse:
@@ -547,5 +549,5 @@ def _get_ranking_creators_detail_categories(db: Session, category: str, term: st
             has_previous=has_previous
         )
     except Exception as e:
-        print('エラーが発生しました', e)
+        logger.error("エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))

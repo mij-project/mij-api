@@ -31,7 +31,9 @@ from app.crud.admin_crud import (
 )
 from app.services.s3.presign import presign_get
 from app.constants.enums import MediaAssetKind
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 CDN_URL = getenv("CDN_BASE_URL")
 MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
 
@@ -131,7 +133,7 @@ def create_admin_user(
     except HTTPException:
         raise
     except Exception as e:
-        print("管理者作成エラー:", e)
+        logger.error("管理者作成エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/create-test-admin")
@@ -180,7 +182,7 @@ def create_test_admin(
         
     except Exception as e:
         db.rollback()
-        print("管理者作成エラー:", e)
+        logger.error("管理者作成エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
     
 

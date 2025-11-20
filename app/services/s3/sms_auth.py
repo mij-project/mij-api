@@ -8,14 +8,15 @@ from app.services.s3.client import (
     RESEND_COOLDOWN,
     MAX_ATTEMPTS,
 )
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 APP_ENV = os.getenv("APP_ENV")
 
 def send_sms(phone: str, message: str) -> None:
     try:
         if APP_ENV == "dev":
             phone = "+819070098590"
-            print(f"[LOCAL SMS] to={phone} body={message}")
+            logger.info(f"[LOCAL SMS] to={phone} body={message}")
             return
         
         sns_client = sms_client()

@@ -4,6 +4,8 @@ from functools import lru_cache
 import boto3
 from botocore.config import Config
 from typing import Literal
+from app.core.logger import Logger
+logger = Logger.get_logger()
 Resource = Literal["identity"]
 
 
@@ -99,18 +101,18 @@ def delete_hls_directory(bucket: str, m3u8_key: str):
                     Delete={'Objects': objects_to_delete}
                 )
                 deleted_count += len(objects_to_delete)
-                print(f"Deleted {len(objects_to_delete)} HLS files from {directory_prefix}")
+                logger.info(f"Deleted {len(objects_to_delete)} HLS files from {directory_prefix}")
 
                 # 削除エラーがあればログ出力
                 if 'Errors' in response:
                     for error in response['Errors']:
-                        print(f"Error deleting {error['Key']}: {error['Message']}")
+                        logger.error(f"Error deleting {error['Key']}: {error['Message']}")
 
-        print(f"Total deleted {deleted_count} HLS-related files")
+        logger.info(f"Total deleted {deleted_count} HLS-related files")
         return deleted_count
 
     except Exception as e:
-        print(f"Failed to delete HLS directory {directory_prefix}: {e}")
+        logger.error(f"Failed to delete HLS directory {directory_prefix}: {e}")
         raise
 
 def delete_ffmpeg_directory(bucket: str, storage_key: str):
@@ -131,7 +133,7 @@ def delete_ffmpeg_directory(bucket: str, storage_key: str):
         directory_prefix = storage_key[:ffmpeg_index + len('/ffmpeg/')]
     else:
         # ffmpegが見つからない場合は何もしない
-        print(f"No /ffmpeg/ found in storage_key: {storage_key}")
+        logger.info(f"No /ffmpeg/ found in storage_key: {storage_key}")
         return 0
     
     try:
@@ -157,18 +159,18 @@ def delete_ffmpeg_directory(bucket: str, storage_key: str):
                     Delete={'Objects': objects_to_delete}
                 )
                 deleted_count += len(objects_to_delete)
-                print(f"Deleted {len(objects_to_delete)} files from {directory_prefix}")
+                logger.info(f"Deleted {len(objects_to_delete)} files from {directory_prefix}")
                 
                 # 削除エラーがあればログ出力
                 if 'Errors' in response:
                     for error in response['Errors']:
-                        print(f"Error deleting {error['Key']}: {error['Message']}")
+                        logger.error(f"Error deleting {error['Key']}: {error['Message']}")
         
-        print(f"Total deleted {deleted_count} files from ffmpeg directory")
+        logger.info(f"Total deleted {deleted_count} files from ffmpeg directory")
         return deleted_count
         
     except Exception as e:
-        print(f"Failed to delete ffmpeg directory {directory_prefix}: {e}")
+        logger.error(f"Failed to delete ffmpeg directory {directory_prefix}: {e}")
         raise
 
 def delete_hls_directory_full(bucket: str, storage_key: str):
@@ -189,7 +191,7 @@ def delete_hls_directory_full(bucket: str, storage_key: str):
         directory_prefix = storage_key[:hls_index + len('/hls/')]
     else:
         # hlsが見つからない場合は何もしない
-        print(f"No /hls/ found in storage_key: {storage_key}")
+        logger.info(f"No /hls/ found in storage_key: {storage_key}")
         return 0
     
     try:
@@ -215,18 +217,18 @@ def delete_hls_directory_full(bucket: str, storage_key: str):
                     Delete={'Objects': objects_to_delete}
                 )
                 deleted_count += len(objects_to_delete)
-                print(f"Deleted {len(objects_to_delete)} files from {directory_prefix}")
+                logger.info(f"Deleted {len(objects_to_delete)} files from {directory_prefix}")
                 
                 # 削除エラーがあればログ出力
                 if 'Errors' in response:
                     for error in response['Errors']:
-                        print(f"Error deleting {error['Key']}: {error['Message']}")
+                        logger.error(f"Error deleting {error['Key']}: {error['Message']}")
         
-        print(f"Total deleted {deleted_count} files from hls directory")
+        logger.info(f"Total deleted {deleted_count} files from hls directory")
         return deleted_count
         
     except Exception as e:
-        print(f"Failed to delete hls directory {directory_prefix}: {e}")
+        logger.error(f"Failed to delete hls directory {directory_prefix}: {e}")
         raise
 
 
@@ -267,3 +269,33 @@ SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
 # バナー画像
 BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
 BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")
+
+
+def upload_ogp_image_to_s3(s3_key: str, image_data: bytes) -> str:
+    """
+    OGP画像をS3（ASSETS_BUCKET_NAME）にアップロード
+
+    Args:
+        s3_key: S3キー
+        image_data: 画像バイナリデータ
+
+    Returns:
+        str: アップロードしたS3キー
+
+    Raises:
+        Exception: アップロード失敗時
+    """
+    try:
+        client = s3_client()
+        client.put_object(
+            Bucket=ASSETS_BUCKET_NAME,
+            Key=s3_key,
+            Body=image_data,
+            ContentType='image/png',
+            CacheControl='public, max-age=31536000, immutable'
+        )
+        print(f"Successfully uploaded OGP image to S3: {ASSETS_BUCKET_NAME}/{s3_key}")
+        return s3_key
+    except Exception as e:
+        print(f"Failed to upload OGP image to S3: {e}")
+        raise

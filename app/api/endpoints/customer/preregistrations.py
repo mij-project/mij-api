@@ -5,7 +5,9 @@ from app.schemas.preregistrations import PreregistrationCreateRequest
 from app.crud.preregistrations_curd import create_preregistration, is_preregistration_exists
 from app.models.preregistrations import Preregistrations
 from app.services.email.send_email import send_thanks_email
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 @router.post("/")
@@ -61,7 +63,7 @@ def create_preregistration_endpoint(
         except Exception as e:
             # 送信失敗は登録結果に影響させない
             email_error = str(e)
-            print("Error sending email", e)
+            logger.error("Error sending email", e)
 
         return {
             "result": preregistration_data,
@@ -69,5 +71,5 @@ def create_preregistration_endpoint(
             "email_error": email_error
         }
     except Exception as e:
-        print("Error creating preregistration", e)
+        logger.error("Error creating preregistration", e)
         raise HTTPException(status_code=500, detail=str(e)) 

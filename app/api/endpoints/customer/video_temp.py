@@ -16,7 +16,8 @@ from pydantic import BaseModel
 from app.schemas.video_temp import CreateSampleRequest, TempVideoResponse, SampleVideoResponse
 import tempfile
 import shutil
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 router = APIRouter()
 
 # 一時ファイル保存ディレクトリ
@@ -57,7 +58,7 @@ async def upload_temp_main_video(
         )
 
     except Exception as e:
-        print(f"一時動画アップロードエラー: {e}")
+        logger.error(f"一時動画アップロードエラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -105,7 +106,7 @@ async def create_sample_video(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"サンプル動画生成エラー: {e}")
+        logger.error(f"サンプル動画生成エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -127,7 +128,7 @@ def _get_video_duration(video_path: str) -> Optional[float]:
     try:
         # ファイルの存在確認
         if not os.path.exists(video_path):
-            print(f"動画ファイルが見つかりません: {video_path}")
+            logger.error(f"動画ファイルが見つかりません: {video_path}")
             return None
 
         cmd = [
@@ -138,18 +139,18 @@ def _get_video_duration(video_path: str) -> Optional[float]:
             video_path
         ]
 
-        print(f"ffprobeコマンド: {' '.join(cmd)}")
+        logger.info(f"ffprobeコマンド: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
         if result.returncode != 0:
-            print(f"ffprobeエラー (return code: {result.returncode}): {result.stderr}")
+            logger.error(f"ffprobeエラー (return code: {result.returncode}): {result.stderr}")
             return None
 
         duration = float(result.stdout.strip())
-        print(f"動画の長さ: {duration}秒")
+        logger.info(f"動画の長さ: {duration}秒")
         return duration
     except Exception as e:
-        print(f"動画の長さ取得エラー: {e}")
+        logger.error(f"動画の長さ取得エラー: {e}")
         return None
 
 
@@ -169,8 +170,8 @@ def _cut_video(input_path: str, output_path: str, start_time: float, end_time: f
         if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
-        print(f"動画切り取り開始: {input_path} -> {output_path}")
-        print(f"開始時間: {start_time}秒, 終了時間: {end_time}秒, 長さ: {duration}秒")
+        logger.info(f"動画切り取り開始: {input_path} -> {output_path}")
+        logger.info(f"開始時間: {start_time}秒, 終了時間: {end_time}秒, 長さ: {duration}秒")
 
         cmd = [
             "ffmpeg",
@@ -185,15 +186,15 @@ def _cut_video(input_path: str, output_path: str, start_time: float, end_time: f
             output_path
         ]
 
-        print(f"ffmpegコマンド: {' '.join(cmd)}")
+        logger.info(f"ffmpegコマンド: {' '.join(cmd)}")
 
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
         # 標準出力と標準エラーを出力（デバッグ用）
         if result.stdout:
-            print(f"ffmpeg stdout: {result.stdout[-500:]}")  # 最後の500文字のみ
+            logger.info(f"ffmpeg stdout: {result.stdout[-500:]}")  # 最後の500文字のみ
         if result.stderr:
-            print(f"ffmpeg stderr: {result.stderr[-500:]}")  # 最後の500文字のみ
+            logger.error(f"ffmpeg stderr: {result.stderr[-500:]}")  # 最後の500文字のみ
 
         if result.returncode != 0:
             raise Exception(f"ffmpegエラー (return code: {result.returncode}): {result.stderr[-500:]}")
@@ -202,13 +203,13 @@ def _cut_video(input_path: str, output_path: str, start_time: float, end_time: f
         if not os.path.exists(output_path):
             raise Exception(f"出力ファイルが生成されませんでした: {output_path}")
 
-        print(f"動画切り取り完了: {output_path} (サイズ: {os.path.getsize(output_path)} bytes)")
+        logger.info(f"動画切り取り完了: {output_path} (サイズ: {os.path.getsize(output_path)} bytes)")
 
     except subprocess.CalledProcessError as e:
-        print(f"動画切り取りエラー (CalledProcessError): {e.stderr}")
+        logger.error(f"動画切り取りエラー (CalledProcessError): {e.stderr}")
         raise Exception(f"動画の切り取りに失敗しました: {e.stderr[-500:]}")
     except Exception as e:
-        print(f"動画切り取りエラー: {e}")
+        logger.error(f"動画切り取りエラー: {e}")
         raise Exception(f"動画の切り取りに失敗しました: {str(e)}")
 
 
@@ -229,7 +230,7 @@ async def cleanup_temp_files(
         if main_video_path and os.path.exists(main_video_path):
             os.remove(main_video_path)
             deleted_files.append(os.path.basename(main_video_path))
-            print(f"本編動画を削除: {main_video_path}")
+            logger.info(f"本編動画を削除: {main_video_path}")
 
         # サンプル動画の削除（temp_video_idから生成された全てのmp4ファイル）
         # 注: サンプル動画IDは別途生成されるため、パターンマッチングで探索
@@ -244,7 +245,7 @@ async def cleanup_temp_files(
                     if os.path.getctime(file_path) < (time.time() - 3600):
                         os.remove(file_path)
                         deleted_files.append(file)
-                        print(f"古いサンプル動画を削除: {file_path}")
+                        logger.info(f"古いサンプル動画を削除: {file_path}")
                 except ValueError:
                     # UUIDでない場合はスキップ
                     pass
@@ -255,7 +256,7 @@ async def cleanup_temp_files(
         }
 
     except Exception as e:
-        print(f"一時ファイル削除エラー: {e}")
+        logger.error(f"一時ファイル削除エラー: {e}")
         # エラーが発生してもクライアント側の処理は継続させる（削除失敗は致命的ではない）
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -347,7 +348,7 @@ async def serve_temp_video(filename: str, request: Request):
                     media_type=media_type
                 )
             except ValueError as e:
-                print(f"Range header parse error: {e}, header: {range_header}")
+                logger.error(f"Range header parse error: {e}, header: {range_header}")
                 # Range headerのパースに失敗した場合は全体を返す
                 pass
 
@@ -374,5 +375,5 @@ async def serve_temp_video(filename: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"一時動画配信エラー: {e}")
+        logger.error(f"一時動画配信エラー: {e}")
         raise HTTPException(status_code=500, detail="動画の配信に失敗しました")

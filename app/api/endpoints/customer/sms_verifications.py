@@ -20,6 +20,8 @@ from app.crud.user_crud import update_user_phone_verified_at
 from app.services.s3.sms_auth import send_sms
 from app.constants.enums import SMSStatus, SMSPurpose, CreatorStatus
 from datetime import datetime, timedelta, timezone
+from app.core.logger import Logger
+logger = Logger.get_logger()
 router = APIRouter()
 
 RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
@@ -59,7 +61,7 @@ def send_sms_verification(
         # コード生成
         code = generate_sms_code(5)
 
-        print(f"[LOCAL SMS] code: {code}")
+        logger.info(f"[LOCAL SMS] code: {code}")
         message = f"mijfans SMS認証コード: {code}（{SMS_TTL//60}分以内に入力してください。）"
 
         send_sms(sms_verification_request.phone_e164, message)
@@ -73,7 +75,7 @@ def send_sms_verification(
         return True
     except Exception as e:
         db.rollback()
-        print("SMS認証エラーが発生しました", e)
+        logger.error("SMS認証エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
@@ -103,7 +105,7 @@ def verify_sms_verification(
         if not db_sms_verification:
             raise HTTPException(status_code=400, detail="コードが見つかりません。再送してください。")
 
-        if db_sms_verification.expires_at < now:
+        if db_sms_verification.expires_at.replace(tzinfo=timezone.utc) < now:
             raise HTTPException(status_code=400, detail="コードの有効期限が切れています。再送してください。")
 
         if db_sms_verification.attempts >= MAX_ATTEMPTS:
@@ -130,7 +132,7 @@ def verify_sms_verification(
             raise HTTPException(status_code=400, detail="コードが間違っています。再送してください。")
     except Exception as e:
         db.rollback()
-        print("SMS認証エラーが発生しました", e)
+        logger.error("SMS認証エラーが発生しました", e)
 
 def _insert_sms_verification(db: Session, phone_e164: str, user_id: str, code: str, purpose: int) -> SMSVerifications:
     """

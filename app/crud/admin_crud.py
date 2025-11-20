@@ -20,6 +20,8 @@ from app.constants.enums import PostStatus, MediaAssetStatus
 import os
 
 from app.schemas.notification import NotificationType
+from app.core.logger import Logger
+logger = Logger.get_logger()
 
 CDN_URL = os.getenv("CDN_BASE_URL")
 
@@ -46,7 +48,7 @@ def get_admin_by_id(db: Session, admin_id: str) -> Optional[Admins]:
         ).first()
         return admin
     except Exception as e:
-        print(f"Get admin by id error: {e}")
+        logger.error(f"Get admin by id error: {e}")
         return None
 
 
@@ -68,7 +70,7 @@ def get_admin_by_email(db: Session, email: str) -> Optional[Admins]:
         ).first()
         return admin
     except Exception as e:
-        print(f"Get admin by email error: {e}")
+        logger.error(f"Get admin by email error: {e}")
         return None
 
 
@@ -113,7 +115,7 @@ def create_admin(
 
         return new_admin
     except Exception as e:
-        print(f"Create admin error: {e}")
+        logger.error(f"Create admin error: {e}")
         db.rollback()
         return None
 def get_dashboard_info(db: Session) -> Dict[str, Any]:
@@ -179,7 +181,7 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
             "active_subscriptions": active_subscriptions
         }
     except Exception as e:
-        print(f"Dashboard stats error: {e}")
+        logger.error(f"Dashboard stats error: {e}")
         # エラー時はデフォルト値を返す
         return {
             "total_users": 0,
@@ -440,7 +442,7 @@ def update_user_status(db: Session, user_id: str, status: str) -> bool:
         db.commit()
         return True
     except Exception as e:
-        print(f"Update user status error: {e}")
+        logger.error(f"Update user status error: {e}")
         db.rollback()
         return False
 
@@ -477,7 +479,7 @@ def update_creator_application_status(db: Session, application_id: str, status: 
         db.commit()
         return True
     except Exception as e:
-        print(f"Update creator application status error: {e}")
+        logger.error(f"Update creator application status error: {e}")
         db.rollback()
         return False
 
@@ -509,7 +511,7 @@ def update_identity_verification_status(db: Session, verification_id: str, statu
         db.commit()
         return True
     except Exception as e:
-        print(f"Update identity verification status error: {e}")
+        logger.error(f"Update identity verification status error: {e}")
         db.rollback()
         return False
 
@@ -544,7 +546,7 @@ def update_post_status(db: Session, post_id: str, status: str) -> bool:
         db.commit()
         return True
     except Exception as e:
-        print(f"Update post status error: {e}")
+        logger.error(f"Update post status error: {e}")
         db.rollback()
         return False
 
@@ -592,7 +594,7 @@ def reject_post_with_comments(
         db.commit()
         return True
     except Exception as e:
-        print(f"Reject post with comments error: {e}")
+        logger.error(f"Reject post with comments error: {e}")
         import traceback
         traceback.print_exc()
         db.rollback()
@@ -620,8 +622,9 @@ def add_notification_for_creator_application(
                     payload={
                         "title": "クリエイター申請が承認されました",
                         "subtitle": "クリエイター申請が承認されました",
+                        "message": "クリエイター申請が承認されました",
                         "avatar": None,
-                        "redirect_url": f"/profile?username={application_id}",
+                        "redirect_url": f"/account",
                     },
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -632,7 +635,7 @@ def add_notification_for_creator_application(
                 db.commit()
             except Exception as e:
                 db.rollback()
-                print(f"Add notification for creator application approved error: {e}")
+                logger.error(f"Add notification for creator application approved error: {e}")
                 pass
         
         elif type == "rejected":
@@ -644,7 +647,7 @@ def add_notification_for_creator_application(
                         "title": "クリエイター申請が拒否されました",
                         "subtitle": "クリエイター申請が拒否されました",
                         "avatar": None,
-                        "redirect_url": f"/profile?username={application_id}",
+                        "redirect_url": f"/account",
                     },
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -655,8 +658,8 @@ def add_notification_for_creator_application(
                 db.commit()
             except Exception as e:
                 db.rollback()
-                print(f"Add notification for creator application rejected error: {e}")
+                logger.error(f"Add notification for creator application rejected error: {e}")
                 pass
     except Exception as e:
-        print(f"Add notification for creator application error: {e}")
+        logger.error(f"Add notification for creator application error: {e}")
         pass

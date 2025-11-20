@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .media_assets import MediaAssets
     from .plans import PostPlans
     from .prices import Prices
+    from .generation_media import GenerationMedia
 
 class Posts(Base):
     __tablename__ = "posts"
@@ -38,3 +39,4 @@ class Posts(Base):
     media_assets: Mapped[List["MediaAssets"]] = relationship("MediaAssets", back_populates="post")
     post_plans: Mapped[List["PostPlans"]] = relationship("PostPlans", back_populates="post")
     prices: Mapped[List["Prices"]] = relationship("Prices", back_populates="post")
+    generation_media: Mapped[["GenerationMedia"]] = relationship("GenerationMedia", back_populates="post")

@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func, desc
 from typing import Optional, List, Tuple, Union
 from uuid import UUID
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.models.conversations import Conversations
 from app.models.conversation_messages import ConversationMessages

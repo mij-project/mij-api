@@ -5,9 +5,9 @@ from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
 from app.constants.enums import PostStatus
 from app.models.user import Users
-from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse, PostUpdateRequest
+from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse, PostUpdateRequest, PostOGPResponse
 from app.constants.enums import PostVisibility, PostType, PlanStatus, PriceType, MediaAssetKind
-from app.crud.post_crud import create_post, get_post_detail_by_id, update_post, get_post_ogp_image_url
+from app.crud.post_crud import create_post, get_post_detail_by_id, update_post, get_post_ogp_image_url, get_post_ogp_data
 from app.crud.plan_crud import create_plan
 from app.crud.price_crud import create_price, delete_price_by_post_id
 from app.crud.post_plans_crud import create_post_plan, delete_plan_by_post_id
@@ -16,13 +16,20 @@ from app.crud.post_tags_crud import create_post_tag, delete_post_tags_by_post_id
 from app.crud.post_categories_crud import create_post_category, delete_post_categories_by_post_id
 from app.crud.post_crud import get_recent_posts
 from app.crud.entitlements_crud import check_entitlement
+from app.crud.generation_media_crud import get_generation_media_by_post_id, create_generation_media
 from app.models.tags import Tags
+from app.services.s3.image_screening import generate_ogp_image
+from app.services.s3.client import upload_ogp_image_to_s3
+from app.services.s3.keygen import post_media_image_key
 from typing import List
+from app.constants.enums import GenerationMediaKind
 import os
 from os import getenv
 from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 # PostTypeの文字列からenumへのマッピングを定義
@@ -84,7 +91,7 @@ async def create_post_endpoint(
         
     except Exception as e:
         db.rollback()
-        print("投稿作成エラーが発生しました", e)
+        logger.error("投稿作成エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/update")
@@ -141,7 +148,7 @@ async def update_post_endpoint(
         
         return post
     except Exception as e:
-        print("投稿更新エラーが発生しました", e)
+        logger.error("投稿更新エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/detail")
@@ -188,7 +195,7 @@ async def get_post_detail(
     except HTTPException:
         raise
     except Exception as e:
-        print("投稿詳細取得エラーが発生しました", e)
+        logger.error("投稿詳細取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/new-arrivals" , response_model=List[NewArrivalsResponse])
@@ -208,22 +215,28 @@ async def get_new_arrivals(
             likes_count=post.likes_count or 0
         ) for post in recent_posts]
     except Exception as e:
-        print("新着投稿取得エラーが発生しました", e)
+        logger.error("新着投稿取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{post_id}/ogp-image")
+@router.get("/{post_id}/ogp-image", response_model=PostOGPResponse)
 async def get_post_ogp_image(
     post_id: str,
     db: Session = Depends(get_db)
 ):
-    """投稿のOGP画像URLを取得する"""
+    """投稿のOGP情報を取得する（Lambda@Edge用）"""
     try:
-        ogp_image_url = get_post_ogp_image_url(db, post_id)
-        return {
-            "ogp_image_url": ogp_image_url
-        }
+        # OGP情報を取得（投稿詳細 + クリエイター情報 + OGP画像）
+        ogp_data = get_post_ogp_data(db, post_id)
+
+        if not ogp_data:
+            raise HTTPException(status_code=404, detail="投稿が見つかりません")
+
+        return ogp_data
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print("OGP画像URL取得エラーが発生しました", e)
+        logger.error("OGP画像URL取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 # utils

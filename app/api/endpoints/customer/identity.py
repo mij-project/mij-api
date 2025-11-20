@@ -23,6 +23,9 @@ from app.services.s3.client import bucket_exit_check
 from app.crud.creater_crud import update_creator_status
 from app.constants.enums import CreatorStatus
 from app.crud.user_crud import update_user_identity_verified_at
+from app.core.logger import Logger
+
+logger = Logger.get_logger()
 router = APIRouter()
 
 from app.services.s3.client import s3_client
@@ -85,7 +88,7 @@ def kyc_presign_upload(
         return VerifyPresignResponse(verification_id=verification.id, uploads=uploads)
     except Exception as e:
         db.rollback()
-        print("認証情報作成エラーが発生しました", e)
+        logger.error("認証情報作成エラーが発生しました", e)
         # エラーが発生した場合は自動的にロールバックされるため、明示的なrollbackは不要
         raise HTTPException(500, f"Failed to issue presigned URL: {e}")
 
@@ -133,5 +136,5 @@ def kyc_complete(
         db.refresh(users)
         return {"ok": True, "verification_id": str(body.verification_id)}
     except Exception as e:
-        print("認証情報更新エラーが発生しました", e)
+        logger.error("認証情報更新エラーが発生しました", e)
         raise HTTPException(500, f"Failed to complete: {e}")
