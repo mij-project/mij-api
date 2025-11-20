@@ -25,7 +25,9 @@ from app.services.email.send_email import send_email_verification
 from app.constants.number import CompanyFeePercent
 from typing import Tuple, Optional
 from uuid import UUID
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 BASE_URL = os.getenv("CDN_BASE_URL")
@@ -61,7 +63,7 @@ def register_user(
 
         return db_user
     except Exception as e:
-        print("ユーザー登録エラー: ", e)
+        logger.error("ユーザー登録エラー: ", e)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -87,7 +89,7 @@ def get_user_profile_by_company_code(
         db.refresh(db_profile)
         return db_user
     except Exception as e:
-        print("ユーザー登録エラー: ", e)
+        logger.error("ユーザー登録エラー: ", e)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -218,7 +220,7 @@ def get_user_profile_by_username_endpoint(
             gacha_items=profile_gacha_items
         )
     except Exception as e:
-        print("ユーザープロフィール取得エラー: ", e)
+        logger.error("ユーザープロフィール取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{user_id}/ogp-image", response_model=UserOGPResponse)
@@ -239,7 +241,7 @@ async def get_user_ogp_image(
     except HTTPException:
         raise
     except Exception as e:
-        print("OGP情報取得エラーが発生しました", e)
+        logger.error("OGP画像URL取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.models.user_settings import UserSettings
 from app.schemas.user_settings import UserSettingsType
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 
 def get_user_settings_by_user_id(db: Session, user_id: UUID, type: UserSettingsType) -> UserSettings:
     return db.query(UserSettings).filter(UserSettings.user_id == user_id, UserSettings.type == type).first()
@@ -31,6 +32,6 @@ def update_user_settings_by_user_id(db: Session, user_id: UUID, type: UserSettin
             db.refresh(user_settings)
             return user_settings
     except Exception as e:
-        print("ユーザー設定更新エラーが発生しました", e)
+        logger.error(f"ユーザー設定更新エラーが発生しました: {e}")
         db.rollback()
         return None

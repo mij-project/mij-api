@@ -110,8 +110,10 @@ def update_profile(db: Session, user_id: UUID, update_data: AccountUpdateRequest
     profile.username = update_data.username
     profile.bio = update_data.description
     profile.links = update_data.links
-    profile.avatar_url = update_data.avatar_url
-    profile.cover_url = update_data.cover_url
+    if update_data.avatar_url is not None:
+        profile.avatar_url = update_data.avatar_url
+    if update_data.cover_url is not None:
+        profile.cover_url = update_data.cover_url
     profile.updated_at = datetime.now(timezone.utc)
     db.add(profile)
     db.flush()

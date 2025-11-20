@@ -17,7 +17,8 @@ from app.api.commons.utils import get_video_duration
 from app.models.user import Users
 from sqlalchemy import func, and_
 import os
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 BASE_URL = os.getenv("CDN_BASE_URL")
 from app.constants.enums import PostStatus
 
@@ -499,7 +500,7 @@ def reorder_plans(db: Session, creator_user_id: UUID, plan_orders: List) -> bool
         try:
             plan_id = UUID(plan_id_str) if isinstance(plan_id_str, str) else plan_id_str
         except (ValueError, AttributeError) as e:
-            print(f"無効なUUID: {plan_id_str}, エラー: {e}")
+            logger.error(f"無効なUUID: {plan_id_str}, エラー: {e}")
             continue
 
         plan = db.query(Plans).filter(

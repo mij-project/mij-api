@@ -30,6 +30,9 @@ from app.services.email.send_email import (
 )
 from app.models.admins import Admins
 from app.crud.user_crud import update_user_identity_verified_at
+from app.core.logger import Logger
+
+logger = Logger.get_logger()
 router = APIRouter()
 
 
@@ -142,12 +145,12 @@ def review_identity_verification(
                         display_name=user.profile.username if user.profile else user.profile_name
                     )
             except Exception as e:
-                print(f"Email sending failed: {e}")
+                logger.error(f"Email sending failed: {e}")
 
             try:
                 add_notification_for_identity_verification(db, user.id, review.status)
             except Exception as e:
-                print(f"Notification sending failed: {e}")
+                logger.error(f"Notification sending failed: {e}")
                 pass
 
             return {"message": "身分証明を承認しました", "status": "approved"}
@@ -177,7 +180,7 @@ def review_identity_verification(
                 if not users:
                     raise HTTPException(500, "身分証明の更新に失敗しました。")
             except Exception as e:
-                print(f"Email sending failed: {e}")
+                logger.error(f"Email sending failed: {e}")
 
             return {"message": "身分証明を拒否しました", "status": "rejected"}
 
@@ -187,6 +190,6 @@ def review_identity_verification(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Identity verification review error: {e}")
+        logger.error(f"Identity verification review error: {e}")
         raise HTTPException(status_code=500, detail="審査処理中にエラーが発生しました")
 

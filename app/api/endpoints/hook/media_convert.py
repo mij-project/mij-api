@@ -15,7 +15,8 @@ from app.constants.enums import MediaRenditionJobStatus, MediaRenditionKind, Pos
 from app.db.base import get_db
 from app.constants.enums import AuthenticatedFlag
 from app.services.s3.client import MEDIA_BUCKET_NAME, AWS_REGION
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 # Constants
 HLS_VARIANT_SUFFIXES = (
     "_360p.m3u8", "_480p.m3u8", "_720p.m3u8", "_1080p.m3u8", "_audio.m3u8"
@@ -69,7 +70,7 @@ async def mediaconvert_webhook(
         raise
     except Exception as e:
         db.rollback()
-        print(f"Webhook processing error: {e}")
+        logger.error(f"Webhook processing error: {e}")
         raise HTTPException(500, "Internal server error")
 
 
@@ -275,7 +276,7 @@ def _find_master_by_listing(bucket: str, prefix: str) -> Tuple[Optional[str], Op
         return master_key, size_bytes
         
     except Exception as e:
-        print(f"Error listing S3 objects: {e}")
+        logger.error(f"Error listing S3 objects: {e}")
         return None, None
 
 
@@ -326,7 +327,7 @@ def _get_video_duration(detail: dict, storage_key: str) -> Optional[Decimal]:
     try:
         return _get_duration_with_ffmpeg(storage_key)
     except Exception as e:
-        print(f"Failed to get video duration: {e}")
+        logger.error(f"Failed to get video duration: {e}")
         return None
 
 
@@ -387,8 +388,8 @@ def _get_duration_with_ffmpeg(storage_key: str) -> Optional[Decimal]:
             return None
             
     except subprocess.CalledProcessError as e:
-        print(f"FFprobe error: {e}")
+        logger.error(f"FFprobe error: {e}")
         return None
     except Exception as e:
-        print(f"Error getting duration with FFmpeg: {e}")
+        logger.error(f"Error getting duration with FFmpeg: {e}")
         return None

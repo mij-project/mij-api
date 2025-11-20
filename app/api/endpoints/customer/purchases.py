@@ -12,7 +12,9 @@ from app.crud.purchases_crud import (
     get_sales_data_by_creator_id,
     get_sales_transactions_by_creator_id
 )
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 @router.post("/create")
@@ -54,7 +56,7 @@ async def create_purchase_endpoint(
         }
     except Exception as e:
         db.rollback()
-        print("購入情報処理に失敗しました", e)
+        logger.error("購入情報処理に失敗しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sales", response_model=SalesDataResponse)
@@ -76,7 +78,7 @@ async def get_sales_data(
         sales_data = get_sales_data_by_creator_id(db, user.id, period)
         return SalesDataResponse(**sales_data)
     except Exception as e:
-        print("売上データ取得に失敗しました", e)
+        logger.error("売上データ取得に失敗しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/transactions", response_model=SalesTransactionsListResponse)
@@ -98,5 +100,5 @@ async def get_sales_transactions(
         transactions = get_sales_transactions_by_creator_id(db, user.id, limit)
         return SalesTransactionsListResponse(transactions=transactions)
     except Exception as e:
-        print("売上履歴取得に失敗しました", e)
+        logger.error("売上履歴取得に失敗しました", e)
         raise HTTPException(status_code=500, detail=str(e))

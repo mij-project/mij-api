@@ -38,9 +38,8 @@ from app.crud.post_crud import get_post_by_id
 from app.constants.enums import MediaAssetKind
 import boto3
 from typing import Dict, Any, Optional
-
-
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 S3 = boto3.client("s3", region_name="ap-northeast-1")
 
 router = APIRouter()
@@ -106,7 +105,7 @@ def _create_media_convert_job(
             "job_id": response['Job']['Id']
         }
     except Exception as e:
-        print(f"Error creating MediaConvert job: {e}")
+        logger.error(f"Error creating MediaConvert job: {e}")
         # エラーが発生した場合はステータスを更新
         update_data = {
             "id": media_rendition_job.id,
@@ -260,12 +259,13 @@ def transcode_mc_unified(
 
         return {"status": True, "message": f"Media conversion completed for {type}"}
 
-    except HTTPException:
+    except HTTPException as httpexception:
         db.rollback()
+        logger.exception(f"HTTPException: {httpexception}")
         raise
     except Exception as e:
         db.rollback()
-        print(f"メディアコンバート処理にてエラーが発生しました。: {e}")
+        logger.error(f"メディアコンバート処理にてエラーが発生しました。: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/transcode_mc")
@@ -336,7 +336,7 @@ def transcode_mc_update(
         raise
     except Exception as e:
         db.rollback()
-        print(f"メディアコンバート更新処理にてエラーが発生しました。: {e}")
+        logger.error(f"メディアコンバート更新処理にてエラーが発生しました。: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

@@ -62,9 +62,16 @@ from app.crud.post_plans_crud import get_post_plans
 from uuid import UUID
 from app.api.commons.utils import resolve_media_asset_storage_key
 import os
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 BASE_URL = os.getenv("CDN_BASE_URL")
+
+TWITTER_URL = "https://x.com"
+INSTAGRAM_URL = "https://www.instagram.com"
+YOUTUBE_URL = "https://www.youtube.com"
+TIKTOK_URL = "https://www.tiktok.com/"
 
 @router.get("/info", response_model=AccountInfoResponse)
 def get_account_info(
@@ -172,7 +179,7 @@ def get_account_info(
             plan_info=plan_info,
         )
     except Exception as e:
-        print("アカウント情報取得エラーが発生しました", e)
+        logger.error("アカウント情報取得エラーが発生しました", e)
         # エラー時はデフォルト値で返す
         return AccountInfoResponse(
             profile_info=ProfileInfo(
@@ -244,7 +251,7 @@ def get_profile_edit_info(
     except HTTPException:
         raise
     except Exception as e:
-        print("プロフィール編集情報取得エラー:", e)
+        logger.error("プロフィール編集情報取得エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/update", response_model=AccountUpdateResponse)
@@ -268,11 +275,48 @@ def update_account_info(
         HTTPException: エラーが発生した場合
     """
     try:
+    
         if update_data.name:
             if check_profile_name_exists(db, update_data.name) and update_data.name != current_user.profile_name:
                 raise HTTPException(status_code=400, detail="このユーザー名は既に使用されています")
 
             user = update_user(db, current_user.id, update_data.name)
+        links = update_data.links
+        instagram = links.get("instagram", "")
+        instagram_link = f"{INSTAGRAM_URL}/{instagram.replace('@', '')}" if instagram else ""
+        tiktok = links.get("tiktok", "")
+        if tiktok and tiktok.startswith("@"):
+            tiktok_link = f"{TIKTOK_URL}/{tiktok}"
+        elif tiktok and not tiktok.startswith("@"):
+            tiktok_link = f"{TIKTOK_URL}/@{tiktok}"
+        else:
+            tiktok_link = ""
+        twitter = links.get("twitter", "")
+        twitter_link = f"{TWITTER_URL}/{twitter.replace('@', '')}" if twitter else ""
+        youtube = links.get("youtube", "")
+        if youtube and youtube.startswith("@"):
+            youtube_link = f"{YOUTUBE_URL}/{youtube}"
+        elif youtube and not youtube.startswith("@"):
+            youtube_link = f"{YOUTUBE_URL}/@{youtube}"
+        else:
+            youtube_link = ""
+        website = links.get("website", "")
+        website2 = links.get("website2", "")
+
+        update_links = {
+            "instagram": instagram,
+            "instagram_link": instagram_link,
+            "tiktok": tiktok,
+            "tiktok_link": tiktok_link,
+            "twitter": twitter,
+            "twitter_link": twitter_link,
+            "youtube": youtube,
+            "youtube_link": youtube_link,
+            "website": website,
+            "website2": website2,
+        }
+
+        update_data.links = update_links
 
         if update_data.username:
             profile = update_profile(db, current_user.id, update_data)
@@ -285,8 +329,9 @@ def update_account_info(
             message="アカウント情報が正常に更新されました",
             success=True
         )
+
     except Exception as e:
-        print("アカウント情報更新エラーが発生しました", e)
+        logger.error("アカウント情報更新エラーが発生しました", e)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -327,7 +372,7 @@ def presign_upload(
 
         return AccountPresignResponse(uploads=uploads)
     except Exception as e:
-        print("アップロードURL生成エラーが発生しました", e)
+        logger.error("アップロードURL生成エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/posts")
@@ -349,7 +394,7 @@ def get_post_status(
             approved_posts=_convert_posts(posts_data["approved_posts"])
         )
     except Exception as e:
-        print("投稿ステータス取得エラーが発生しました", e)
+        logger.error("投稿ステータス取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/post/{post_id}", response_model=AccountPostDetailResponse)
@@ -429,7 +474,7 @@ def get_account_post_detail(
     except HTTPException:
         raise
     except Exception as e:
-        print("投稿詳細取得エラーが発生しました", e)
+        logger.error("投稿詳細取得エラーが発生しました", e)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -463,7 +508,7 @@ def get_plans(
             subscribed_plan_details=subscribed_plan_details,
         )
     except Exception as e:
-        print("プラン一覧取得エラーが発生しました", e)
+        logger.error("プラン一覧取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/bookmarks", response_model=BookmarkedPostsResponse)
@@ -503,7 +548,7 @@ def get_bookmarks(
 
         return BookmarkedPostsResponse(bookmarks=bookmarks)
     except Exception as e:
-        print("ブックマーク一覧取得エラー:", e)
+        logger.error("ブックマーク一覧取得エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/likes", response_model=LikedPostsListResponse)
@@ -543,7 +588,7 @@ def get_likes(
 
         return LikedPostsListResponse(liked_posts=liked_posts)
     except Exception as e:
-        print("いいね一覧取得エラー:", e)
+        logger.error("いいね一覧取得エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/bought", response_model=BoughtPostsResponse)
@@ -583,7 +628,7 @@ def get_bought(
 
         return BoughtPostsResponse(bought_posts=bought_posts)
     except Exception as e:
-        print("購入済み一覧取得エラー:", e)
+        logger.error("購入済み一覧取得エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/profile-image/submit", response_model=ProfileImageSubmissionResponse)
@@ -628,7 +673,7 @@ def submit_profile_image(
     except HTTPException:
         raise
     except Exception as e:
-        print("プロフィール画像申請エラー:", e)
+        logger.error("プロフィール画像申請エラー:", e)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -650,7 +695,7 @@ def get_profile_image_status(
             cover_submission=submissions["cover_submission"]
         )
     except Exception as e:
-        print("申請状況取得エラー:", e)
+        logger.error("申請状況取得エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 # データ変換用のヘルパー関数
@@ -746,5 +791,5 @@ def update_account_post(
         raise HTTPException(status_code=400, detail=f"無効な投稿ID: {str(e)}")
     except Exception as e:
         db.rollback()
-        print(f"投稿更新エラー: {e}")
+        logger.error(f"投稿更新エラー: {e}")
         raise HTTPException(status_code=500, detail="投稿の更新に失敗しました")

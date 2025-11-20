@@ -11,6 +11,8 @@ from typing import List
 from app.schemas.notification import NotificationType
 from app.schemas.user_settings import UserSettingsType
 from app.services.email.send_email import send_follow_notification_email
+from app.core.logger import Logger
+logger = Logger.get_logger()
 
 def get_follower_count(db: Session, user_id: UUID) -> dict:
     """
@@ -169,7 +171,7 @@ def add_notification_follow(db: Session, follower_user_id: UUID, creator_user_id
         db.commit()
     except Exception as e:
         db.rollback()
-        print(f"Add notification follow error: {e}")
+        logger.error(f"Add notification follow error: {e}")
         pass
 
 def add_mail_notification_follow(db: Session, follower_user_id: UUID, creator_user_id: UUID) -> None:
@@ -199,5 +201,5 @@ def add_mail_notification_follow(db: Session, follower_user_id: UUID, creator_us
             send_follow_notification_email(user.Users.email, user.Profiles.username, follower_profile.username, f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp')}/profile?username={follower_profile.username}")
     except Exception as e:
         db.rollback()
-        print(f"Add mail notification follow error: {e}")
+        logger.error(f"Add mail notification follow error: {e}")
         pass
