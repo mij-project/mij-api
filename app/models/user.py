@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from .events import UserEvents
     from .companies import CompanyUsers
     from .password_reset_token import PasswordResetToken
+    from .generation_media import GenerationMedia
 
 class Users(Base):
     __tablename__ = "users"
@@ -64,3 +65,4 @@ class Users(Base):
     user_events: Mapped[List["UserEvents"]] = relationship("UserEvents", back_populates="user")
     company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
     password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship("PasswordResetToken", back_populates="user")
+    generation_media: Mapped[["GenerationMedia"]] = relationship("GenerationMedia", back_populates="user")

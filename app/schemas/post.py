@@ -56,3 +56,20 @@ class PostUpdateRequest(BaseModel):
 	price: Optional[int] = None
 	post_type: str
 	reject_comments: Optional[str] = None
+
+class PostOGPCreatorResponse(BaseModel):
+	"""投稿OGP用のクリエイター情報"""
+	user_id: str
+	profile_name: str
+	username: str
+	avatar_url: Optional[str] = None
+
+class PostOGPResponse(BaseModel):
+	"""投稿OGP情報レスポンス"""
+	post_id: str
+	title: str
+	description: str
+	post_type: int | None
+	ogp_image_url: str
+	creator: PostOGPCreatorResponse
+	created_at: datetime

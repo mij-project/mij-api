@@ -3153,12 +3153,13 @@ def add_notification_for_post(
 def get_post_ogp_image_url(db: Session, post_id: str) -> str | None:
     """
     投稿のOGP画像URLを取得
-    優先順位: kind=1のメディアアセット → クリエイタープロフィール画像 → None
+    優先順位: kind=1のメディアアセット → クリエイターのカバー画像 → デフォルト画像
     """
+
     # 投稿を取得
     post = db.query(Posts).filter(Posts.id == post_id).first()
     if not post:
-        return None
+        raise Exception("Post not found")
 
     # kind=1のメディアアセットを取得
     media_asset = db.query(MediaAssets).filter(
@@ -3167,21 +3168,12 @@ def get_post_ogp_image_url(db: Session, post_id: str) -> str | None:
             MediaAssets.kind == MediaAssetKind.OGP,
         )
     ).first()
+    
 
-    # メディアアセットがある場合はそのURLを返す
-    if media_asset and media_asset.storage_key:
-        return f"{CDN_BASE_URL}/{media_asset.storage_key}"
+    if not media_asset:
+        return None
 
-    # メディアアセットがない場合、クリエイターのプロフィール画像を取得
-    creator_profile = db.query(Profiles).filter(
-        Profiles.user_id == post.creator_user_id
-    ).first()
-
-    if creator_profile and creator_profile.avatar_url:
-        return f"{CDN_BASE_URL}/{creator_profile.avatar_url}"
-
-    # プロフィール画像もない場合はNoneを返す
-    return None
+    return f"{CDN_BASE_URL}/{media_asset.storage_key}"
 
 def add_mail_notification_for_post(
     db: Session, 
@@ -3227,4 +3219,80 @@ def add_mail_notification_for_post(
     except Exception as e:
         print(f"Add mail notification for post error: {e}")
         pass
-               
+
+def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
+    """
+    投稿のOGP生成に必要な全ての情報を取得
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+
+    Returns:
+        Dict[str, Any]: OGP情報（投稿詳細 + クリエイター情報 + OGP画像）
+        None: 投稿が見つからない場合
+    """
+    from app.models.generation_media import GenerationMedia
+    from app.constants.enums import GenerationMediaKind
+
+    # 投稿情報 + クリエイター情報 + プロフィール情報を一度に取得
+    result = (
+        db.query(
+            Posts.id,
+            Posts.description,
+            Posts.post_type,
+            Posts.created_at,
+            Users.id.label("creator_user_id"),
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .outerjoin(Profiles, Users.id == Profiles.user_id)
+        .filter(Posts.id == post_id)
+        .filter(Posts.deleted_at.is_(None))
+        .first()
+    )
+
+    if not result:
+        return None
+
+    # OGP画像URLを取得
+    # 優先順位: generation_media (kind=2) → thumbnail → デフォルト画像
+    ogp_image_url = None
+
+    # 1. generation_mediaからOGP画像を取得
+    generation_media = db.query(GenerationMedia).filter(
+        GenerationMedia.post_id == post_id,
+        GenerationMedia.kind == GenerationMediaKind.POST_IMAGE
+    ).first()
+
+    if generation_media:
+        ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
+    else:
+        ogp_image_url = "https://logo.mijfans.jp/bimi/ogp-image.png"
+
+    # タイトル生成（descriptionの最初の30文字）
+    description = result.description or ""
+    title = description[:30] + "..." if len(description) > 30 else description
+
+    # アバターURL
+    avatar_url = None
+    if result.avatar_url:
+        avatar_url = f"{CDN_BASE_URL}/{result.avatar_url}"
+
+    return {
+        "post_id": str(result.id),
+        "title": title,
+        "description": description,
+        "post_type": result.post_type,
+        "ogp_image_url": ogp_image_url,
+        "creator": {
+            "user_id": str(result.creator_user_id),
+            "profile_name": result.profile_name or "クリエイター",
+            "username": result.username or "",
+            "avatar_url": avatar_url
+        },
+        "created_at": result.created_at
+    }
+

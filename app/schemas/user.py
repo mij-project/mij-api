@@ -77,6 +77,16 @@ class UserProfileResponse(BaseModel):
     plans: List[ProfilePlanResponse]
     individual_purchases: List[ProfilePurchaseResponse]
     gacha_items: List[ProfileGachaResponse]
+
+class UserOGPResponse(BaseModel):
+    """ユーザーOGP情報レスポンス"""
+    user_id: str
+    profile_name: str
+    username: str
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+    cover_url: Optional[str] = None
+    ogp_image_url: str
     
     class Config:
         from_attributes = True

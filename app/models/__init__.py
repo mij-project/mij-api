@@ -36,6 +36,7 @@ from .companies import Companies, CompanyUsers
 from .search_history import SearchHistory
 from .password_reset_token import PasswordResetToken
 from .user_settings import UserSettings
+from .generation_media import GenerationMedia
 
 __all__ = [
     "Users", "Profiles", "Creators", "Genres", "Categories", "Posts", "PostCategories",
@@ -46,5 +47,5 @@ __all__ = [
     "CreatorType", "Gender", "MediaRenditionJobs", "Preregistrations",
     "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants",
     "Admins", "PaymentEvents", "SMSVerifications", "Banners", "Events", "UserEvents", "Companies", "CompanyUsers",
-    "SearchHistory", "PasswordResetToken", "UserSettings"
+    "SearchHistory", "PasswordResetToken", "UserSettings", "GenerationMedia"
 ]
