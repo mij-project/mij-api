@@ -77,3 +77,17 @@ class UpdateImagesPresignRequest(BaseModel):
 class UpdateImagesPresignResponse(BaseModel):
     """画像投稿の更新用レスポンス"""
     uploads: List[PresignResponseItem] = Field(default=[], description='アップロードURL一覧')
+
+class TriggerBatchProcessRequest(BaseModel):
+    """バッチ処理トリガーリクエスト"""
+    post_id: UUID = Field(..., description='投稿ID')
+    tmp_storage_key: str = Field(..., description='tmpバケットのストレージキー (TEMP_VIDEO_DESTINATION)')
+    need_trim: bool = Field(False, description='FFmpegでトリミングが必要か (NEED_TRIM)')
+    start_time: Optional[float] = Field(None, description='トリミング開始時間（秒）(START_TIME)')
+    end_time: Optional[float] = Field(None, description='トリミング終了時間（秒）(END_TIME)')
+
+class TriggerBatchProcessResponse(BaseModel):
+    """バッチ処理トリガーレスポンス"""
+    status: str = Field(..., description='処理状態（processing）')
+    message: str = Field(..., description='メッセージ')
+    tmp_storage_key: str = Field(..., description='tmpバケットのストレージキー')

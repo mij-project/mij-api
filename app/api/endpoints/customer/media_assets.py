@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.services.s3.presign import presign_put_public, presign_put, get_bucket_name, Resource
 from app.schemas.post_media import (
@@ -12,6 +12,8 @@ from app.schemas.post_media import (
     UpdateMediaVideoPresignRequest,
     UpdateImagesPresignRequest,
     UpdateImagesPresignResponse,
+    TriggerBatchProcessRequest,
+    TriggerBatchProcessResponse,
 )
 from app.deps.auth import get_current_user
 from app.db.base import get_db
@@ -33,6 +35,10 @@ from app.models.user import Users
 from app.constants.enums import MediaAssetKind, MediaAssetOrientation, MediaAssetStatus, PostStatus
 from app.constants.enums import AuthenticatedFlag
 from app.core.logger import Logger
+import subprocess
+import os
+import boto3
+from app.core.config import settings
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -56,6 +62,15 @@ ORIENTATION_MAPPING = {
 # 許可されたkind
 ALLOWED_IMAGE_KINDS = {"ogp", "thumbnail", "images"}
 ALLOWED_VIDEO_KINDS = {"main", "sample"}
+
+# S3
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+INGEST_BUCKET_NAME = os.getenv("INGEST_BUCKET_NAME")
+KMS_ALIAS_INGEST = os.getenv("KMS_ALIAS_INGEST")
+TMP_VIDEO_BUCKET_NAME = os.getenv("TMP_VIDEO_BUCKET")
+KMS_ALIAS_INGEST = os.getenv("KMS_ALIAS_INGEST")
 
 
 # ==================== ヘルパー関数 ====================
@@ -352,7 +367,7 @@ async def presign_post_media_video(
     user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """動画のアップロードURLを生成
+    """動画のアップロードURLを生成（sample動画のuploadモード専用）
 
     Args:
         request (PostMediaVideoPresignRequest): リクエストデータ
@@ -371,11 +386,26 @@ async def presign_post_media_video(
         uploads: Dict[VideoKind, PresignResponseItem] = {}
 
         for f in request.files:
+            # sample動画のuploadモードのみ許可
+            # main動画はuploadTempMainVideo → triggerBatchProcessを使用
+            if f.kind == "main":
+                raise HTTPException(
+                    400,
+                    "main動画のアップロードはuploadTempMainVideo → triggerBatchProcessを使用してください"
+                )
+
+            # sample動画でuploadモード以外は拒否
+            if f.kind == "sample" and f.sample_type != "upload":
+                raise HTTPException(
+                    400,
+                    "このエンドポイントはsample動画のuploadモードのみ対応しています。cut_outモードはtriggerBatchProcessを使用してください"
+                )
+
             response = generate_video_presign(
                 str(user.id), str(f.post_id), f.ext, f.kind, f.content_type
             )
             key = response["key"]
-            
+
             uploads[f.kind] = create_presign_response_item(response)
 
             media_asset_data = create_media_asset_data(
@@ -712,3 +742,145 @@ async def update_images(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+@router.post("/trigger-batch-process", response_model=TriggerBatchProcessResponse)
+async def trigger_batch_process(
+    request: TriggerBatchProcessRequest,
+    background_tasks: BackgroundTasks,
+    user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    バッチ処理をトリガーする（バックグラウンド実行）
+    - tmpバケットの動画をmainバケットへ移動
+    - need_trim=Trueの場合、FFmpegでサンプル動画を切り取り
+
+    Args:
+        request: バッチ処理リクエスト
+        background_tasks: FastAPIバックグラウンドタスク
+        user: 現在のユーザー
+        db: データベースセッション
+
+    Returns:
+        TriggerBatchProcessResponse: 処理状態
+    """
+    try:
+        # バリデーション
+        if request.need_trim:
+            if request.start_time is None or request.end_time is None:
+                raise HTTPException(
+                    400,
+                    "need_trim=Trueの場合、start_timeとend_timeは必須です"
+                )
+            if request.start_time >= request.end_time:
+                raise HTTPException(
+                    400,
+                    "start_timeはend_timeより小さい値である必要があります"
+                )
+
+        logger.info(f"バッチ処理トリガー: user_id={user.id}, post_id={request.post_id}, tmp_key={request.tmp_storage_key}")
+
+        # バックグラウンドタスクとしてバッチ処理を登録
+        background_tasks.add_task(
+            execute_batch_process,
+            post_id=str(request.post_id),
+            user_id=str(user.id),
+            tmp_storage_key=request.tmp_storage_key,
+            need_trim=request.need_trim,
+            start_time=request.start_time,
+            end_time=request.end_time
+        )
+
+        return TriggerBatchProcessResponse(
+            status="processing",
+            message="バッチ処理を開始しました",
+            tmp_storage_key=request.tmp_storage_key
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"バッチ処理トリガーエラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def execute_batch_process(
+    post_id: str,
+    user_id: str,
+    tmp_storage_key: str,
+    need_trim: bool,
+    start_time: float = None,
+    end_time: float = None,
+):
+    """
+    バッチ処理を実行（バックグラウンド）
+    - tmpバケットから動画をダウンロード
+    - 必要に応じてFFmpegでトリミング
+    - mainバケットとsampleバケットにアップロード
+
+    Args:
+        post_id: 投稿ID
+        user_id: ユーザーID
+        tmp_storage_key: tmpバケットのストレージキー
+        need_trim: トリミングが必要か
+        start_time: トリミング開始時間（秒）
+        end_time: トリミング終了時間（秒）
+    """
+    try:
+        logger.info(f"バッチ処理開始: post_id={post_id}, tmp_key={tmp_storage_key}")
+
+        # keygen関数でoutput_keyを生成
+        main_output_key = post_media_video_key(user_id, post_id, "mp4", "main")
+        sample_output_key = post_media_video_key(user_id, post_id, "mp4", "sample")
+
+        logger.info(f"生成されたキー: main={main_output_key}, sample={sample_output_key}")
+
+        # 環境変数を設定してバッチスクリプトを実行
+        env = os.environ.copy()
+        env["TEMP_VIDEO_BUCKET"] = INGEST_BUCKET_NAME  # tmpバケット
+        env["TEMP_VIDEO_DESTINATION"] = tmp_storage_key
+        env["MAIN_VIDEO_BUCKET"] = INGEST_BUCKET_NAME  # 審査用バケット
+        env["MAIN_VIDEO_DESTINATION"] = main_output_key
+        env["SAMPLE_VIDEO_BUCKET"] = INGEST_BUCKET_NAME  # 審査用バケット
+        env["SAMPLE_VIDEO_DESTINATION"] = sample_output_key
+        env["NEED_TRIM"] = "1" if need_trim else "0"
+        env["START_TIME"] = str(start_time) if start_time is not None else "0.0"
+        env["END_TIME"] = str(end_time) if end_time is not None else "0.0"
+        env["AWS_REGION"] = AWS_REGION
+        env["AWS_ACCESS"] = AWS_ACCESS_KEY_ID
+        env["AWS_SECRET"] = AWS_SECRET_ACCESS_KEY
+        env["KMS_ARN"] = KMS_ALIAS_INGEST if hasattr(settings, 'KMS_ALIAS_INGEST') else ""
+
+        # バッチスクリプトのディレクトリとファイルパスを取得
+        # app/api/endpoints/customer/ から mij-api/batchs へ移動
+        batch_dir = os.path.abspath(os.path.join(
+            os.path.dirname(__file__),
+            "../../../../batchs/batch-main-sample-video"
+        ))
+        batch_script = "main.py"
+
+        logger.info(f"バッチディレクトリ: {batch_dir}")
+
+        # ディレクトリの存在確認
+        if not os.path.exists(batch_dir):
+            raise FileNotFoundError(f"バッチディレクトリが見つかりません: {batch_dir}")
+
+        # バッチスクリプトのディレクトリから実行（相対インポート対応）
+        result = subprocess.run(
+            ["python", batch_script],
+            env=env,
+            cwd=batch_dir,  # 作業ディレクトリを変更
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        logger.info(f"バッチ処理完了: {result.stdout}")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"バッチ処理エラー: {e.stderr}")
+        raise
+    except Exception as e:
+        logger.error(f"バッチ処理予期しないエラー: {e}")
+        raise
