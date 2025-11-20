@@ -12,7 +12,8 @@ from os import getenv
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PostType
 from app.deps.auth import get_current_user
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 router = APIRouter()
 
 BASE_URL = getenv("CDN_BASE_URL")
@@ -84,5 +85,5 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
             ) for p in recent_posts]
         )
     except Exception as e:
-        print("トップページデータ取得エラー: ", e)
+        logger.error("トップページデータ取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))

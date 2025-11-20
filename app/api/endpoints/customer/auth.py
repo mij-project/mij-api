@@ -34,6 +34,9 @@ from app.crud.preregistrations_curd import get_preregistration_by_X_name
 from app.constants.event_code import EventCode
 from app.crud.user_events_crud import create_user_event
 from app.crud.events_crud import get_event_by_code
+from app.core.logger import Logger
+
+logger = Logger.get_logger()
 router = APIRouter()
 
 X_API_KEY = os.getenv('X_API_KEY')
@@ -121,7 +124,7 @@ def x_login(request: Request, company_code: str = None):
     except HTTPException:
         raise
     except Exception as e:
-        print("Xログイン画面へリダイレクトに失敗:", e)
+        logger.error("Xログイン画面へリダイレクトに失敗:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -222,7 +225,7 @@ def x_callback(
         return redirect_response
     except Exception as e:
         db.rollback()
-        print("Xログインコールバックに失敗しました", e)
+        logger.error("Xログインコールバックに失敗しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 # 認可テスト用の /auth/me
@@ -324,9 +327,9 @@ def refresh_token(request: Request, response: Response):
 def get_csrf_token(request: Request):
     csrf = request.cookies.get(CSRF_COOKIE)
 
-    print(f"csrf_header={request.headers.get('csrf-token') or request.headers.get('x-csrf-token')}")
-    print(f"cookies={request.cookies}")
-    print(f"csrf={csrf}")
+    logger.info(f"csrf_header={request.headers.get('csrf-token') or request.headers.get('x-csrf-token')}")
+    logger.info(f"cookies={request.cookies}")
+    logger.info(f"csrf={csrf}")
     if not csrf:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing CSRF token")
     
@@ -414,7 +417,7 @@ def _update_user_and_profile(db: Session, user: Users, x_username: str, x_name: 
         raise HTTPException(status_code=404, detail="Profile not found")
 
     user = get_user_by_id(db, profile.user_id)
-    print(f"DEBUG: Existing user found, user.id = {user.id if user else 'None'}")
+    logger.info(f"DEBUG: Existing user found, user.id = {user.id if user else 'None'}")
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 

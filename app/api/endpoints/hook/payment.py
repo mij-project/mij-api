@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query
 from typing import Optional
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 router = APIRouter()
 
 @router.get("/payment")
@@ -23,10 +24,10 @@ async def payment_webhook(
         sendpoint: 送信ポイント
         result: 結果
     """
-    print(f"clientip: {clientip}")
-    print(f"telno: {telno}")
-    print(f"email: {email}")
-    print(f"sendid: {sendid}")
-    print(f"sendpoint: {sendpoint}")
-    print(f"result: {result}")
+    logger.info(f"clientip: {clientip}")
+    logger.info(f"telno: {telno}")
+    logger.info(f"email: {email}")
+    logger.info(f"sendid: {sendid}")
+    logger.info(f"sendpoint: {sendpoint}")
+    logger.info(f"result: {result}")
     return {"ok": True}

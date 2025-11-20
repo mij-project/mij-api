@@ -9,7 +9,9 @@ from app.crud.creator_type_crud import create_creator_type, delete_creator_type_
 from app.schemas.creator_type import CreatorTypeCreate
 from typing import List
 from app.models.gender import Gender
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 @router.get("/", response_model=List[str])
@@ -18,7 +20,7 @@ def get_creator_type_by_user_id_api(db: Session = Depends(get_db), user: Users =
         creator_type = get_creator_type_by_user_id(db, user.id)
         return creator_type
     except Exception as e:
-        print("クリエイタータイプ取得エラー: ", e)
+        logger.error("クリエイタータイプ取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/")
@@ -58,5 +60,5 @@ def create_creator_type_api(creator_type_create: CreatorTypeCreate, db: Session 
             create_creator_type(db, CreatorType(user_id=user.id, gender_id=slug_to_id[gender_slug]))
         return {"result": "true"}
     except Exception as e:
-        print("クリエイタータイプ作成エラー: ", e)
+        logger.error("クリエイタータイプ作成エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))

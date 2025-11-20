@@ -8,7 +8,8 @@ from botocore.exceptions import ClientError
 from PIL import Image, ImageOps
 
 from app.services.s3.client import s3_client, BANNER_BUCKET_NAME, BANNER_IMAGE_URL
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 # 許可する画像形式
 ALLOWED_CONTENT_TYPES = [
     "image/jpeg",
@@ -197,5 +198,5 @@ def delete_banner_image(image_key: str) -> bool:
         )
         return True
     except Exception as e:
-        print(f"Failed to delete banner image {image_key}: {e}")
+        logger.error(f"Failed to delete banner image {image_key}: {e}")
         return False

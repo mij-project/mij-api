@@ -32,7 +32,9 @@ from app.models.posts import Posts
 from app.models.user import Users
 from app.constants.enums import MediaAssetKind, MediaAssetOrientation, MediaAssetStatus, PostStatus
 from app.constants.enums import AuthenticatedFlag
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 # 文字列kindから整数kindへのマッピング
@@ -233,7 +235,7 @@ def delete_existing_media_file(
             # 承認されていない場合は通常削除
             delete_object(resource, storage_key)
     except Exception as e:
-        print(f"Failed to delete old file from S3: {e}")
+        logger.error(f"Failed to delete old file from S3: {e}")
 
 
 def _determine_resource_for_asset(
@@ -340,7 +342,7 @@ async def presign_post_media_image(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"アップロードURL生成エラーが発生しました: {e}")
+        logger.error(f"アップロードURL生成エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -390,7 +392,7 @@ async def presign_post_media_video(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"アップロードURL生成エラーが発生しました: {e}")
+        logger.error(f"アップロードURL生成エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -464,7 +466,7 @@ async def presign_update_image_upload(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"アップロードURL更新エラーが発生しました: {e}")
+        logger.error(f"アップロードURL更新エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -545,7 +547,7 @@ async def presign_update_video_upload(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"アップロードURL更新エラーが発生しました: {e}")
+        logger.error(f"アップロードURL更新エラーが発生しました: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -620,7 +622,7 @@ async def delete_media_asset_by_id(
         raise
     except Exception as e:
         db.rollback()
-        print(f"メディアアセット削除エラー: {e}")
+        logger.error(f"メディアアセット削除エラー: {e}")
         raise HTTPException(
             status_code=500,
             detail="Failed to delete media asset"
@@ -658,7 +660,7 @@ async def update_images(
                 asset = get_media_asset_by_id(db, image_id)
 
                 if not asset:
-                    print(f"Warning: media asset not found: {image_id}")
+                    logger.error(f"Warning: media asset not found: {image_id}")
                     continue
 
                 # 投稿IDが一致するか確認
@@ -670,7 +672,7 @@ async def update_images(
 
                 # kindがIMAGESであることを確認
                 if asset.kind != MediaAssetKind.IMAGES:
-                    print(f"Warning: asset {image_id} is not an image (kind={asset.kind})")
+                    logger.error(f"Warning: asset {image_id} is not an image (kind={asset.kind})")
                     continue
 
                 # S3から削除
@@ -706,6 +708,6 @@ async def update_images(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"画像更新エラー: {e}")
+        logger.error(f"画像更新エラー: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

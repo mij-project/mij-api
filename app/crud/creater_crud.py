@@ -422,7 +422,7 @@ def get_ranking_creators_overall_detail_overall(db: Session, page: int = 1, limi
         .outerjoin(Likes, Likes.post_id == Posts.id)
         .filter(Users.role == AccountType.CREATOR)
     )
-    if filter_date_condition:
+    if filter_date_condition is not None:
         query = query.filter(filter_date_condition)
     return (
         query

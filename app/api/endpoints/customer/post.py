@@ -22,7 +22,9 @@ import os
 from os import getenv
 from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 # PostTypeの文字列からenumへのマッピングを定義
@@ -84,7 +86,7 @@ async def create_post_endpoint(
         
     except Exception as e:
         db.rollback()
-        print("投稿作成エラーが発生しました", e)
+        logger.error("投稿作成エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/update")
@@ -141,7 +143,7 @@ async def update_post_endpoint(
         
         return post
     except Exception as e:
-        print("投稿更新エラーが発生しました", e)
+        logger.error("投稿更新エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/detail")
@@ -188,7 +190,7 @@ async def get_post_detail(
     except HTTPException:
         raise
     except Exception as e:
-        print("投稿詳細取得エラーが発生しました", e)
+        logger.error("投稿詳細取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/new-arrivals" , response_model=List[NewArrivalsResponse])
@@ -208,7 +210,7 @@ async def get_new_arrivals(
             likes_count=post.likes_count or 0
         ) for post in recent_posts]
     except Exception as e:
-        print("新着投稿取得エラーが発生しました", e)
+        logger.error("新着投稿取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{post_id}/ogp-image")
@@ -223,7 +225,7 @@ async def get_post_ogp_image(
             "ogp_image_url": ogp_image_url
         }
     except Exception as e:
-        print("OGP画像URL取得エラーが発生しました", e)
+        logger.error("OGP画像URL取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 # utils

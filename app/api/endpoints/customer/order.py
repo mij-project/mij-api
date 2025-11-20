@@ -11,7 +11,9 @@ from app.crud.orders import insert_order
 from app.crud.order_items import insert_order_item
 from app.constants.enums import OrderStatus
 import os
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 @router.post("/create")
@@ -61,7 +63,7 @@ def create_order(
         }
     except Exception as e:
         db.rollback()
-        print("注作成エラーが発生しました", e)
+        logger.error("注作成エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()

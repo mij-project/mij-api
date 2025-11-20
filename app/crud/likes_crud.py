@@ -11,7 +11,8 @@ from typing import List
 from app.schemas.notification import NotificationType
 from app.schemas.user_settings import UserSettingsType
 from app.services.email.send_email import send_like_notification_email
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 def get_likes_count(db: Session, post_id: UUID) -> int:
     """
     いいね数を取得
@@ -131,7 +132,7 @@ def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
             payload={
                 "title": f"{liked_user_profile.username} があなたの投稿をいいねしました",
                 "subtitle": f"{liked_user_profile.username} があなたの投稿をいいねしました",
-                "avatar": liked_user_profile.avatar_url,
+                "avatar": f"{os.environ.get('CDN_BASE_URL')}/{liked_user_profile.avatar_url}",
                 "redirect_url": f"/post/detail?post_id={post.id}"
             },
             is_read=False,
@@ -143,7 +144,7 @@ def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
         db.commit()
     except Exception as e:
         db.rollback()
-        print(f"Add notification like error: {e}")
+        logger.error(f"Add notification like error: {e}")
         pass
 
 def add_mail_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
@@ -179,5 +180,5 @@ def add_mail_notification_like(db: Session, user_id: UUID, post_id: UUID) -> Non
                 f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp')}/post/detail?post_id={post_id}"
             )
     except Exception as e:
-        print(f"Add mail notification like error: {e}")
+        logger.error(f"Add mail notification like error: {e}")
         pass

@@ -23,6 +23,9 @@ from app.crud.post_crud import get_total_likes_by_user_id, get_posts_count_by_us
 from app.crud.creater_crud import get_creators
 from typing import List
 from os import getenv
+from app.core.logger import Logger
+
+logger = Logger.get_logger()
 BASE_URL = getenv("CDN_BASE_URL")
 
 router = APIRouter()
@@ -70,7 +73,7 @@ def register_creator(
         db.refresh(creater)
         return creater
     except Exception as e:
-        print("クリエイター登録エラー: ", e)
+        logger.error("クリエイター登録エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/profile", response_model=CreatorOut)
@@ -93,7 +96,7 @@ def update_creator_profile(
     try:
         return update_creator(db, user_id, creator_update)
     except Exception as e:
-        print("クリエイタープロフィール更新エラー: ", e)
+        logger.error("クリエイタープロフィール更新エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -118,7 +121,7 @@ def get_verification_status(
             raise HTTPException(status_code=404, detail="Identity verification not found")
         return verification
     except Exception as e:
-        print("本人確認ステータス取得エラー: ", e)
+        logger.error("本人確認ステータス取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -162,7 +165,7 @@ def get_creator_profile(
             "posts_count": posts_count
         }
     except Exception as e:
-        print("クリエイタープロフィール取得エラー: ", e)
+        logger.error("クリエイタープロフィール取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/list" , response_model=List)
@@ -179,5 +182,5 @@ def get_creator_list(
             "avatar_url": f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None
         } for creator in creators]
     except Exception as e:
-        print("クリエイター一覧取得エラー: ", e)
+        logger.error("クリエイター一覧取得エラー: ", e)
         raise HTTPException(status_code=500, detail=str(e))

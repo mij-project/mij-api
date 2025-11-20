@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
 from app.db.base import get_db
 from sqlalchemy.orm import Session
@@ -22,16 +23,17 @@ from app.core.config import settings
 from app.constants.number import CompanyFeePercent
 from app.schemas.user import UserCreate, EmailVerificationIn
 from app.crud.user_crud import resend_email_verification
-import os
 from app.schemas.auth_email_verify import VerifyIn
 from app.crud.events_crud import get_event_by_code
 from app.crud.user_events_crud import create_user_event
 from app.core.security import create_access_token, create_refresh_token, new_csrf_token
 from app.core.cookies import set_auth_cookies
 from app.api.commons.utils import generate_email_verification_url
+from app.core.logger import Logger
+
 router = APIRouter()
 
-
+logger = Logger.get_logger()
 @router.post("/verify/")
 def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db)):
     """メールアドレスの認証
@@ -50,7 +52,7 @@ def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db
     try:
         token_hash = hashlib.sha256(body.token.encode()).hexdigest()
         rec = get_verification_token(db, token_hash)
-        if not rec or rec.consumed_at is not None or rec.expires_at < datetime.now(timezone.utc):
+        if not rec or rec.consumed_at is not None or rec.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
             raise HTTPException(status_code=400, detail="リンクが無効か、期限切れです。")
 
         # 事前登録判定
@@ -80,7 +82,7 @@ def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db
         return {"result": True , "csrf_token": csrf}
     except Exception as e:
         db.rollback()
-        print("メールアドレスの認証エラーが発生しました", e)
+        logger.exception("メールアドレスの認証エラーが発生しました", e)
         raise HTTPException(500, f"Failed to verify: {e}")
 
 @router.post("/resend/")
@@ -117,7 +119,7 @@ def verify_email(
             db.refresh(user)
         return {"message": "email resend"}
     except Exception as e:
-        print("メールアドレスの再送信エラーが発生しました", e)
+        logger.error("メールアドレスの再送信エラーが発生しました", e)
         raise HTTPException(500, f"Failed to resend: {e}")
 
 
