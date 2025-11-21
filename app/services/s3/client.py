@@ -46,6 +46,11 @@ SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
 BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
 BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")
 
+# ECS設定
+ECS_SUBNETS = os.environ.get("ECS_SUBNETS", "").split(",") if os.environ.get("ECS_SUBNETS") else []
+ECS_SECURITY_GROUPS = os.environ.get("ECS_SECURITY_GROUPS", "").split(",") if os.environ.get("ECS_SECURITY_GROUPS") else []
+ECS_ASSIGN_PUBLIC_IP = os.environ.get("ECS_ASSIGN_PUBLIC_IP", "ENABLED")
+
 
 
 def s3_client():
@@ -58,6 +63,12 @@ def s3_client():
         "s3",
         region_name=AWS_REGION,
         config=Config(signature_version="s3v4")
+    )
+
+def ecs_client():
+    return boto3.client(
+        "ecs",
+        region_name=AWS_REGION,
     )
 
 def _bucket_and_kms(resource: Resource):

@@ -19,8 +19,14 @@ from app.deps.auth import get_current_user
 from app.db.base import get_db
 from app.services.s3.keygen import post_media_image_key, post_media_video_key
 from app.schemas.commons import PresignResponseItem
-from typing import Dict, List, Union, Tuple, Set, Any
-from app.services.s3.client import delete_ffmpeg_directory, delete_hls_directory_full
+from typing import Dict, List, Union, Tuple, Set, Any, Optional, Literal
+from app.services.s3.client import (
+    delete_ffmpeg_directory,
+    delete_hls_directory_full,
+    ECS_SUBNETS,
+    ECS_SECURITY_GROUPS,
+    ECS_ASSIGN_PUBLIC_IP,
+)
 from app.services.s3.presign import delete_object
 from app.crud.media_assets_crud import (
     create_media_asset,
@@ -35,6 +41,7 @@ from app.models.user import Users
 from app.constants.enums import MediaAssetKind, MediaAssetOrientation, MediaAssetStatus, PostStatus
 from app.constants.enums import AuthenticatedFlag
 from app.core.logger import Logger
+from app.services.s3.ecs_task import run_ecs_task
 import subprocess
 import os
 import boto3
@@ -71,6 +78,9 @@ INGEST_BUCKET_NAME = os.getenv("INGEST_BUCKET_NAME")
 KMS_ALIAS_INGEST = os.getenv("KMS_ALIAS_INGEST")
 TMP_VIDEO_BUCKET_NAME = os.getenv("TMP_VIDEO_BUCKET")
 KMS_ALIAS_INGEST = os.getenv("KMS_ALIAS_INGEST")
+ECS_VIDEO_BATCH = os.getenv("ECS_VIDEO_BATCH")
+ECS_TASK_DEFINITION = os.getenv("ECS_TASK_DEFINITION")
+ECS_VODEO_CONTAINER = os.getenv("ECS_VODEO_CONTAINER")
 
 
 # ==================== ヘルパー関数 ====================
@@ -639,6 +649,9 @@ async def delete_media_asset_by_id(
             is_video=is_video
         )
 
+        # 関連するmedia_rendition_jobsを先に削除
+        delete_media_rendition_job(db, asset.id)
+
         # DBから削除
         delete_media_asset(db, asset.id)
         db.commit()
@@ -742,8 +755,6 @@ async def update_images(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
 @router.post("/trigger-batch-process", response_model=TriggerBatchProcessResponse)
 async def trigger_batch_process(
     request: TriggerBatchProcessRequest,
@@ -789,7 +800,11 @@ async def trigger_batch_process(
             tmp_storage_key=request.tmp_storage_key,
             need_trim=request.need_trim,
             start_time=request.start_time,
-            end_time=request.end_time
+            end_time=request.end_time,
+            main_orientation=request.main_orientation,
+            sample_orientation=request.sample_orientation,
+            content_type=request.content_type,
+            db=db
         )
 
         return TriggerBatchProcessResponse(
@@ -812,6 +827,10 @@ def execute_batch_process(
     need_trim: bool,
     start_time: float = None,
     end_time: float = None,
+    main_orientation: Literal["portrait", "landscape", "square"] = None,
+    sample_orientation: Literal["portrait", "landscape", "square"] = None,
+    content_type: str = None,
+    db: Session = None
 ):
     """
     バッチ処理を実行（バックグラウンド）
@@ -834,49 +853,125 @@ def execute_batch_process(
         main_output_key = post_media_video_key(user_id, post_id, "mp4", "main")
         sample_output_key = post_media_video_key(user_id, post_id, "mp4", "sample")
 
+        #  media_assetsinsert
+        insert_media_data = [
+            {
+                "post_id": post_id,
+                "kind": MediaAssetKind.MAIN_VIDEO,
+                "mime_type": content_type,
+                "storage_key": main_output_key,
+                "orientation": ORIENTATION_MAPPING[main_orientation],
+                "status": MediaAssetStatus.PENDING,
+                "bytes": 0,  # バッチ処理完了後に更新される
+            },
+        ]
+
+        # カット動画の場合はサンプル動画を作成
+        if need_trim:
+            insert_media_data.append({
+                "post_id": post_id,
+                "kind": MediaAssetKind.SAMPLE_VIDEO,
+                "mime_type": content_type,
+                "storage_key": sample_output_key,
+                "orientation": ORIENTATION_MAPPING[sample_orientation],
+                "status": MediaAssetStatus.PENDING,
+                "sample_type": "cut_out",
+                "sample_start_time": start_time,
+                "sample_end_time": end_time,
+                "bytes": 0,  # バッチ処理完了後に更新される
+            })
+        for data in insert_media_data:
+            create_media_asset(db, data)
+            db.commit()
+
         logger.info(f"生成されたキー: main={main_output_key}, sample={sample_output_key}")
+        logger.info(f"バッチ処理開始: post_id={post_id}, tmp_key={tmp_storage_key}")
 
         # 環境変数を設定してバッチスクリプトを実行
-        env = os.environ.copy()
-        env["TEMP_VIDEO_BUCKET"] = INGEST_BUCKET_NAME  # tmpバケット
-        env["TEMP_VIDEO_DESTINATION"] = tmp_storage_key
-        env["MAIN_VIDEO_BUCKET"] = INGEST_BUCKET_NAME  # 審査用バケット
-        env["MAIN_VIDEO_DESTINATION"] = main_output_key
-        env["SAMPLE_VIDEO_BUCKET"] = INGEST_BUCKET_NAME  # 審査用バケット
-        env["SAMPLE_VIDEO_DESTINATION"] = sample_output_key
-        env["NEED_TRIM"] = "1" if need_trim else "0"
-        env["START_TIME"] = str(start_time) if start_time is not None else "0.0"
-        env["END_TIME"] = str(end_time) if end_time is not None else "0.0"
-        env["AWS_REGION"] = AWS_REGION
-        env["AWS_ACCESS"] = AWS_ACCESS_KEY_ID
-        env["AWS_SECRET"] = AWS_SECRET_ACCESS_KEY
-        env["KMS_ARN"] = KMS_ALIAS_INGEST if hasattr(settings, 'KMS_ALIAS_INGEST') else ""
+        cluster = ECS_VIDEO_BATCH
 
-        # バッチスクリプトのディレクトリとファイルパスを取得
-        # app/api/endpoints/customer/ から mij-api/batchs へ移動
-        batch_dir = os.path.abspath(os.path.join(
-            os.path.dirname(__file__),
-            "../../../../batchs/batch-main-sample-video"
-        ))
-        batch_script = "main.py"
+        overrides = {
+            "containerOverrides": [
+                {
+                    "name": ECS_VODEO_CONTAINER,
+                    "environment": [
+                        {
+                            "name": "TEMP_VIDEO_BUCKET",
+                            "value": TMP_VIDEO_BUCKET_NAME
+                        },
+                        {
+                            "name": "TEMP_VIDEO_DESTINATION",
+                            "value": tmp_storage_key
+                        },
+                        {
+                            "name": "MAIN_VIDEO_BUCKET",
+                            "value": INGEST_BUCKET_NAME
+                        },
+                        {
+                            "name": "MAIN_VIDEO_DESTINATION",
+                            "value": main_output_key
+                        },
+                        {
+                            "name": "SAMPLE_VIDEO_BUCKET",
+                            "value": INGEST_BUCKET_NAME
+                        },
+                        {
+                            "name": "SAMPLE_VIDEO_DESTINATION",
+                            "value": sample_output_key
+                        },
+                        {
+                            "name": "NEED_TRIM",
+                            "value": "1" if need_trim else "0"
+                        },
+                        {
+                            "name": "START_TIME",
+                            "value": str(start_time) if start_time is not None else "0.0"
+                        },
+                        {
+                            "name": "END_TIME",
+                            "value": str(end_time) if end_time is not None else "0.0"
+                        },
+                        {
+                            "name": "AWS_REGION",
+                            "value": AWS_REGION
+                        },
+                        {
+                            "name": "AWS_ACCESS",
+                            "value": AWS_ACCESS_KEY_ID
+                        },
+                        {
+                            "name": "AWS_SECRET",
+                            "value": AWS_SECRET_ACCESS_KEY
+                        },
+                        {
+                            "name": "KMS_ARN",
+                            "value": KMS_ALIAS_INGEST
+                        },
+                    ]
+                }
+            ]
+        }
 
-        logger.info(f"バッチディレクトリ: {batch_dir}")
+        # ネットワーク設定（Fargateでは必須）
+        network_configuration = {
+            "awsvpcConfiguration": {
+                "subnets": ECS_SUBNETS,
+                "securityGroups": ECS_SECURITY_GROUPS,
+                "assignPublicIp": ECS_ASSIGN_PUBLIC_IP,
+            }
+        }
 
-        # ディレクトリの存在確認
-        if not os.path.exists(batch_dir):
-            raise FileNotFoundError(f"バッチディレクトリが見つかりません: {batch_dir}")
-
-        # バッチスクリプトのディレクトリから実行（相対インポート対応）
-        result = subprocess.run(
-            ["python", batch_script],
-            env=env,
-            cwd=batch_dir,  # 作業ディレクトリを変更
-            capture_output=True,
-            text=True,
-            check=True
+        # タスク定義名（ARNから取得したものを使用）
+        response = run_ecs_task(
+            cluster=cluster,
+            task_definition=ECS_TASK_DEFINITION,
+            launch_type="FARGATE",
+            overrides=overrides,
+            network_configuration=network_configuration,
         )
+     
 
-        logger.info(f"バッチ処理完了: {result.stdout}")
+        logger.info(f"バッチ処理完了")
 
     except subprocess.CalledProcessError as e:
         logger.error(f"バッチ処理エラー: {e.stderr}")

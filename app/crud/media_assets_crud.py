@@ -157,7 +157,7 @@ def delete_media_asset(db: Session, asset_id: str) -> bool:
     asset = db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
     if asset:
         db.delete(asset)
-        db.commit()
+        db.flush()  # commitではなくflushを使用（外部でcommitを制御）
         return True
     return False
 

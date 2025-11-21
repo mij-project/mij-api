@@ -85,6 +85,9 @@ class TriggerBatchProcessRequest(BaseModel):
     need_trim: bool = Field(False, description='FFmpegでトリミングが必要か (NEED_TRIM)')
     start_time: Optional[float] = Field(None, description='トリミング開始時間（秒）(START_TIME)')
     end_time: Optional[float] = Field(None, description='トリミング終了時間（秒）(END_TIME)')
+    main_orientation: Optional[Orientation] = Field(None, description='メイン動画の向き (MAIN_ORIENTATION)')
+    sample_orientation: Optional[Orientation] = Field(None, description='サンプル動画の向き (SAMPLE_ORIENTATION)')
+    content_type: Optional[str] = Field(None, description='コンテンツタイプ (CONTENT_TYPE)')
 
 class TriggerBatchProcessResponse(BaseModel):
     """バッチ処理トリガーレスポンス"""

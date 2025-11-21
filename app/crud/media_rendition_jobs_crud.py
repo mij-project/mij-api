@@ -36,8 +36,8 @@ def get_media_rendition_job_by_id(db: Session, media_rendition_job_id: str) -> M
 
 def delete_media_rendition_job(db: Session, asset_id: str) -> bool:
     """
-    メディアレンディションジョブ削除
+    メディアレンディションジョブ削除（asset_idに紐づくジョブをすべて削除）
     """
     db.query(MediaRenditionJobs).filter(MediaRenditionJobs.asset_id == asset_id).delete()
-    db.commit()
+    db.flush()  # commitではなくflushを使用（外部でcommitを制御）
     return True
