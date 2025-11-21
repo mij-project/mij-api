@@ -27,6 +27,7 @@ class NotificationType(IntEnum):
   ADMIN = 1 # admin -> users, can create by admin in admin screen
   USERS = 2 # users -> users, can create by users in app when users follow each other, like, comment, etc.
   PAYMENTS = 3 # payments -> users, can create by payments in app when users pay for the content, subscription, etc.
+  ALL = 4 # all of this.
 
 class NotificationCreateRequest(BaseModel):
   type: NotificationType = Field(..., description='通知種別: 1: admin -> users 2: users -> users 3: payments')

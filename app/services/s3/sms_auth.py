@@ -14,6 +14,7 @@ APP_ENV = os.getenv("APP_ENV")
 
 def send_sms(phone: str, message: str) -> None:
     try:
+        logger.info(f"[SMS] APP_ENV: {APP_ENV}")
         if APP_ENV == "dev":
             phone = "+819070098590"
             logger.info(f"[LOCAL SMS] to={phone} body={message}")
@@ -29,4 +30,5 @@ def send_sms(phone: str, message: str) -> None:
         },
     )
     except Exception as e:
+        logger.error(f"[SMS] send_sms error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

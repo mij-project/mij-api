@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.functions import now
 from app.models.sms_verifications import SMSVerifications
@@ -46,6 +46,10 @@ def send_sms_verification(
     try:
 
         user_id = user.id
+
+        phone_e164_existing = db.query(Creators).filter(Creators.phone_number == sms_verification_request.phone_e164).first()
+        if phone_e164_existing:
+            return Response(content="既に使用されている電話番号です。", status_code=400)
 
         latest_sms_verification = get_latest_sms_verification(db, sms_verification_request.phone_e164, sms_verification_request.purpose, user_id)
 
