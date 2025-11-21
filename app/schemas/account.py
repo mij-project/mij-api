@@ -220,3 +220,8 @@ class AccountPostUpdateResponse(BaseModel):
     """投稿更新レスポンス"""
     message: str
     success: bool
+
+class AccountEmailSettingRequest(BaseModel):
+    type: int # 1: メールアドレス設定, 2: メールアドレス認証
+    email: Optional[str] = None
+    token: Optional[str] = None
