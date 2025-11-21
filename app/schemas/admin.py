@@ -234,6 +234,12 @@ class MediaAssetData(BaseModel):
     storage_key: str
     status: int
 
+class PlanInfo(BaseModel):
+    """プラン情報"""
+    plan_id: str
+    plan_name: str
+    price: int
+
 class AdminPostDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -248,6 +254,10 @@ class AdminPostDetailResponse(BaseModel):
     username: Optional[str]
     profile_avatar_url: Optional[str]
     media_assets: Dict[str, MediaAssetData]
+
+    # 価格情報
+    single_price: Optional[int] = Field(None, description="単品販売価格")
+    plans: Optional[List[PlanInfo]] = Field(None, description="プラン販売情報")
 
 class AdminPreregistrationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
