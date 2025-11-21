@@ -1504,6 +1504,37 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
             if not any(rj['output_key'] == rendition_job['output_key'] for rj in rendition_jobs):
                 rendition_jobs.append(rendition_job)
 
+    # 価格情報を取得（単品販売）
+    single_price_data = db.query(Prices.price).filter(
+        Prices.post_id == post_uuid,
+        Prices.is_active == True
+    ).first()
+
+    # プラン情報を取得
+    plan_data = (
+        db.query(
+            Plans.id,
+            Plans.name,
+            Plans.price
+        )
+        .join(PostPlans, Plans.id == PostPlans.plan_id)
+        .filter(
+            PostPlans.post_id == post_uuid,
+            Plans.deleted_at.is_(None),
+        )
+        .all()
+    )
+
+    # プラン情報をリスト形式に整形
+    plans_list = [
+        {
+            'plan_id': str(plan.id),
+            'plan_name': plan.name,
+            'price': plan.price
+        }
+        for plan in plan_data
+    ] if plan_data else None
+
     # 指定された内容を返却
     return {
         # 投稿情報
@@ -1533,7 +1564,10 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
                 'sample_end_time': ma.get('sample_end_time'),
             }
             for ma in media_assets if ma['storage_key']
-        }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
+        },  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
+        # 価格情報
+        'single_price': single_price_data[0] if single_price_data else None,
+        'plans': plans_list
     }
 
 
