@@ -132,6 +132,7 @@ class AdminPostResponse(BaseModel):
     visibility: int
     view_count: int = 0  # フロントエンド側で期待されるフィールドを追加
     like_count: int = 0  # フロントエンド側で期待されるフィールドを追加
+    is_uploading: bool = False  # S3にメディアがアップロード中かどうか
     created_at: datetime
     updated_at: datetime
 

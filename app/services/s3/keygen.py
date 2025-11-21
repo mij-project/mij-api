@@ -121,3 +121,16 @@ def transcode_mc_ffmpeg_key(creator_id: str, post_id: str, ext: str) -> str:
         str: メディアコンバートキー
     """
     return f"transcode-mc/{creator_id}/{post_id}/ffmpeg/{uuid.uuid4()}.{ext}"
+
+def temp_video_key(creator_id: str, filename: str, ext: str) -> str:
+    """
+    一時保存ビデオキー生成
+
+    Args:
+        creator_id: str クリエイターID
+        filename: str ファイル名
+
+    Returns:
+        str: 一時保存ビデオキー
+    """
+    return f"temp-videos/{creator_id}/{uuid.uuid4()}.{ext}"

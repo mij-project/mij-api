@@ -11,6 +11,47 @@ Resource = Literal["identity"]
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
 
+# 環境セット
+ENV = os.environ.get("ENV")
+
+# 身分証明バケット
+KYC_BUCKET_NAME = os.environ.get("KYC_BUCKET_NAME")
+KMS_ALIAS_KYC   = os.environ.get("KMS_ALIAS_KYC") 
+
+# アカウント
+ASSETS_BUCKET_NAME = os.environ.get("ASSETS_BUCKET_NAME")
+
+# ビデオバケット
+INGEST_BUCKET = os.environ.get("INGEST_BUCKET_NAME") 
+KMS_ALIAS_INGEST   = os.environ.get("KMS_ALIAS_INGEST") 
+
+# メディアコンバート
+MEDIA_BUCKET_NAME = os.environ.get("MEDIA_BUCKET_NAME")
+KMS_ALIAS_MEDIA = os.environ.get("KMS_ALIAS_MEDIA")
+
+# 一時保存バケット
+TEMP_VIDEO_BUCKET_NAME = os.environ.get("TMP_VIDEO_BUCKET")
+
+MEDIACONVERT_ROLE_ARN = os.environ.get("MEDIACONVERT_ROLE_ARN")
+OUTPUT_COVERT_KMS_ARN = os.environ.get("OUTPUT_KMS_ARN")
+
+# SMS認証
+SMS_TTL = int(os.getenv("SMS_CODE_TTL_SECONDS", "300"))
+RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
+MAX_ATTEMPTS = int(os.getenv("SMS_MAX_ATTEMPTS", "5"))
+SNS_SENDER_ID = os.getenv("SNS_SENDER_ID", "mijfans")
+SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
+
+# バナー画像
+BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
+BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")
+
+# ECS設定
+ECS_SUBNETS = os.environ.get("ECS_SUBNETS", "").split(",") if os.environ.get("ECS_SUBNETS") else []
+ECS_SECURITY_GROUPS = os.environ.get("ECS_SECURITY_GROUPS", "").split(",") if os.environ.get("ECS_SECURITY_GROUPS") else []
+ECS_ASSIGN_PUBLIC_IP = os.environ.get("ECS_ASSIGN_PUBLIC_IP", "ENABLED")
+
+
 
 def s3_client():
     """S3クライアントを取得
@@ -22,6 +63,12 @@ def s3_client():
         "s3",
         region_name=AWS_REGION,
         config=Config(signature_version="s3v4")
+    )
+
+def ecs_client():
+    return boto3.client(
+        "ecs",
+        region_name=AWS_REGION,
     )
 
 def _bucket_and_kms(resource: Resource):
@@ -231,46 +278,6 @@ def delete_hls_directory_full(bucket: str, storage_key: str):
         logger.error(f"Failed to delete hls directory {directory_prefix}: {e}")
         raise
 
-
-@lru_cache(maxsize=1)
-def s3_client_for_mc():
-    base = boto3.client("mediaconvert", region_name=AWS_REGION)
-    ep = base.describe_endpoints(MaxResults=1)["Endpoints"][0]["Url"]
-    return boto3.client("mediaconvert", region_name=AWS_REGION, endpoint_url=ep)
-
-# 環境セット
-ENV = os.environ.get("ENV")
-
-# 身分証明バケット
-KYC_BUCKET_NAME = os.environ.get("KYC_BUCKET_NAME")
-KMS_ALIAS_KYC   = os.environ.get("KMS_ALIAS_KYC") 
-
-# アカウント
-ASSETS_BUCKET_NAME = os.environ.get("ASSETS_BUCKET_NAME")
-
-# ビデオバケット
-INGEST_BUCKET = os.environ.get("INGEST_BUCKET_NAME") 
-KMS_ALIAS_INGEST   = os.environ.get("KMS_ALIAS_INGEST") 
-
-# メディアコンバート
-MEDIA_BUCKET_NAME = os.environ.get("MEDIA_BUCKET_NAME")
-KMS_ALIAS_MEDIA = os.environ.get("KMS_ALIAS_MEDIA")
-
-MEDIACONVERT_ROLE_ARN = os.environ.get("MEDIACONVERT_ROLE_ARN")
-OUTPUT_COVERT_KMS_ARN = os.environ.get("OUTPUT_KMS_ARN")
-
-# SMS認証
-SMS_TTL = int(os.getenv("SMS_CODE_TTL_SECONDS", "300"))
-RESEND_COOLDOWN = int(os.getenv("SMS_RESEND_COOLDOWN_SECONDS", "60"))
-MAX_ATTEMPTS = int(os.getenv("SMS_MAX_ATTEMPTS", "5"))
-SNS_SENDER_ID = os.getenv("SNS_SENDER_ID", "mijfans")
-SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
-
-# バナー画像
-BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
-BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")
-
-
 def upload_ogp_image_to_s3(s3_key: str, image_data: bytes) -> str:
     """
     OGP画像をS3（ASSETS_BUCKET_NAME）にアップロード
@@ -299,3 +306,10 @@ def upload_ogp_image_to_s3(s3_key: str, image_data: bytes) -> str:
     except Exception as e:
         print(f"Failed to upload OGP image to S3: {e}")
         raise
+
+
+@lru_cache(maxsize=1)
+def s3_client_for_mc():
+    base = boto3.client("mediaconvert", region_name=AWS_REGION)
+    ep = base.describe_endpoints(MaxResults=1)["Endpoints"][0]["Url"]
+    return boto3.client("mediaconvert", region_name=AWS_REGION, endpoint_url=ep)
