@@ -45,7 +45,14 @@ def get_profile_by_username(db: Session, username: str) -> Profiles:
     """
     ユーザー名に紐づくプロフィールを取得
     """
-    return db.query(Profiles).filter(Profiles.username == username).first()
+    filter = set()
+    if username.startswith("@"):
+        filter.add(username)
+        filter.add(username[1:])
+    else:
+        filter.add(username)
+        filter.add(f"@{username}")
+    return db.query(Profiles).filter(Profiles.username.in_(filter)).first()
 
 def get_profile_info_by_user_id(db: Session, user_id: UUID) -> Dict[str, Optional[str]]:
     """

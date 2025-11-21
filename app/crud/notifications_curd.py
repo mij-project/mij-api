@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 from typing import Optional
 from uuid import UUID
-from sqlalchemy import asc, desc, func, update, cast as sa_cast
+from sqlalchemy import asc, desc, func, or_, update, cast as sa_cast
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -112,7 +112,16 @@ def get_notifications_paginated(db: Session, user: Users, type: NotificationType
       query = db.query(Notifications).filter(Notifications.user_id == user.id, Notifications.type == type, Notifications.created_at >= user.created_at).order_by(desc(Notifications.created_at))
     elif type == NotificationType.PAYMENTS:
       query = db.query(Notifications).filter(Notifications.user_id == user.id, Notifications.type == type, Notifications.created_at >= user.created_at).order_by(desc(Notifications.created_at))
-
+    elif type == NotificationType.ALL:
+      query = (
+        db.query(Notifications)
+        .filter(
+          or_(Notifications.user_id == user.id, Notifications.user_id == None),
+          Notifications.created_at >= user.created_at,
+          Notifications.type.in_([NotificationType.ADMIN, NotificationType.USERS, NotificationType.PAYMENTS])
+        )
+        .order_by(desc(Notifications.created_at))
+      )
     total = query.count()
     notifications = query.offset(skip).limit(limit).all()
     has_next = (skip + limit) < total
