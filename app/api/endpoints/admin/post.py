@@ -17,9 +17,89 @@ from app.crud.admin_crud import (
     reject_post_with_comments,
 )
 from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, get_post_by_id
+from app.crud.media_assets_crud import get_media_assets_by_post_id_and_kind
 from app.api.commons.utils import resolve_media_asset_storage_key
+from app.constants.enums import MediaAssetKind, AuthenticatedFlag, PostType
+from app.services.s3.presign import get_bucket_name
+from app.core.logger import Logger
+import boto3
+import os
 
+logger = Logger.get_logger()
 router = APIRouter()
+
+# S3設定
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+
+
+def check_media_uploading(db: Session, post) -> bool:
+    """
+    投稿のメディアがS3にアップロード中かチェック
+
+    Returns:
+        bool: True=送信中（S3にファイルがない）, False=アップロード完了
+    """
+    try:
+        # 動画投稿でない場合はチェック不要
+        if post.post_type != PostType.VIDEO:
+            return False
+
+        # メイン動画とサンプル動画のアセットを取得
+        main_video_asset = get_media_assets_by_post_id_and_kind(
+            db, str(post.id), MediaAssetKind.MAIN_VIDEO
+        )
+        sample_video_asset = get_media_assets_by_post_id_and_kind(
+            db, str(post.id), MediaAssetKind.SAMPLE_VIDEO
+        )
+
+        # アセットがない場合は送信中
+        if not main_video_asset and not sample_video_asset:
+            return True
+
+        # S3クライアントを初期化
+        s3_client = boto3.client(
+            's3',
+            region_name=AWS_REGION,
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+        )
+
+        # バケット名を決定（authenticated_flgに基づく）
+        if post.authenticated_flg == AuthenticatedFlag.AUTHENTICATED:
+            resource = "media"
+        else:
+            resource = "ingest"
+        bucket_name = get_bucket_name(resource)
+
+        # メイン動画のS3存在確認
+        main_exists = False
+        if main_video_asset and main_video_asset.storage_key:
+            try:
+                s3_client.head_object(Bucket=bucket_name, Key=main_video_asset.storage_key)
+                main_exists = True
+            except s3_client.exceptions.ClientError:
+                main_exists = False
+
+        # サンプル動画のS3存在確認
+        sample_exists = False
+        if sample_video_asset and sample_video_asset.storage_key:
+            try:
+                s3_client.head_object(Bucket=bucket_name, Key=sample_video_asset.storage_key)
+                sample_exists = True
+            except s3_client.exceptions.ClientError:
+                sample_exists = False
+
+        # どちらか一方でも存在しない場合は送信中
+        is_uploading = not (main_exists and sample_exists)
+
+        return is_uploading
+
+    except Exception as e:
+        logger.error(f"メディアアップロード状態チェックエラー: {e}")
+        # エラー時は送信中として扱わない
+        return False
 
 @router.get("/", response_model=PaginatedResponse[AdminPostResponse])
 def get_posts(
@@ -32,7 +112,7 @@ def get_posts(
     current_admin: Admins = Depends(get_current_admin_user)
 ):
     """投稿一覧を取得"""
-    
+
     posts, total = get_posts_paginated(
         db=db,
         page=page,
@@ -41,9 +121,22 @@ def get_posts(
         status=status,
         sort=sort
     )
-    
+
+    # 各投稿にS3アップロード状態を追加
+    post_responses = []
+    for post in posts:
+        post_response = AdminPostResponse.from_orm(post)
+        # S3にメディアがアップロード中かチェック
+        is_uploading = check_media_uploading(db, post)
+        # is_uploadingフィールドを更新
+        post_response.is_uploading = is_uploading
+        # 送信中の場合はステータスを"uploading"に変更
+        if is_uploading:
+            post_response.status = "uploading"
+        post_responses.append(post_response)
+
     return PaginatedResponse(
-        data=[AdminPostResponse.from_orm(post) for post in posts],
+        data=post_responses,
         total=total,
         page=page,
         limit=limit,
