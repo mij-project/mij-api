@@ -12,7 +12,16 @@ from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
 from app.models.user import Users
 from typing import Optional
-from app.schemas.video_temp import CreateSampleRequest, TempVideoMultipartInitResponse, SampleVideoResponse, TempVideoPartPresignResponse, TempVideoMultipartCompleteRequest
+from app.schemas.video_temp import (
+    CreateSampleRequest,
+    TempVideoMultipartInitResponse,
+    SampleVideoResponse,
+    TempVideoPartPresignResponse,
+    TempVideoMultipartCompleteRequest,
+    BulkPartPresignRequest,
+    BulkPartPresignResponse,
+    PartPresignUrl,
+)
 import tempfile
 import shutil
 from app.core.logger import Logger
@@ -95,6 +104,57 @@ async def presign_temp_main_video_part(
         raise
     except Exception as e:
         logger.error(f"マルチパートアップロード用: 各パートの署名付きURL発行エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/video-temp/temp-upload/bulk-part-presign", response_model=BulkPartPresignResponse)
+async def bulk_presign_temp_main_video_parts(
+    request: BulkPartPresignRequest,
+    user: Users = Depends(get_current_user_optional),
+):
+    """
+    マルチパートアップロード用: 複数パートの署名付きURLを一括発行
+    並列アップロードを可能にするため、一度に複数のURLを取得
+    """
+    try:
+        if not user:
+            raise HTTPException(status_code=401, detail="ログインが必要です")
+
+        # S3キーにユーザーIDが含まれているか確認（セキュリティチェック）
+        if not request.s3_key.startswith(f"temp-videos/{user.id}/"):
+            raise HTTPException(status_code=403, detail="アクセス権限がありません")
+
+        # パート数の上限チェック（S3の制限: 最大10,000パート）
+        if len(request.part_numbers) > 10000:
+            raise HTTPException(status_code=400, detail="パート数が上限を超えています（最大10,000）")
+
+        # 有効期限を2時間に設定（大容量ファイル対応）
+        expires_in = 7200
+
+        urls: list[PartPresignUrl] = []
+        for part_number in request.part_numbers:
+            presign = presign_multipart_part_temp_video(
+                resource="temp-video",
+                key=request.s3_key,
+                upload_id=request.upload_id,
+                part_number=part_number,
+                expires_in=expires_in,
+            )
+            urls.append(PartPresignUrl(
+                part_number=part_number,
+                upload_url=presign["upload_url"],
+            ))
+
+        return BulkPartPresignResponse(
+            s3_key=request.s3_key,
+            upload_id=request.upload_id,
+            urls=urls,
+            expires_in=expires_in,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"一括署名付きURL発行エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -34,3 +34,24 @@ class TempVideoMultipartCompleteRequest(BaseModel):
     s3_key: str
     upload_id: str
     parts: list[CompletedPart]
+
+
+class BulkPartPresignRequest(BaseModel):
+    """一括Presigned URL取得リクエスト"""
+    s3_key: str
+    upload_id: str
+    part_numbers: List[int]  # アップロードするパート番号のリスト
+
+
+class PartPresignUrl(BaseModel):
+    """個別パートのPresigned URL"""
+    part_number: int
+    upload_url: str
+
+
+class BulkPartPresignResponse(BaseModel):
+    """一括Presigned URL取得レスポンス"""
+    s3_key: str
+    upload_id: str
+    urls: List[PartPresignUrl]
+    expires_in: int
