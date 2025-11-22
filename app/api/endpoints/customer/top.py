@@ -25,8 +25,8 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
     """
     try:
         top_categories = get_top_categories(db, limit=8)
-        ranking_posts = get_ranking_posts(db, limit=5)
-        recent_posts = get_recent_posts(db, limit=5)
+        ranking_posts = get_ranking_posts(db, limit=6)
+        recent_posts = get_recent_posts(db, limit=6)
         top_creators = get_top_creators(db, limit=5)
         new_creators = get_new_creators(db, limit=5)
         
