@@ -68,7 +68,7 @@ def _build_mime(
     return msg.as_string()
 
 def _from_header() -> str:
-    display = getattr(settings, "MAIL_FROM_NAME", "") or "MIJ Fans"
+    display = getattr(settings, "MAIL_FROM_NAME", "") or "mijfans"
     return formataddr((display, settings.MAIL_FROM))
 
 def _email_tags(base: dict[str, str] | None = None) -> list[dict[str, str]]:

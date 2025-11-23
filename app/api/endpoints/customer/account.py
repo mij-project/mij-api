@@ -57,7 +57,7 @@ from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id
 from app.crud.purchases_crud import get_single_purchases_count_by_user_id, get_single_purchases_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
-from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile
+from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile, exist_profile_by_username
 from app.crud import profile_image_crud
 from app.services.email.send_email import send_email_verification
 from app.services.s3.keygen import account_asset_key
@@ -283,7 +283,11 @@ def update_account_info(
     
         if update_data.name:
             if check_profile_name_exists(db, update_data.name) and update_data.name != current_user.profile_name:
-                raise HTTPException(status_code=400, detail="このユーザー名は既に使用されています")
+                return Response(content="このユーザ名は既に使用されています", status_code=400)
+
+        if update_data.username:
+            if exist_profile_by_username(db, update_data.username):
+                return Response(content="このユーザーネームは既に使用されています", status_code=400)
 
             user = update_user(db, current_user.id, update_data.name)
         links = update_data.links

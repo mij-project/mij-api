@@ -31,7 +31,7 @@ def search_creators(
         sort: ソート基準 ('relevance' or 'popularity')
         limit: 取得件数
         offset: オフセット
-        include_recent_posts: 最新投稿4件を含めるかどうか
+        include_recent_posts: 最新投稿5件を含めるかどうか
 
     Returns:
         (結果リスト, 総件数)
@@ -135,11 +135,12 @@ def search_creators(
         # クリエイターIDごとに最新投稿をグループ化
         posts_by_creator = {}
         for post in recent_posts_query:
-            if post.creator_user_id not in posts_by_creator:
-                posts_by_creator[post.creator_user_id] = []
-            if len(posts_by_creator[post.creator_user_id]) < 4:
-                posts_by_creator[post.creator_user_id].append({
-                    'id': post.id,
+            creator_id = str(post.creator_user_id)
+            if creator_id not in posts_by_creator:
+                posts_by_creator[creator_id] = []
+            if len(posts_by_creator[creator_id]) < 5:
+                posts_by_creator[creator_id].append({
+                    'id': str(post.id),
                     'thumbnail_url': post.thumbnail_url
                 })
 
@@ -163,7 +164,7 @@ def search_creators(
                 followers_count=r.followers_count,
                 is_verified=r.is_verified,
                 posts_count=r.posts_count,
-                recent_posts=posts_by_creator.get(r.id, [])
+                recent_posts=posts_by_creator.get(str(r.id), [])
             ))
 
         return enhanced_results, total
