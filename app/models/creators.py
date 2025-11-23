@@ -6,7 +6,6 @@ from datetime import datetime
 from sqlalchemy import ForeignKey, Text, SmallInteger, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, CITEXT, JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column
-
 from app.db.base import Base
 
 if TYPE_CHECKING:
@@ -26,6 +25,7 @@ class Creators(Base):
     birth_date: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     tos_accepted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    platform_fee_percent: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
     user: Mapped["Users"] = relationship("Users", back_populates="creator")

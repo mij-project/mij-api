@@ -30,7 +30,13 @@ from app.services.email.send_email import (
 )
 from app.models.admins import Admins
 from app.crud.user_crud import update_user_identity_verified_at
+from app.crud.creater_crud import update_creator
 from app.core.logger import Logger
+from app.crud.events_crud import get_event_by_code
+from app.crud.user_events_crud import check_user_event_exists
+from app.constants.event_code import EventCode
+from app.constants.number import PlatformFeePercent
+from app.schemas.creator import CreatorUpdate
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -136,6 +142,23 @@ def review_identity_verification(
             if not updated_verification:
                 raise HTTPException(status_code=500, detail="承認処理に失敗しました")
 
+
+            # 事前登録判定 TODO: イベント終了時削除
+            is_preregistration = _check_preregistration(db, user.id)
+            
+            # プラットフォーム手数料を設定
+            if is_preregistration:
+                platform_fee_percent = PlatformFeePercent.DEFAULT if not is_preregistration else 0
+
+                # クリエイター情報を更新
+                update_creator_data = {
+                    "platform_fee_percent": platform_fee_percent
+                }
+                
+                creator = update_creator(db, user.id, CreatorUpdate(**update_creator_data))
+                if not creator:
+                    raise HTTPException(status_code=500, detail="クリエイター情報の更新に失敗しました")
+
             # 承認メール送信
             try:
                 email_settings = db.query(UserSettings).filter(UserSettings.user_id == user.id, UserSettings.type == UserSettingsType.EMAIL).first()
@@ -193,3 +216,11 @@ def review_identity_verification(
         logger.error(f"Identity verification review error: {e}")
         raise HTTPException(status_code=500, detail="審査処理中にエラーが発生しました")
 
+def _check_preregistration(db: Session, user_id: str) -> bool:
+    """
+    事前登録判定
+    """
+    event = get_event_by_code(db, EventCode.PRE_REGISTRATION)
+    if event:
+        return check_user_event_exists(db, user_id, event.id)
+    return False
