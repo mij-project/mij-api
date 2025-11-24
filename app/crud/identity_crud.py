@@ -10,44 +10,11 @@ from app.models.notifications import Notifications
 from app.models.user import Users
 from app.models.profiles import Profiles
 from typing import Optional, List
-
+from app.constants.messages import IdentityVerificationMessage
 from app.schemas.notification import NotificationType
 from app.core.logger import Logger
+from app.constants.enums import VerificationStatus, AccountType
 logger = Logger.get_logger()
-
-IDENTITY_APPROVED_MESSAGE = """## Mijfans 身分証明書の審査が完了しました
-
--name- 様
-
-身分証明書の審査が完了いたしました。
-
-> ✅ **審査結果: 承認**  
-> おめでとうございます！クリエイターとしての活動を開始できます。
-
-沢山のファンがあなたのコンテンツを楽しみにお待ちしています。  
-ぜひ素敵なコンテンツをお届けください。
-
-お問い合わせ: support@mijfans.jp
-
-※ このメールは自動送信されています。返信はできません。
-"""
-
-IDENTITY_REJECTED_MESSAGE = """##Mijfans 身分証明書の審査が完了しました
-
-{{ name }} 様
-
-身分証明書の審査が完了いたしました。
-
-> ❌ **審査結果: 拒否**  
-> 誠に申し訳ございませんが、今回の申請は承認されませんでした。
-
-書類を再確認の上、再度申請をお願いいたします。
-ご不明な点がございましたら、サポートまでお問い合わせください。
-
-お問い合わせ: support@mijfans.jp
-
-※ このメールは自動送信されています。返信はできません。
-"""
 
 
 def create_identity_verification(db: Session, user_id: str, status: int) -> IdentityVerifications:
@@ -206,11 +173,14 @@ def update_identity_verification_status(db: Session, verification_id: str, statu
         verification = db.query(IdentityVerifications).filter(
             IdentityVerifications.id == verification_id
         ).first()
-        if not verification or verification.status != 1:  # 1 = pending
+        if not verification or verification.status != VerificationStatus.WAITING:
             return False
 
         # 審査ステータス更新
-        status_map = {"approved": 2, "rejected": 3}
+        status_map = {
+            "approved": VerificationStatus.APPROVED,
+            "rejected": VerificationStatus.REJECTED
+        }
         verification.status = status_map[status]
         verification.updated_at = datetime.now(timezone.utc)
 
@@ -245,18 +215,18 @@ def approve_identity_verification(
             IdentityVerifications.id == verification_id
         ).first()
 
-        if not verification or verification.status != 1:  # 1 = WAITING (承認待ち)
+        if not verification or verification.status != VerificationStatus.WAITING:
             return None
 
         # ユーザーのroleを2 (creator)に更新
         user = db.query(Users).filter(Users.id == verification.user_id).first()
         if user:
-            user.role = 2
+            user.role = AccountType.CREATOR
             user.is_identity_verified = True
             user.identity_verified_at = datetime.now(timezone.utc)
 
         # 審査情報を更新
-        verification.status = 3  # APPROVED
+        verification.status = VerificationStatus.APPROVED # APPROVED
         verification.approved_by = admin_id
         verification.checked_at = datetime.now(timezone.utc)
         if notes:
@@ -298,7 +268,7 @@ def reject_identity_verification(
             return None
 
         # 審査情報を更新
-        verification.status = 2  # REJECTED
+        verification.status = VerificationStatus.REJECTED # REJECTED
         verification.approved_by = admin_id
         verification.checked_at = datetime.now(timezone.utc)
         if notes:
@@ -311,70 +281,3 @@ def reject_identity_verification(
         logger.error(f"Reject identity verification error: {e}")
         db.rollback()
         return None
-
-def add_notification_for_identity_verification(db: Session, user_id: str, status: int) -> bool:
-    """
-    身分証明のステータスを更新
-
-    Args:
-        db: データベースセッション
-        user_id: ユーザーID
-        status: ステータス
-    """
-    try:
-        profiles = db.query(Profiles).filter(Profiles.user_id == user_id).first()
-        if not profiles:
-            raise Exception("Profileが見つかりません")
-        if status == "approved":
-            try:
-                message = IDENTITY_APPROVED_MESSAGE.replace("-name-", profiles.username)
-                notification = Notifications(
-                    user_id=user_id,
-                    type=NotificationType.USERS,
-                    payload={
-                        "type": "identity",
-                        "title": "身分証明の審査が承認されました",
-                        "subtitle": "身分証明の審査が承認されました",
-                        "message": message,
-                        "avatar": f"{os.environ.get('CDN_BASE_URL')}/{profiles.avatar_url}",
-                        "redirect_url": f"/profile?username={profiles.username}",
-                    },
-                    is_read=False,
-                    read_at=None,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                )
-                db.add(notification)
-                db.commit()
-            except Exception as e:
-                logger.error(f"Add notification for identity verification error: {e}")
-                db.rollback()
-                pass
-        elif status == "rejected":
-            try:
-                message = IDENTITY_REJECTED_MESSAGE.replace("-name-", profiles.username)
-                notification = Notifications(
-                    user_id=user_id,
-                    type=NotificationType.USERS,
-                    payload={
-                        "type": "identity",
-                        "title": "身分証明の審査が拒否されました",
-                        "subtitle": "身分証明の審査が拒否されました",
-                        "message": message,
-                        "avatar": "",
-                        "redirect_url": f"/profile?username={profiles.username}",
-                    },
-                    is_read=False,
-                    read_at=None,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                )
-                db.add(notification)
-                db.commit()
-            except Exception as e:
-                logger.error(f"Add notification for identity verification error: {e}")
-                db.rollback()
-                pass
-    except Exception as e:
-        logger.error(f"Add notification for identity verification error: {e}")
-        pass

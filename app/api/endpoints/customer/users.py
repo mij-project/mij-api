@@ -263,7 +263,7 @@ def _insert_user(db: Session, email: str, password: str, name: str, company_code
     """
     is_email_exists = check_email_exists(db, email)
     if is_email_exists:
-        return Response(content="すでに利用されているメールアドレスです", status_code=400)
+        return Response(content="このメールアドレスは既に登録されています。", status_code=400)
     is_profile_name_exists = check_profile_name_exists(db, name)
     if is_profile_name_exists:
         return Response(content="この名前は既に登録されています。", status_code=400)

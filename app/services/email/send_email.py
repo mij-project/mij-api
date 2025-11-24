@@ -197,6 +197,7 @@ def send_identity_approval_email(to: str, display_name: str | None = None) -> No
         "brand": "mijfans",
         "status": 1,  # 承認
         "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+        "reapply_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/creator/request",
     }
     send_templated_email(
         to=to,
@@ -217,6 +218,7 @@ def send_identity_rejection_email(to: str, display_name: str | None = None, note
         "status": 0,  # 拒否
         "notes": notes or "申請内容を再度ご確認ください。",
         "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+        "reapply_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/creator/request",
     }
     send_templated_email(
         to=to,

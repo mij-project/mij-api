@@ -6,10 +6,12 @@ from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
 from app.models import UserSettings
 from app.schemas.admin import (
-    AdminIdentityVerificationResponse, 
-    PaginatedResponse, 
-    IdentityVerificationReview, 
-    IdentityDocumentResponse
+    AdminIdentityVerificationResponse,
+    PaginatedResponse,
+    IdentityVerificationReview,
+    IdentityDocumentResponse,
+    CreatorInfoForApproval,
+    CreatorInfoResponse
 )
 from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.models.user import Users
@@ -18,7 +20,6 @@ from app.schemas.user_settings import UserSettingsType
 from app.services.s3.presign import presign_get
 
 from app.crud.identity_crud import (
-    add_notification_for_identity_verification,
     get_identity_verifications_paginated,
     update_identity_verification_status,
     approve_identity_verification,
@@ -30,16 +31,48 @@ from app.services.email.send_email import (
 )
 from app.models.admins import Admins
 from app.crud.user_crud import update_user_identity_verified_at
-from app.crud.creater_crud import update_creator
+from app.crud.creater_crud import update_creator, get_creator_by_user_id
 from app.core.logger import Logger
 from app.crud.events_crud import get_event_by_code
 from app.crud.user_events_crud import check_user_event_exists
 from app.constants.event_code import EventCode
 from app.constants.number import PlatformFeePercent
 from app.schemas.creator import CreatorUpdate
-
+from app.constants.enums import VerificationStatus
+from app.crud.notifications_crud import add_notification_for_identity_verification
 logger = Logger.get_logger()
 router = APIRouter()
+
+def _check_has_creator_info(db: Session, user_id: str) -> bool:
+    """クリエイター情報が入力済みかどうかを判定"""
+    creator = get_creator_by_user_id(db, user_id)
+    if not creator:
+        return False
+    return bool(
+        creator.name and
+        creator.first_name_kana and
+        creator.last_name_kana and
+        creator.address and
+        creator.birth_date
+    )
+
+def _get_creator_info(db: Session, user_id: str) -> Optional[CreatorInfoResponse]:
+    """クリエイター情報を取得"""
+    creator = get_creator_by_user_id(db, user_id)
+    if not creator:
+        return None
+
+    birth_date_str = None
+    if creator.birth_date:
+        birth_date_str = creator.birth_date.strftime("%Y-%m-%d")
+
+    return CreatorInfoResponse(
+        name=creator.name,
+        first_name_kana=creator.first_name_kana,
+        last_name_kana=creator.last_name_kana,
+        address=creator.address,
+        birth_date=birth_date_str
+    )
 
 
 @router.get("/identity-verifications", response_model=PaginatedResponse[AdminIdentityVerificationResponse])
@@ -63,8 +96,14 @@ def get_identity_verifications(
         sort=sort
     )
 
+    # 各認証に対してクリエイター情報の有無を判定
+    response_data = []
+    for v in verifications:
+        has_creator_info = _check_has_creator_info(db, str(v.user_id))
+        response_data.append(AdminIdentityVerificationResponse.from_orm(v, has_creator_info))
+
     return PaginatedResponse(
-        data=[AdminIdentityVerificationResponse.from_orm(v) for v in verifications],
+        data=response_data,
         total=total,
         page=page,
         limit=limit,
@@ -98,8 +137,14 @@ def get_identity_verification(
             presigned_url=presigned_data.get("download_url")
         ))
 
+    # クリエイター情報の有無を判定
+    has_creator_info = _check_has_creator_info(db, str(verification.user_id))
+
+    # クリエイター情報を取得
+    creator_info = _get_creator_info(db, str(verification.user_id))
+
     # レスポンスを作成
-    response = AdminIdentityVerificationResponse.from_orm(verification)
+    response = AdminIdentityVerificationResponse.from_orm(verification, has_creator_info, creator_info)
     response.documents = document_responses
 
     return response
@@ -142,6 +187,20 @@ def review_identity_verification(
             if not updated_verification:
                 raise HTTPException(status_code=500, detail="承認処理に失敗しました")
 
+            # クリエイター情報が入力されている場合のみ更新
+            if review.creator_info:
+                from datetime import datetime as dt
+                creator_update_data = {
+                    "name": review.creator_info.name,
+                    "first_name_kana": review.creator_info.first_name_kana,
+                    "last_name_kana": review.creator_info.last_name_kana,
+                    "address": review.creator_info.address,
+                    "birth_date": dt.strptime(review.creator_info.birth_date, "%Y-%m-%d") if review.creator_info.birth_date else None,
+                }
+                creator = update_creator(db, user.id, CreatorUpdate(**creator_update_data))
+                if not creator:
+                    raise HTTPException(status_code=500, detail="クリエイター情報の更新に失敗しました")
+
 
             # 事前登録判定 TODO: イベント終了時削除
             is_preregistration = _check_preregistration(db, user.id)
@@ -170,6 +229,7 @@ def review_identity_verification(
             except Exception as e:
                 logger.error(f"Email sending failed: {e}")
 
+            # 通知を送信
             try:
                 add_notification_for_identity_verification(db, user.id, review.status)
             except Exception as e:
@@ -205,6 +265,13 @@ def review_identity_verification(
             except Exception as e:
                 logger.error(f"Email sending failed: {e}")
 
+            # 通知を送信
+            try:
+                add_notification_for_identity_verification(db, user.id, review.status)
+            except Exception as e:
+                logger.error(f"Notification sending failed: {e}")
+                pass
+
             return {"message": "身分証明を拒否しました", "status": "rejected"}
 
         else:
@@ -215,6 +282,46 @@ def review_identity_verification(
     except Exception as e:
         logger.error(f"Identity verification review error: {e}")
         raise HTTPException(status_code=500, detail="審査処理中にエラーが発生しました")
+
+@router.patch("/identity-verifications/{verification_id}/creator-info")
+def update_creator_info(
+    verification_id: str,
+    creator_info: CreatorInfoForApproval,
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user)
+):
+    """クリエイター基本情報を更新"""
+    from app.schemas.admin import CreatorInfoForApproval
+
+    try:
+        # 審査情報を取得
+        verification = db.query(IdentityVerifications).filter(
+            IdentityVerifications.id == verification_id
+        ).first()
+
+        if not verification:
+            raise HTTPException(status_code=404, detail="審査が見つかりません")
+
+        # クリエイター情報を更新
+        from datetime import datetime as dt
+        creator_update_data = {
+            "name": creator_info.name,
+            "first_name_kana": creator_info.first_name_kana,
+            "last_name_kana": creator_info.last_name_kana,
+            "address": creator_info.address,
+            "birth_date": dt.strptime(creator_info.birth_date, "%Y-%m-%d") if creator_info.birth_date else None,
+        }
+        creator = update_creator(db, verification.user_id, CreatorUpdate(**creator_update_data))
+        if not creator:
+            raise HTTPException(status_code=500, detail="クリエイター情報の更新に失敗しました")
+
+        return {"message": "クリエイター情報を更新しました", "success": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Creator info update error: {e}")
+        raise HTTPException(status_code=500, detail="クリエイター情報の更新に失敗しました")
 
 def _check_preregistration(db: Session, user_id: str) -> bool:
     """

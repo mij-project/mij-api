@@ -91,6 +91,14 @@ class IdentityDocumentResponse(BaseModel):
     created_at: datetime
     presigned_url: Optional[str] = None
 
+class CreatorInfoResponse(BaseModel):
+    """クリエイター情報レスポンス"""
+    name: Optional[str] = None
+    first_name_kana: Optional[str] = None
+    last_name_kana: Optional[str] = None
+    address: Optional[str] = None
+    birth_date: Optional[str] = None  # YYYY-MM-DD形式
+
 class AdminIdentityVerificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -101,9 +109,11 @@ class AdminIdentityVerificationResponse(BaseModel):
     checked_at: Optional[datetime]
     notes: Optional[str]
     documents: List['IdentityDocumentResponse'] = []
+    has_creator_info: bool = False  # クリエイター情報入力済みかどうか
+    creator_info: Optional[CreatorInfoResponse] = None  # クリエイター情報
 
     @classmethod
-    def from_orm(cls, verification):
+    def from_orm(cls, verification, has_creator_info: bool = False, creator_info: Optional['CreatorInfoResponse'] = None):
         data = {
             "id": str(verification.id),
             "user_id": str(verification.user_id),
@@ -112,12 +122,22 @@ class AdminIdentityVerificationResponse(BaseModel):
             "checked_at": verification.checked_at,
             "notes": verification.notes,
             "documents": [],
+            "has_creator_info": has_creator_info,
+            "creator_info": creator_info,
         }
         return cls(**data)
+
+class CreatorInfoForApproval(BaseModel):
+    name: str
+    first_name_kana: str
+    last_name_kana: str
+    address: str
+    birth_date: str  # YYYY-MM-DD形式
 
 class IdentityVerificationReview(BaseModel):
     status: str  # "approved" or "rejected"
     notes: Optional[str] = None
+    creator_info: Optional[CreatorInfoForApproval] = None  # 承認時のみ必須
 
 class AdminPostResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
