@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.get("", response_model=PaginatedNotificationUserResponse)
 async def get_notifications(
-    type: NotificationType = Query(..., description='通知種別: 1: admin -> users 2: users -> users 3: payments'),
+    type: NotificationType = Query(..., description='通知種別: 1: admin -> users 2: users -> users 3: payments 4: all'),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -28,7 +28,7 @@ async def get_notifications(
     通知を取得
 
     Args:
-        type: 通知種別: 1: admin -> users 2: users -> users 3: payments
+        type: 通知種別: 1: admin -> users 2: users -> users 3: payments 4: all
         page: ページ番号
         limit: 1ページあたりの件数
 
