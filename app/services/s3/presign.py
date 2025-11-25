@@ -187,7 +187,7 @@ def presign_multipart_part_temp_video(
     マルチパートアップロード用の署名付きPUT URLを生成（upload_part 用）
     """
     bucket = _bucket_and_kms(resource)
-    client = s3_client()
+    client = s3_client(is_use_accelerate_endpoint=True)
 
     params = {
         "Bucket": bucket,
@@ -231,7 +231,7 @@ def presign_get_temp_video(
         dict: 署名付きURLと有効期限
     """
     bucket = _bucket_and_kms(resource)
-    client = s3_client()
+    client = s3_client(is_use_accelerate_endpoint=True)
 
     params = {"Bucket": bucket, "Key": key}
 
@@ -264,7 +264,7 @@ def complete_multipart_temp_video(
     マルチパートアップロードを完了する
     """
     bucket = _bucket_and_kms(resource)
-    client = s3_client()
+    client = s3_client(is_use_accelerate_endpoint=True)
 
     # PartNumber の昇順に並び替え（S3は昇順を要求）
     multipart_parts = [
