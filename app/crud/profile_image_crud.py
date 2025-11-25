@@ -391,7 +391,7 @@ def add_notification_for_profile_image_submission(
             payload={
                 "title": title,
                 "subtitle": subtitle,
-                "avatar": profile.avatar_url,
+                "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
                 "redirect_url": f"/profile?username={profile.username}"
             }
         )

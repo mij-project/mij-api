@@ -46,7 +46,7 @@ VideoAssets = aliased(MediaAssets)
 MEDIA_CDN_URL = os.getenv("MEDIA_CDN_URL")
 CDN_BASE_URL = os.getenv("CDN_BASE_URL")
 
-POST_APPROVED_MD = """## Mijfans 投稿の審査が完了しました
+POST_APPROVED_MD = """## mijfans 投稿の審査が完了しました
 
 -name- 様
 
@@ -61,7 +61,7 @@ POST_APPROVED_MD = """## Mijfans 投稿の審査が完了しました
 ご不明な点がございましたら、サポートまでお問い合わせください。
 """
 
-POST_REJECTED_MD = """## Mijfans 投稿の審査が完了しました
+POST_REJECTED_MD = """## mijfans 投稿の審査が完了しました
 
 -name- 様
 

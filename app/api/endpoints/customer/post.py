@@ -170,7 +170,11 @@ async def get_post_detail(
         creator_info = _format_creator_info(post_data["creator"], post_data["creator_profile"])
 
         # メディア情報を整形
-        media_info, thumbnail_key = _format_media_info(post_data["media_assets"], post_data["is_entitlement"])
+        media_info, thumbnail_key = _format_media_info(
+            post_data["media_assets"],
+            post_data["is_entitlement"],
+            post_data["price"],
+        )
 
         # カテゴリ情報を整形
         categories_data = _format_categories_info(post_data["categories"])
@@ -381,10 +385,14 @@ def _create_plan(db: Session, post_id: str, plan_ids: list):
         plan_post.append(create_post_plan(db, plan_post_data))
     return plan_post
 
-def _format_media_info(media_assets: list, is_entitlement: bool):
-    """メディア情報を整形する"""
+def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
+    """メディア情報を整形する。priceは今後の判定用に受け取る。"""
     set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
     set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
+
+    # 単品販売で価格が0の場合、通常のファイル名を使用
+    if price and price.price == 0:
+        set_file_name = "_1080w.webp"
     
     media_info = []
     for media_asset in media_assets:
