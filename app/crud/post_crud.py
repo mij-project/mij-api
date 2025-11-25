@@ -249,7 +249,7 @@ def get_post_status_by_user_id(db: Session, user_id: UUID) -> dict:
     """
 
     # 審査中の投稿を取得
-    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT]).all()
+    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]).all()
 
     # 拒否された投稿を取得
     rejected_posts = _build_post_status_query(db, user_id, [PostStatus.REJECTED]).all()
@@ -919,7 +919,7 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     is_entitlement = check_entitlement(db, user_id, post_id) if user_id else False
 
     set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
-    set_file_name = "_1080w.webp" if is_entitlement else "_mosaic.webp"
+    set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
     
     media_info = []
     for media_asset in media_assets:

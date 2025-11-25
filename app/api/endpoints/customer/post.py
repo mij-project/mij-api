@@ -306,6 +306,7 @@ def _update_post(db: Session, request_data: PostUpdateRequest, user_id: str, vis
         "expiration_at": request_data.expirationDate if request_data.expiration else None,
         "visibility": visibility,
         "status": PostStatus.RESUBMIT,
+        "reject_comments": "",
     }
     return update_post(db, post_data)
 
@@ -383,7 +384,7 @@ def _create_plan(db: Session, post_id: str, plan_ids: list):
 def _format_media_info(media_assets: list, is_entitlement: bool):
     """メディア情報を整形する"""
     set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
-    set_file_name = "_1080w.webp" if is_entitlement else "_mosaic.webp"
+    set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
     
     media_info = []
     for media_asset in media_assets:
