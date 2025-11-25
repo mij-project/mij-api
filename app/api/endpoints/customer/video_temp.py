@@ -69,7 +69,7 @@ async def upload_temp_main_video(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"署名付きURL発行エラー: {e}")
+        logger.exception(f"署名付きURL発行エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/video-temp/temp-upload/main-video/part-presign", response_model=TempVideoPartPresignResponse)
