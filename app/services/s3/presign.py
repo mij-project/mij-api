@@ -157,7 +157,7 @@ def init_multipart_temp_video(
     upload_id を返すヘルパー
     """
     bucket = _bucket_and_kms(resource)
-    client = s3_client()
+    client = s3_client(is_use_accelerate_endpoint=True)
 
     # マルチパートアップロード開始
     resp = client.create_multipart_upload(
@@ -321,7 +321,7 @@ def multipart_complete(resource: Resource, key: str, upload_id: str, parts: list
     parts: [{"ETag": "...","PartNumber": 1}, ...]
     """
     bucket, _ = _bucket_and_kms(resource)
-    client = s3_client()
+    client = s3_client(is_use_accelerate_endpoint=True)
     client.complete_multipart_upload(
         Bucket=bucket,
         Key=key,
