@@ -404,6 +404,8 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             ThumbnailAssets.duration_sec,
             func.count(func.distinct(Likes.user_id)).label('likes_count'),
             func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.min(Prices.price).label('post_price'),
+            func.min(Prices.currency).label('post_currency'),
             Bookmarks.created_at.label('bookmarked_at')
         )
         .join(Bookmarks, Posts.id == Bookmarks.post_id)
@@ -412,6 +414,7 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
+        .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Bookmarks.user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
@@ -442,6 +445,8 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             ThumbnailAssets.duration_sec,
             func.count(func.distinct(Likes.user_id)).label('likes_count'),
             func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.min(Prices.price).label('post_price'),
+            func.min(Prices.currency).label('post_currency'),
             Likes.created_at.label('liked_at')
         )
         .join(Likes, Posts.id == Likes.post_id)
@@ -449,6 +454,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
         .outerjoin(Comments, Posts.id == Comments.post_id)
+        .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Likes.user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)

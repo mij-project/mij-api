@@ -30,7 +30,7 @@ from app.constants.enums import (
 )
 from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
 from app.crud.media_rendition_crud import create_media_rendition
-from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status
+from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status, update_media_asset_rejected_comments 
 from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, update_post_status
 from app.crud.media_assets_crud import get_media_asset_by_id
 from app.schemas.transcode_mc import TranscodeMCUpdateRequest
@@ -290,6 +290,10 @@ def transcode_mc_update(
 
         post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
 
+        result = _update_media_asset_rejected_comments(db, post_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Media asset not found")
+
         if not post:
             raise HTTPException(status_code=404, detail="Post not found")
 
@@ -357,3 +361,10 @@ def _update_post_status_for_convert(db: Session, post_id: str, status: int) -> O
     db.commit()
     db.refresh(post)
     return post
+
+def _update_media_asset_rejected_comments(db: Session, post_id: str) -> bool:
+    """
+    メディアアセットを拒否して拒否理由を更新する
+    """
+    result = update_media_asset_rejected_comments(db, post_id)
+    return True

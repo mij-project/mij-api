@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
-
+import os
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
@@ -13,6 +13,8 @@ from app.schemas.social import (
     FollowResponse, LikeResponse, BookmarkResponse,
     UserBasicResponse
 )
+
+BASE_URL = os.getenv("CDN_BASE_URL")
 
 router = APIRouter()
 
@@ -47,11 +49,11 @@ def get_followers(
     followers = followes_crud.get_followers(db, user_id, skip, limit)
     return [
         UserBasicResponse(
-            id=user.id,
-            username=user.username,
-            profile_name=user.profile_name,
-            avatar_storage_key=user.avatar_storage_key
-        ) for user in followers
+            id=follower_id,
+            username=username,
+            profile_name=profile_name,
+            avatar_storage_key=f"{BASE_URL}/{avatar_url}" if avatar_url else None
+        ) for follower_id, profile_name, username, avatar_url in followers
     ]
 
 @router.get("/following/{user_id}", response_model=List[UserBasicResponse])
@@ -65,11 +67,11 @@ def get_following(
     following = followes_crud.get_following(db, user_id, skip, limit)
     return [
         UserBasicResponse(
-            id=user.id,
-            username=user.username,
-            profile_name=user.profile_name,
-            avatar_storage_key=user.avatar_storage_key
-        ) for user in following
+            id=following_id,
+            username=username,
+            profile_name=profile_name,
+            avatar_storage_key=f"{BASE_URL}/{avatar_url}" if avatar_url else None
+        ) for following_id, profile_name, username, avatar_url in following
     ]
 
 # いいね関連エンドポイント

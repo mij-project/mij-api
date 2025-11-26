@@ -4,13 +4,14 @@ from app.models.user import Users
 from app.models.profiles import Profiles
 from app.schemas.user import UserCreate
 from app.core.security import hash_password
-from sqlalchemy import select, desc, func, update, asc
+from sqlalchemy import select, desc, func, update, asc, case
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone
 from uuid import UUID
 from app.constants.enums import (
     AccountType,
-    AccountStatus
+    AccountStatus,
+    PlanStatus
 )
 from app.crud.profile_crud import get_profile_by_username
 from app.models.posts import Posts
@@ -161,8 +162,11 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         db.query(Plans)
         .filter(Plans.creator_user_id == user.id)
         .filter(Plans.deleted_at.is_(None))
-        .order_by(asc(Plans.display_order))
-        .order_by(asc(Plans.created_at))
+        .order_by(
+            case((Plans.type == 2, 0), else_=1),  # typeが2のものを優先
+            asc(Plans.display_order),
+            asc(Plans.created_at)
+        )
         .all()
     )
     

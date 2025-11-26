@@ -135,6 +135,16 @@ class BannerListResponse(BaseModel):
     total_pages: int
 
 
+class PreRegisterUserResponse(BaseModel):
+    """pre-registerイベント参加ユーザーレスポンス"""
+    id: str
+    profile_name: str
+    username: str
+    avatar_url: Optional[str] = None
+    cover_url: Optional[str] = None
+
+
 class ActiveBannersResponse(BaseModel):
     """有効なバナー一覧レスポンス（顧客向け）"""
     banners: List[BannerResponse]
+    pre_register_users: List[PreRegisterUserResponse] = Field(default_factory=list, description="pre-registerイベント参加ユーザー（最大5件）")

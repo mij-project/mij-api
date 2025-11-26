@@ -7,12 +7,15 @@ from uuid import UUID
 from app.models.banners import Banners
 from app.models.user import Users
 from app.models.profiles import Profiles
+from app.models.events import Events, UserEvents
 from app.constants.enums import BannerImageSource, BannerStatus, BannerType
+from app.constants.event_code import EventCode
+from sqlalchemy import func
 import os
 
 BANNER_IMAGE_URL = os.getenv("BANNER_IMAGE_URL", "")
 CDN_URL = os.getenv("CDN_BASE_URL", "")
-
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 
 def create_banner(
     db: Session,
@@ -397,3 +400,52 @@ def get_banner_detail(
         "created_at": banner.created_at,
         "updated_at": banner.updated_at
     }
+
+
+def get_pre_register_users_random(
+    db: Session,
+    limit: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    イベント"pre-register"に参加しているユーザーをランダムで取得
+
+    Args:
+        db: データベースセッション
+        limit: 取得件数（デフォルト: 5）
+
+    Returns:
+        List[Dict]: ユーザーリスト
+    """
+    # イベント"pre-register"を取得
+    event = db.query(Events).filter(Events.code == EventCode.PRE_REGISTRATION).first()
+
+    if not event:
+        return []
+
+    # イベントに参加しているユーザーをランダムで取得
+    results = (
+        db.query(Users, Profiles.username, Profiles.avatar_url, Profiles.cover_url)
+        .join(UserEvents, UserEvents.user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .filter(UserEvents.event_id == event.id)
+        .order_by(func.random())
+        .limit(limit)
+        .all()
+    )
+
+    users = []
+    for row in results:
+        user = row[0]
+        username = row[1]
+        avatar_url = row[2]
+        cover_url = row[3]
+
+        users.append({
+            "id": str(user.id),
+            "profile_name": user.profile_name,
+            "username": username,
+            "avatar_url": f"{CDN_URL}/{avatar_url}" if avatar_url else f"{FRONTEND_URL}/assets/mijfans.png",
+            "cover_url": f"{CDN_URL}/{cover_url}" if cover_url else f"{FRONTEND_URL}/assets/no-image.svg",
+        })
+
+    return users

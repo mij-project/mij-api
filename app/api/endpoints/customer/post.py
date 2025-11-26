@@ -390,10 +390,13 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
     set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
     set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
 
-    # 単品販売で価格が0の場合、通常のファイル名を使用
-    if price and price.price == 0:
+    # 単品販売で価格が0の場合フラグを立てる
+    free_flg = True if price and price.price == 0 else False
+
+    if free_flg:
         set_file_name = "_1080w.webp"
-    
+
+
     media_info = []
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
