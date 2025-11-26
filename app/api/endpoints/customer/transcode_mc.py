@@ -309,6 +309,20 @@ def transcode_mc_update(
         if not assets:
             raise HTTPException(status_code=404, detail="Media asset not found")
 
+        logger.info(f"MediaConvert処理対象アセット: post_id={post_id}, asset_ids={[a.id for a in assets]}, kinds={[a.kind for a in assets]}")
+
+        # 動画投稿の場合、メイン・サンプル動画のステータスをRESUBMITに更新
+        # （どちらかが再提出された場合、両方を再変換するため）
+        if type == "video":
+            for asset in assets:
+                if asset.kind in [MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
+                    video_update_data = {
+                        "status": MediaAssetStatus.RESUBMIT
+                    }
+                    update_media_asset(db, asset.id, video_update_data)
+                    kind_label = "メイン動画" if asset.kind == MediaAssetKind.MAIN_VIDEO else "サンプル動画"
+                    logger.info(f"{kind_label}のステータスをRESUBMITに更新: asset_id={asset.id}")
+
         for asset in assets:
             if type == "video":
                 output_prefix = transcode_mc_hls_prefix(

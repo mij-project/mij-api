@@ -425,6 +425,7 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
 def _format_creator_info(creator: dict, creator_profile: dict):
     """クリエイター情報を整形する"""
     return {
+        "user_id": str(creator.id),
         "username": creator_profile.username if creator_profile else creator.email,
         "profile_name": creator.profile_name if creator_profile else creator.email,
         "avatar": f"{BASE_URL}/{creator_profile.avatar_url}" if creator_profile.avatar_url else None,

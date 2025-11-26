@@ -274,6 +274,7 @@ class AdminPostDetailResponse(BaseModel):
     username: Optional[str]
     profile_avatar_url: Optional[str]
     media_assets: Dict[str, MediaAssetData]
+    authenticated_flg: int
 
     # 価格情報
     single_price: Optional[int] = Field(None, description="単品販売価格")
