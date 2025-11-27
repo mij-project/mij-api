@@ -1,0 +1,43 @@
+name: Demo
+
+on:
+  push:
+    branches:
+      - cicd/demo
+
+env:
+  AWS_REGION: ap-northeast-1
+  SLACK_CHANNEL: C08MV1PPBAP
+  IMAGE_TAG: demo
+  ECR_REPOSITORY: mijfans-batchs
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    environment: mijfans
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Baths Image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          cd batchs
+          DOCKER_DEFAULT_PLATFORM=linux/amd64 docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          cd ..
