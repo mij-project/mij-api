@@ -12,6 +12,9 @@ from app.schemas.notification import NotificationType
 from app.schemas.user_settings import UserSettingsType
 from app.services.email.send_email import send_follow_notification_email
 from app.core.logger import Logger
+import os
+BASE_URL = os.getenv("")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
 logger = Logger.get_logger()
 
 def get_follower_count(db: Session, user_id: UUID) -> dict:
@@ -77,17 +80,23 @@ def is_following(db: Session, follower_user_id: UUID, creator_user_id: UUID) -> 
     return follow is not None
 
 def get_followers(
-    db: Session, 
-    user_id: UUID, 
-    skip: int = 0, 
+    db: Session,
+    user_id: UUID,
+    skip: int = 0,
     limit: int = 20
-) -> List[Users]:
+):
     """
-    フォロワー一覧を取得
+    フォロワー一覧を取得（Users + Profilesの情報を返す）
     """
     return (
-        db.query(Users)
+        db.query(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url
+        )
         .join(Follows, Follows.follower_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
         .filter(Follows.creator_user_id == user_id)
         .order_by(Follows.created_at.desc())
         .offset(skip)
@@ -96,17 +105,23 @@ def get_followers(
     )
 
 def get_following(
-    db: Session, 
-    user_id: UUID, 
-    skip: int = 0, 
+    db: Session,
+    user_id: UUID,
+    skip: int = 0,
     limit: int = 20
-) -> List[Users]:
+):
     """
-    フォロー中のユーザー一覧を取得
+    フォロー中のユーザー一覧を取得（Users + Profilesの情報を返す）
     """
     return (
-        db.query(Users)
+        db.query(
+            Users.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url
+        )
         .join(Follows, Follows.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
         .filter(Follows.follower_user_id == user_id)
         .order_by(Follows.created_at.desc())
         .offset(skip)
@@ -159,8 +174,8 @@ def add_notification_follow(db: Session, follower_user_id: UUID, creator_user_id
             payload={
                 "title": f"{follower_profile.username} があなたをフォローしました",
                 "subtitle": f"{follower_profile.username} があなたをフォローしました",
-                "avatar": follower_profile.avatar_url,
-                "redirect_url": f"/profile/username={follower_profile.username}"
+                "avatar": f"{BASE_URL}/{follower_profile.avatar_url}" if follower_profile.avatar_url else f"{FRONTEND_URL}/assets/no-image.svg",
+                "redirect_url": f"{FRONTEND_URL}/profile?username={follower_profile.username}"
             },
             is_read=False,
             read_at=None,

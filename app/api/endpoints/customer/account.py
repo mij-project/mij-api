@@ -280,17 +280,31 @@ def update_account_info(
         HTTPException: エラーが発生した場合
     """
     try:
-    
-        if update_data.name:
-            if check_profile_name_exists(db, update_data.name) and update_data.name != current_user.profile_name:
+        # 現在のプロフィール情報を取得
+        current_profile = get_profile_by_user_id(db, current_user.id)
+
+        # 氏名の変更チェックと重複確認
+        name_changed = update_data.name and update_data.name != current_user.profile_name
+        if name_changed:
+            logger.info(f"氏名変更を検出: {current_user.profile_name} -> {update_data.name}")
+            if check_profile_name_exists(db, update_data.name):
+                logger.warning(f"氏名の重複エラー: {update_data.name}")
                 return Response(content="このユーザ名は既に使用されています", status_code=400)
 
-        if update_data.username:
+        # ユーザーネームの変更チェックと重複確認
+        username_changed = (update_data.username and current_profile
+                           and update_data.username != current_profile.username)
+        if username_changed:
+            logger.info(f"ユーザーネーム変更を検出: {current_profile.username} -> {update_data.username}")
             if exist_profile_by_username(db, update_data.username):
+                logger.warning(f"ユーザーネームの重複エラー: {update_data.username}")
                 return Response(content="このユーザーネームは既に使用されています", status_code=400)
 
+        # ユーザー情報の更新（氏名が変更された場合のみ）
+        if name_changed:
             user = update_user(db, current_user.id, update_data.name)
-        links = update_data.links
+
+        links = update_data.links if update_data.links else {}
         instagram = links.get("instagram", "")
         instagram_link = f"{INSTAGRAM_URL}/{instagram.replace('@', '')}" if instagram else ""
         tiktok = links.get("tiktok", "")
@@ -327,12 +341,18 @@ def update_account_info(
 
         update_data.links = update_links
 
-        if update_data.username:
+        # プロフィール情報の更新（username、description、links、avatar_url、cover_urlのいずれかがある場合）
+        if any([update_data.username, update_data.description, update_data.links,
+                update_data.avatar_url, update_data.cover_url]):
             profile = update_profile(db, current_user.id, update_data)
 
         db.commit()
-        db.refresh(user)
-        db.refresh(profile)
+
+        # 更新されたオブジェクトのリフレッシュ
+        if 'user' in locals():
+            db.refresh(user)
+        if 'profile' in locals():
+            db.refresh(profile)
 
         return AccountUpdateResponse(
             message="アカウント情報が正常に更新されました",
@@ -532,7 +552,7 @@ def get_bookmarks(
         bookmarks_data = get_bookmarked_posts_by_user_id(db, current_user.id)
 
         bookmarks = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, bookmarked_at in bookmarks_data:
+        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, bookmarked_at in bookmarks_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -551,7 +571,9 @@ def get_bookmarks(
                 comments_count=comments_count or 0,
                 duration=duration,
                 is_video=(post.post_type == PostType.VIDEO),  # 2が動画
-                created_at=bookmarked_at
+                created_at=bookmarked_at,
+                price=int(post_price) if post_price else None,
+                currency=post_currency or "JPY"
             )
             bookmarks.append(bookmark)
 
@@ -572,7 +594,7 @@ def get_likes(
         liked_posts_data = get_liked_posts_list_by_user_id(db, current_user.id)
 
         liked_posts = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, liked_at in liked_posts_data:
+        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, liked_at in liked_posts_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -591,7 +613,9 @@ def get_likes(
                 comments_count=comments_count or 0,
                 duration=duration,
                 is_video=(post.post_type == PostType.VIDEO),  # 1が動画
-                created_at=liked_at
+                created_at=liked_at,
+                price=int(post_price) if post_price else None,
+                currency=post_currency or "JPY"
             )
             liked_posts.append(liked_post)
 

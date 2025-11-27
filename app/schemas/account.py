@@ -127,6 +127,8 @@ class PostCardResponse(BaseModel):
     duration: Optional[str] = None
     is_video: bool
     created_at: datetime
+    price: Optional[int] = None
+    currency: Optional[str] = None
 
     class Config:
         from_attributes = True

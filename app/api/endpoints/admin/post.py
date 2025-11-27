@@ -16,10 +16,11 @@ from app.crud.admin_crud import (
     update_post_status,
     reject_post_with_comments,
 )
-from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, get_post_by_id
-from app.crud.media_assets_crud import get_media_assets_by_post_id_and_kind
+from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, get_post_by_id, update_post_status as update_post_status_crud
+from app.crud.media_assets_crud import get_media_assets_by_post_id_and_kind, get_media_asset_by_post_id, update_media_asset
+from app.models.media_assets import MediaAssets
 from app.api.commons.utils import resolve_media_asset_storage_key
-from app.constants.enums import MediaAssetKind, AuthenticatedFlag, PostType
+from app.constants.enums import MediaAssetKind, AuthenticatedFlag, PostType, PostStatus, MediaAssetStatus
 from app.services.s3.presign import get_bucket_name
 from app.core.logger import Logger
 import boto3
@@ -187,6 +188,88 @@ def reject_post(
         success=True
     )
 
+@router.post("/{post_id}/approve")
+def approve_post(
+    post_id: str,
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user)
+):
+    """
+    投稿を承認する
+
+    authenticated_flg=1（認証済み）の場合:
+        - 投稿ステータスをAPPROVEDに更新
+        - 紐づくメディアアセットのステータスをAPPROVEDに更新
+        - MediaConvert処理は実行しない（既に変換済みのため）
+
+    authenticated_flg=0（未認証）の場合:
+        - transcode_mc エンドポイントを使用してMediaConvert処理を実行
+    """
+    try:
+        # 投稿を取得
+        post = get_post_by_id(db, post_id)
+        if not post:
+            raise HTTPException(status_code=404, detail="投稿が見つかりません")
+
+        # authenticated_flg=1（認証済み）の場合
+        if post.get('authenticated_flg') == AuthenticatedFlag.AUTHENTICATED:
+            logger.info(f"認証済み投稿を承認: post_id={post_id}")
+
+            # 投稿ステータスをAPPROVEDに更新
+            updated_post = update_post_status_crud(
+                db,
+                post_id,
+                PostStatus.APPROVED,
+                AuthenticatedFlag.AUTHENTICATED
+            )
+
+            if not updated_post:
+                raise HTTPException(status_code=500, detail="投稿ステータスの更新に失敗しました")
+
+            # 紐づく全てのメディアアセットを取得してステータスを更新
+            media_assets = db.query(MediaAssets).filter(
+                MediaAssets.post_id == post_id
+            ).all()
+
+            if media_assets:
+                for asset in media_assets:
+                    update_media_asset(db, str(asset.id), {
+                        "status": MediaAssetStatus.APPROVED
+                    })
+                    logger.info(f"メディアアセットのステータスを更新: asset_id={asset.id}, kind={asset.kind}, status=APPROVED")
+                logger.info(f"全メディアアセットのステータスを更新完了: post_id={post_id}, count={len(media_assets)}")
+            else:
+                logger.warning(f"メディアアセットが見つかりません: post_id={post_id}")
+
+            db.commit()
+
+            # Email通知を追加
+            add_mail_notification_for_post(db, post_id=post_id, type="approved")
+            # 投稿に対する通知を追加
+            add_notification_for_post(db, updated_post, post.get('creator_user_id'), type="approved")
+
+            return {
+                "message": "投稿を承認しました（認証済み）",
+                "success": True,
+                "post_id": post_id,
+                "status": "approved"
+            }
+        else:
+            # authenticated_flg=0の場合は、MediaConvert処理が必要
+            # フロントエンドでtranscode_mcエンドポイントを呼ぶ必要がある
+            raise HTTPException(
+                status_code=400,
+                detail="未認証の投稿はMediaConvert処理が必要です。transcode_mcエンドポイントを使用してください。"
+            )
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"投稿承認エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/{post_id}")
 def get_post(
     post_id: str,
@@ -194,7 +277,7 @@ def get_post(
     # current_admin: Users = Depends(get_current_admin_user)
 ):
     """投稿詳細を取得"""
-    
+
     post_data = get_post_by_id(db, post_id)
 
     if not post_data:

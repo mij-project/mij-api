@@ -46,7 +46,7 @@ VideoAssets = aliased(MediaAssets)
 MEDIA_CDN_URL = os.getenv("MEDIA_CDN_URL")
 CDN_BASE_URL = os.getenv("CDN_BASE_URL")
 
-POST_APPROVED_MD = """## Mijfans 投稿の審査が完了しました
+POST_APPROVED_MD = """## mijfans 投稿の審査が完了しました
 
 -name- 様
 
@@ -61,7 +61,7 @@ POST_APPROVED_MD = """## Mijfans 投稿の審査が完了しました
 ご不明な点がございましたら、サポートまでお問い合わせください。
 """
 
-POST_REJECTED_MD = """## Mijfans 投稿の審査が完了しました
+POST_REJECTED_MD = """## mijfans 投稿の審査が完了しました
 
 -name- 様
 
@@ -249,7 +249,7 @@ def get_post_status_by_user_id(db: Session, user_id: UUID) -> dict:
     """
 
     # 審査中の投稿を取得
-    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT]).all()
+    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]).all()
 
     # 拒否された投稿を取得
     rejected_posts = _build_post_status_query(db, user_id, [PostStatus.REJECTED]).all()
@@ -404,6 +404,8 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             ThumbnailAssets.duration_sec,
             func.count(func.distinct(Likes.user_id)).label('likes_count'),
             func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.min(Prices.price).label('post_price'),
+            func.min(Prices.currency).label('post_currency'),
             Bookmarks.created_at.label('bookmarked_at')
         )
         .join(Bookmarks, Posts.id == Bookmarks.post_id)
@@ -412,6 +414,7 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
+        .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Bookmarks.user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
@@ -442,6 +445,8 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             ThumbnailAssets.duration_sec,
             func.count(func.distinct(Likes.user_id)).label('likes_count'),
             func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.min(Prices.price).label('post_price'),
+            func.min(Prices.currency).label('post_currency'),
             Likes.created_at.label('liked_at')
         )
         .join(Likes, Posts.id == Likes.post_id)
@@ -449,6 +454,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
         .outerjoin(Comments, Posts.id == Comments.post_id)
+        .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Likes.user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
@@ -919,7 +925,7 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     is_entitlement = check_entitlement(db, user_id, post_id) if user_id else False
 
     set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
-    set_file_name = "_1080w.webp" if is_entitlement else "_mosaic.webp"
+    set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
     
     media_info = []
     for media_asset in media_assets:

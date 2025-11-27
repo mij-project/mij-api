@@ -966,13 +966,31 @@ async def trigger_batch_process(
         # リソース決定（動画用）
         resource = get_video_resource_and_approved_flag(post['authenticated_flg'])
 
-        # 既存アセットを削除（バックグラウンド処理に入る前に実行）
+        # 既存メイン動画アセットを削除（バックグラウンド処理に入る前に実行）
         delete_existing_video_asset(db, existing_main_asset, resource, post['authenticated_flg'])
-        delete_existing_video_asset(db, existing_sample_asset, resource, post['authenticated_flg'])
+
+        # 既存サンプル動画アセットの削除判定
+        # - need_trim=True（cut_outモード）: 新しいサンプル動画を生成するため、既存を削除
+        # - need_trim=False（uploadモード）: 既存サンプル動画がcut_outモードの場合のみ削除
+        #   （uploadモードの既存サンプル動画は保持）
+        should_delete_sample = False
+        if request.need_trim:
+            # cut_outモードで新しいサンプル動画を生成する場合は削除
+            should_delete_sample = True
+        elif existing_sample_asset and existing_sample_asset.sample_type == "cut_out":
+            # uploadモードだが、既存がcut_outモードの場合は削除
+            # （メイン動画が変わると、cut_outで切り出したサンプル動画は無効になる）
+            should_delete_sample = True
+
+        if should_delete_sample:
+            delete_existing_video_asset(db, existing_sample_asset, resource, post['authenticated_flg'])
+            logger.info(f"既存サンプル動画アセット削除: post_id={request.post_id}, sample_type={existing_sample_asset.sample_type if existing_sample_asset else 'None'}")
+        else:
+            logger.info(f"既存サンプル動画アセット保持: post_id={request.post_id}, sample_type={existing_sample_asset.sample_type if existing_sample_asset else 'None'}")
 
         db.commit()
 
-        logger.info(f"既存アセット削除完了: post_id={request.post_id}")
+        logger.info(f"既存アセット処理完了: post_id={request.post_id}")
 
         # バックグラウンドタスクとしてバッチ処理を登録
         background_tasks.add_task(
