@@ -14,13 +14,13 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from .media_renditions import MediaRenditions
     from .media_assets import MediaAssets
-
+    
 class MediaRenditionJobs(Base):
+    """メディアレンディションジョブ(media convert後のリソース)"""
     __tablename__ = "media_rendition_jobs"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     asset_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="CASCADE"), index=True, nullable=False)
-    rendition_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("media_renditions.id", ondelete="CASCADE"), index=True, nullable=True)
 
     kind: Mapped[int] = mapped_column(SmallInteger, nullable=False)     # PREVIEW_MP4 / HLS_ABR4
     backend: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
@@ -33,15 +33,8 @@ class MediaRenditionJobs(Base):
 
     # 実行情報
     job_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)      # MediaConvert JobId
-    percent_complete: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # 生成物メタ（HLS向け）
-    master_manifest_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 例 "hls/<post>/<asset>/master.m3u8"
-    extra: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
     asset: Mapped["MediaAssets"] = relationship("MediaAssets", back_populates="rendition_jobs")
-    rendition: Mapped["MediaRenditions"] = relationship("MediaRenditions", back_populates="jobs")

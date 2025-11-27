@@ -1,51 +1,48 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from uuid import UUID
+from datetime import datetime, timezone
 from os import getenv
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
 from app.schemas.admin import (
     AdminDashboardStats,
     AdminCreatorApplicationResponse,
-    AdminIdentityVerificationResponse,
-    AdminPostResponse,
     AdminUserResponse,
     AdminSalesData,
     CreatorApplicationReview,
-    IdentityVerificationReview,
     PaginatedResponse,
-    CreateUserRequest,
-    AdminPostDetailResponse
+    CreateAdminRequest,
+    AdminResponse,
 )
 from app.models.user import Users
 from app.models.creators import Creators
-from app.models.identity import IdentityVerifications
-from app.models.posts import Posts
 from app.models.profiles import Profiles
+from app.models.admins import Admins
 from app.core.security import hash_password
 from app.crud.admin_crud import (
+    add_notification_for_creator_application,
     get_dashboard_info,
     get_users_paginated,
     update_user_status,
     get_creator_applications_paginated,
     update_creator_application_status,
-    get_identity_verifications_paginated,
-    update_identity_verification_status,
-    get_posts_paginated,
-    update_post_status,
-    get_post_by_id,
+    create_admin,
 )
 from app.services.s3.presign import presign_get
 from app.constants.enums import MediaAssetKind
+from app.core.logger import Logger
+
+logger = Logger.get_logger()
+CDN_URL = getenv("CDN_BASE_URL")
+MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
 
 router = APIRouter()
 
 @router.get("/dashboard/stats", response_model=AdminDashboardStats)
 def get_dashboard_stats(
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """管理者ダッシュボード統計情報を取得"""
     
@@ -57,6 +54,7 @@ def get_dashboard_stats(
         pending_creator_applications=stats["pending_creator_applications"],
         pending_identity_verifications=stats["pending_identity_verifications"],
         pending_post_reviews=stats["pending_post_reviews"],
+        pending_profile_reviews=stats["pending_profile_reviews"],
         total_posts=stats["total_posts"],
         monthly_revenue=stats["monthly_revenue"],
         active_subscriptions=stats["active_subscriptions"]
@@ -70,7 +68,7 @@ def get_users(
     role: Optional[str] = None,
     sort: Optional[str] = "created_at_desc",
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """ユーザー一覧を取得"""
     
@@ -96,7 +94,7 @@ def update_user_status(
     user_id: str,
     status: str,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """ユーザーのステータスを更新"""
     
@@ -106,54 +104,36 @@ def update_user_status(
     
     return {"message": "ユーザーステータスを更新しました"}
 
-@router.post("/users", response_model=AdminUserResponse)
-def create_user(
-    user_data: CreateUserRequest,
+@router.post("/create-admin", response_model=AdminResponse)
+def create_admin_user(
+    admin_data: CreateAdminRequest,
     db: Session = Depends(get_db),
 ):
-    """新しいユーザーを作成"""
+    """新しい管理者を作成 - adminsテーブルを使用"""
 
     try:
-    
-    # メールアドレスの重複チェック
-        existing_user = db.query(Users).filter(Users.email == user_data.email).first()
-        if existing_user:
-            raise HTTPException(status_code=400, detail="このメールアドレスは既に使用されています")
-        
-        # ユーザー作成
-        hashed_password = hash_password(user_data.password)
-        
-        # role の文字列を数値に変換
-        role_map = {"user": 1, "creator": 2, "admin": 3}
-        role_value = role_map.get(user_data.role, 1)
-        
-        new_user = Users(
-            email=user_data.email,
-            profile_name=user_data.username,
+        # パスワードをハッシュ化
+        hashed_password = hash_password(admin_data.password)
+
+        # 管理者作成
+        new_admin = create_admin(
+            db=db,
+            email=admin_data.email,
             password_hash=hashed_password,
-            role=role_value,
-            status=1,  # active
-            email_verified_at=datetime.utcnow()  # 管理者作成ユーザーは確認済み
+            role=admin_data.role,
         )
-        
-        db.add(new_user)
-        db.flush()  # ユーザーIDを取得するためにflush
-        
-        # プロフィール作成
-        new_profile = Profiles(
-            user_id=new_user.id,
-            username=user_data.username,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        
-        db.add(new_profile)
-        db.commit()
-        db.refresh(new_user)
-        
-        return AdminUserResponse.from_orm(new_user)
+
+        if not new_admin:
+            raise HTTPException(
+                status_code=400,
+                detail="このメールアドレスは既に使用されています"
+            )
+
+        return AdminResponse.from_orm(new_admin)
+    except HTTPException:
+        raise
     except Exception as e:
-        print("エラーが発生しました", e)
+        logger.error("管理者作成エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/create-test-admin")
@@ -177,7 +157,7 @@ def create_test_admin(
             password_hash=hashed_password,
             role=3,  # admin
             status=1,  # active
-            email_verified_at=datetime.utcnow()
+            email_verified_at=datetime.now(timezone.utc)
         )
         
         db.add(test_admin)
@@ -187,8 +167,8 @@ def create_test_admin(
         admin_profile = Profiles(
             user_id=test_admin.id,
             username="Test Admin",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         
         db.add(admin_profile)
@@ -202,7 +182,7 @@ def create_test_admin(
         
     except Exception as e:
         db.rollback()
-        print("管理者作成エラー:", e)
+        logger.error("管理者作成エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
     
 
@@ -214,7 +194,7 @@ def get_creator_applications(
     status: Optional[str] = None,
     sort: Optional[str] = "created_at_desc",
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """クリエイター申請一覧を取得"""
     
@@ -239,11 +219,11 @@ def get_creator_applications(
 def get_creator_application(
     application_id: str,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """クリエイター申請詳細を取得"""
     
-    application = db.query(Creators).filter(Creators.id == application_id).first()
+    application = db.query(Creators).filter(Creators.user_id == application_id).first()
     if not application:
         raise HTTPException(status_code=404, detail="申請が見つかりません")
     
@@ -254,7 +234,7 @@ def review_creator_application(
     application_id: str,
     review: CreatorApplicationReview,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """クリエイター申請を審査"""
     
@@ -262,133 +242,10 @@ def review_creator_application(
     if not success:
         raise HTTPException(status_code=404, detail="申請が見つかりませんまたは既に審査済みです")
     
+    # クリエイター申請に対する通知を追加
+    add_notification_for_creator_application(db, application_id, type=review.status)
+    
     return {"message": "申請審査を完了しました"}
-
-@router.get("/identity-verifications", response_model=PaginatedResponse[AdminIdentityVerificationResponse])
-def get_identity_verifications(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    search: Optional[str] = None,
-    status: Optional[str] = None,
-    sort: Optional[str] = "created_at_desc",
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """身分証明審査一覧を取得"""
-    
-    verifications, total = get_identity_verifications_paginated(
-        db=db,
-        page=page,
-        limit=limit,
-        search=search,
-        status=status,
-        sort=sort
-    )
-    
-    return PaginatedResponse(
-        data=[AdminIdentityVerificationResponse.from_orm(v) for v in verifications],
-        total=total,
-        page=page,
-        limit=limit,
-        total_pages=(total + limit - 1) // limit if total > 0 else 1
-    )
-
-@router.get("/identity-verifications/{verification_id}", response_model=AdminIdentityVerificationResponse)
-def get_identity_verification(
-    verification_id: str,
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """身分証明審査詳細を取得"""
-    
-    verification = db.query(IdentityVerifications).filter(IdentityVerifications.id == verification_id).first()
-    if not verification:
-        raise HTTPException(status_code=404, detail="審査が見つかりません")
-    
-    return AdminIdentityVerificationResponse.from_orm(verification)
-
-@router.patch("/identity-verifications/{verification_id}/review")
-def review_identity_verification(
-    verification_id: str,
-    review: IdentityVerificationReview,
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """身分証明を審査"""
-    
-    success = update_identity_verification_status(db, verification_id, review.status)
-    if not success:
-        raise HTTPException(status_code=404, detail="審査が見つかりませんまたは既に完了済みです")
-    
-    return {"message": "身分証明審査を完了しました"}
-
-@router.get("/posts", response_model=PaginatedResponse[AdminPostResponse])
-def get_posts(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    search: Optional[str] = None,
-    status: Optional[str] = None,
-    sort: Optional[str] = "created_at_desc",
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """投稿一覧を取得"""
-    
-    posts, total = get_posts_paginated(
-        db=db,
-        page=page,
-        limit=limit,
-        search=search,
-        status=status,
-        sort=sort
-    )
-    
-    return PaginatedResponse(
-        data=[AdminPostResponse.from_orm(post) for post in posts],
-        total=total,
-        page=page,
-        limit=limit,
-        total_pages=(total + limit - 1) // limit if total > 0 else 1
-    )
-
-@router.patch("/posts/{post_id}/status")
-def update_post_status(
-    post_id: str,
-    status: str,
-    db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
-):
-    """投稿のステータスを更新"""
-    
-    success = update_post_status(db, post_id, status)
-    if not success:
-        raise HTTPException(status_code=404, detail="投稿が見つかりません")
-    
-    return {"message": "投稿ステータスを更新しました"}
-
-@router.get("/posts/{post_id}", response_model=AdminPostDetailResponse)
-def get_post(
-    post_id: str,
-    db: Session = Depends(get_db),
-    # current_admin: Users = Depends(get_current_admin_user)
-):
-    """投稿詳細を取得"""
-    
-    post_data = get_post_by_id(db, post_id)
-
-    # メディアアセットの情報からkindが3,4,5のものはpresign_getを呼び出し、urlを取得
-    CDN_URL = getenv("CDN_BASE_URL", "")
-    for media_asset_id, media_asset_data in post_data['media_assets'].items():
-        if media_asset_data['kind'] in [MediaAssetKind.IMAGES, MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
-            presign_url = presign_get("ingest", media_asset_data['storage_key'])
-            post_data['media_assets'][media_asset_id]['storage_key'] = presign_url['download_url']
-        elif media_asset_data['kind'] in [MediaAssetKind.OGP, MediaAssetKind.THUMBNAIL]:
-            post_data['media_assets'][media_asset_id]['storage_key'] = CDN_URL + "/" + media_asset_data['storage_key']
-
-    if not post_data:
-        raise HTTPException(status_code=404, detail="投稿が見つかりません")
-    
-    return AdminPostDetailResponse(**post_data)
 
 
 @router.get("/sales", response_model=List[AdminSalesData])
@@ -397,7 +254,7 @@ def get_sales_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """売上データを取得"""
     
@@ -427,7 +284,7 @@ def get_sales_report(
     end_date: str,
     format: str = Query("csv", regex="^(csv|json)$"),
     db: Session = Depends(get_db),
-    current_admin: Users = Depends(get_current_admin_user)
+    current_admin: Admins = Depends(get_current_admin_user)
 ):
     """売上レポートを出力"""
     

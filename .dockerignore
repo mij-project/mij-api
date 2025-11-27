@@ -1,0 +1,68 @@
+# Python キャッシュ・一時ファイル
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+
+# 仮想環境
+venv/
+env/
+.venv/
+
+# Alembic マイグレーションキャッシュ
+migrations/__pycache__/
+migrations/versions/__pycache__/
+
+# テスト関連
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+*.log
+
+# IDE 設定ファイル
+.vscode/
+.idea/
+*.swp
+
+# OS生成ファイル
+.DS_Store
+Thumbs.db
+
+# Git関連
+.git/
+.gitignore
+
+# Docker関連（ビルド時に不要）
+Dockerfile
+docker-compose.yml
+*.md
+
+# キャッシュ類
+cache/
+tmp/
+logs/
+*.log
+
+# メディアや静的ファイル（S3で管理する場合）
+uploads/
+media/
+static/
+
+# Secretsや環境変数ファイル
+.env
+.env.*
+*.key
+*.pem
+
+# Node関連（管理画面を同レポで管理する場合）
+node_modules/
+dist/
+build/
+
+# バイトコード・パッケージ
+*.egg-info/
+.eggs/
+MANIFEST

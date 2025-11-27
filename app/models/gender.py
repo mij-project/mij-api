@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .creator_type import CreatorType
 
 class Gender(Base):
+    """性別 (一般アダルト,ゲイ・BL,レズ)"""
     __tablename__ = "gender"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

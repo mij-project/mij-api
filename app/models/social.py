@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from .posts import Posts
 
 class Follows(Base):
+    """フォロー"""
     __tablename__ = "follows"
 
     follower_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
@@ -24,6 +25,7 @@ class Follows(Base):
     creator: Mapped["Users"] = relationship("Users", foreign_keys=[creator_user_id])
 
 class Likes(Base):
+    """いいね"""
     __tablename__ = "likes"
 
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
@@ -34,6 +36,7 @@ class Likes(Base):
     post: Mapped["Posts"] = relationship("Posts")
 
 class Comments(Base):
+    """コメント"""
     __tablename__ = "comments"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -52,6 +55,7 @@ class Comments(Base):
     replies: Mapped[list["Comments"]] = relationship("Comments", back_populates="parent_comment")
 
 class Bookmarks(Base):
+    """ブックマーク"""
     __tablename__ = "bookmarks"
 
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)

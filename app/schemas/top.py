@@ -1,43 +1,50 @@
 from pydantic import BaseModel
 from typing import List, Optional
 
-class GenreResponse(BaseModel):
+class CategoryResponse(BaseModel):
     id: str
     name: str
     slug: str
     post_count: int
 
+class PostCreatorResponse(BaseModel):
+    name: str
+    username: str
+    avatar: Optional[str] = None
+    verified: bool
+
 class RankingPostResponse(BaseModel):
     id: str
-    description: str
-    thumbnail_url: Optional[str] = None
-    likes_count: int
-    creator_name: str
-    username: str
-    creator_avatar_url: Optional[str] = None
-    rank: int
+    post_type: int
+    title: str
+    thumbnail: Optional[str] = None
+    likes: int
     duration: Optional[str] = None
+    rank: int
+    creator: PostCreatorResponse
+
 
 class CreatorResponse(BaseModel):
     id: str
     name: str
     username: str
-    avatar_url: Optional[str] = None
-    followers_count: int
+    avatar: Optional[str] = None
+    followers: int
     rank: Optional[int] = None
-
+    follower_ids: Optional[List[str]] = None
+    likes: Optional[int] = None
+    
 class RecentPostResponse(BaseModel):
     id: str
-    description: str
-    thumbnail_url: Optional[str] = None
-    creator_name: str
-    username: str
-    creator_avatar_url: Optional[str] = None
+    post_type: int
+    title: str
+    thumbnail: Optional[str] = None
+    likes: int
     duration: Optional[str] = None
-    likes_count: int = 0
+    creator: PostCreatorResponse
 
 class TopPageResponse(BaseModel):
-    genres: List[GenreResponse]
+    categories: List[CategoryResponse]
     ranking_posts: List[RankingPostResponse]
     top_creators: List[CreatorResponse]
     new_creators: List[CreatorResponse]

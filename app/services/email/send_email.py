@@ -12,7 +12,8 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from app.core.config import settings  # pydantic Settings想定
 import os
-
+from app.core.logger import Logger
+logger = Logger.get_logger()
 # --------------------------
 # Jinja2
 # --------------------------
@@ -67,7 +68,7 @@ def _build_mime(
     return msg.as_string()
 
 def _from_header() -> str:
-    display = getattr(settings, "MAIL_FROM_NAME", "") or "MIJ Fans"
+    display = getattr(settings, "MAIL_FROM_NAME", "") or "mijfans"
     return formataddr((display, settings.MAIL_FROM))
 
 def _email_tags(base: dict[str, str] | None = None) -> list[dict[str, str]]:
@@ -186,6 +187,189 @@ def send_email_verification(to: str, verify_url: str, display_name: str | None =
         tags={"category": "verify"},
     )
 
+def send_identity_approval_email(to: str, display_name: str | None = None) -> None:
+    """身分証明承認完了メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】身分証明書の審査が完了しました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+        "reapply_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/creator/request",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="approval_complete.html",
+        ctx=ctx,
+        tags={"category": "identity_approval"},
+    )
+
+def send_identity_rejection_email(to: str, display_name: str | None = None, notes: str | None = None) -> None:
+    """身分証明拒否通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】身分証明書の審査結果について"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "notes": notes or "申請内容を再度ご確認ください。",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+        "reapply_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/creator/request",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="approval_complete.html",
+        ctx=ctx,
+        tags={"category": "identity_rejection"},
+    )
+
+def send_password_reset_email(to: str, reset_url: str, display_name: str | None = None) -> None:
+    """パスワードリセットメール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】パスワードリセットのご案内"
+    ctx = {
+        "name": display_name or "",
+        "reset_url": reset_url,
+        "brand": "mijfans",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+        "expire_hours": os.getenv("PASSWORD_RESET_TTL_HOURS", "1"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="password_reset.html",
+        ctx=ctx,
+        tags={"category": "password_reset"},
+    )
+
+def send_post_approval_email(to: str, display_name: str | None = None, post_id: str | None = None) -> None:
+    """投稿承認完了メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】投稿が承認されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "post_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/post/detail?post_id={post_id}",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="post_notification.html",
+        ctx=ctx,
+        tags={"category": "post_approval"},
+    )
+
+def send_post_rejection_email(to: str, display_name: str | None = None, notes: str | None = None, post_id: str | None = None) -> None:
+    """投稿拒否通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】投稿が拒否されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "notes": notes or "申請内容を再度ご確認ください。",
+        "post_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/post/{post_id}",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="post_notification.html",
+        ctx=ctx,
+        tags={"category": "post_rejection"},
+    )
+
+def send_profile_image_approval_email(to: str, display_name: str | None = None) -> None:
+    """プロフィール画像承認完了メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】プロフィール画像が承認されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "profile_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="profile_notification.html",
+        ctx=ctx,
+        tags={"category": "profile_image_approval"},
+    )
+
+def send_profile_image_rejection_email(to: str, display_name: str | None = None, notes: str | None = None) -> None:
+    """プロフィール画像拒否通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】プロフィール画像が拒否されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "notes": notes or "申請内容を再度ご確認ください。",
+        "profile_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="profile_notification.html",
+        ctx=ctx,
+        tags={"category": "profile_image_rejection"},
+    )
+
+def send_follow_notification_email(to: str, name: str | None = None, username: str | None = None, redirect_url: str | None = None) -> None:
+    """フォロー通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】フォロー通知"
+    ctx = {
+        "name": name or "", 
+        "brand": "mijfans",
+        "username": username or "",
+        "redirect_url": redirect_url or os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="follow_notification.html",
+        ctx=ctx,
+        tags={"category": "follow_notification"},
+    )
+
+def send_like_notification_email(to: str, name: str | None = None, username: str | None = None, redirect_url: str | None = None) -> None:
+    """いいね通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】いいね通知"
+    ctx = {
+        "name": name or "",
+        "brand": "mijfans",
+        "username": username or "",
+        "redirect_url": redirect_url or os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="like_notification.html",
+        ctx=ctx,
+        tags={"category": "follow_notification"},
+    )
+
 # --------------------------
 # 実体：バックエンド切替
 # --------------------------
@@ -205,4 +389,4 @@ def _send_backend(to: str, subject: str, html: str, tags: dict[str, str] | None 
             raise RuntimeError(f"Unsupported EMAIL_BACKEND: {backend}")
     except Exception as e:
         # 必要に応じて構造化ログへ
-        print(f"[email] send failed backend={backend} to={to} err={e}")
+        logger.error(f"[email] send failed backend={backend} to={to} err={e}")

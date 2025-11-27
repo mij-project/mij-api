@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .orders import OrderItems
 
 class Entitlements(Base):
+    """視聴権利 (ユーザーと投稿の多対多)"""
     __tablename__ = "entitlements"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

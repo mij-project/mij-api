@@ -1,8 +1,21 @@
+import os
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.constants.enums import IdentityKind
-from datetime import datetime
+from datetime import datetime, timezone
+from sqlalchemy import desc, asc
+from sqlalchemy.orm import joinedload
+from app.models.notifications import Notifications
+from app.models.user import Users
+from app.models.profiles import Profiles
+from typing import Optional, List
+from app.constants.messages import IdentityVerificationMessage
+from app.schemas.notification import NotificationType
+from app.core.logger import Logger
+from app.constants.enums import VerificationStatus, AccountType
+logger = Logger.get_logger()
+
 
 def create_identity_verification(db: Session, user_id: str, status: int) -> IdentityVerifications:
     """
@@ -89,3 +102,182 @@ def update_identity_verification(db: Session, verification_id: str, status: int,
     db.commit()
     db.refresh(db_verification)
     return db_verification
+
+
+def get_identity_verifications_paginated(
+    db: Session,
+    page: int = 1,
+    limit: int = 20,
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    sort: str = "created_at_desc"
+) -> tuple[List[IdentityVerifications], int]:
+    """
+    ページネーション付き身分証明審査一覧を取得
+    
+    Args:
+        db: データベースセッション
+        page: ページ番号
+        limit: 1ページあたりの件数
+        search: 検索クエリ
+        status: ステータスフィルタ
+        sort: ソート順
+        
+    Returns:
+        tuple[List[IdentityVerifications], int]: (審査リスト, 総件数)
+    """
+    skip = (page - 1) * limit
+    
+    query = db.query(IdentityVerifications).join(Users).options(joinedload(IdentityVerifications.user))
+    
+    if search:
+        query = query.join(Profiles).filter(
+            (Profiles.username.ilike(f"%{search}%")) |
+            (Users.email.ilike(f"%{search}%"))
+        )
+    
+    if status:
+        status_map = {"pending": 1, "approved": 2, "rejected": 3}
+        query = query.filter(IdentityVerifications.status == status_map.get(status, 1))
+    
+    # ソート処理
+    if sort == "created_at_desc":
+        query = query.order_by(desc(IdentityVerifications.checked_at))
+    elif sort == "created_at_asc":
+        query = query.order_by(asc(IdentityVerifications.checked_at))
+    elif sort == "user_name_asc":
+        query = query.join(Profiles).order_by(asc(Profiles.username))
+    elif sort == "user_name_desc":
+        query = query.join(Profiles).order_by(desc(Profiles.username))
+    else:
+        query = query.order_by(desc(IdentityVerifications.checked_at))
+    
+    total = query.count()
+    verifications = query.offset(skip).limit(limit).all()
+    
+    return verifications, total
+
+def update_identity_verification_status(db: Session, verification_id: str, status: str) -> bool:
+    """
+    身分証明のステータスを更新
+
+    Args:
+        db: データベースセッション
+        verification_id: 審査ID
+        status: 新しいステータス (approved/rejected)
+
+    Returns:
+        bool: 更新成功フラグ
+    """
+    try:
+        verification = db.query(IdentityVerifications).filter(
+            IdentityVerifications.id == verification_id
+        ).first()
+        if not verification or verification.status != VerificationStatus.WAITING:
+            return False
+
+        # 審査ステータス更新
+        status_map = {
+            "approved": VerificationStatus.APPROVED,
+            "rejected": VerificationStatus.REJECTED
+        }
+        verification.status = status_map[status]
+        verification.updated_at = datetime.now(timezone.utc)
+
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Update identity verification status error: {e}")
+        db.rollback()
+        return False
+
+
+def approve_identity_verification(
+    db: Session,
+    verification_id: str,
+    admin_id: str,
+    notes: Optional[str] = None
+) -> Optional[IdentityVerifications]:
+    """
+    身分証明を承認する
+
+    Args:
+        db: データベースセッション
+        verification_id: 審査ID
+        admin_id: 承認した管理者のID
+        notes: 審査メモ
+
+    Returns:
+        IdentityVerifications: 更新された審査情報、失敗時はNone
+    """
+    try:
+        verification = db.query(IdentityVerifications).filter(
+            IdentityVerifications.id == verification_id
+        ).first()
+
+        if not verification or verification.status != VerificationStatus.WAITING:
+            return None
+
+        # ユーザーのroleを2 (creator)に更新
+        user = db.query(Users).filter(Users.id == verification.user_id).first()
+        if user:
+            user.role = AccountType.CREATOR
+            user.is_identity_verified = True
+            user.identity_verified_at = datetime.now(timezone.utc)
+
+        # 審査情報を更新
+        verification.status = VerificationStatus.APPROVED # APPROVED
+        verification.approved_by = admin_id
+        verification.checked_at = datetime.now(timezone.utc)
+        if notes:
+            verification.notes = notes
+
+        db.commit()
+        db.refresh(verification)
+        return verification
+    except Exception as e:
+        logger.error(f"Approve identity verification error: {e}")
+        db.rollback()
+        return None
+
+
+def reject_identity_verification(
+    db: Session,
+    verification_id: str,
+    admin_id: str,
+    notes: Optional[str] = None
+) -> Optional[IdentityVerifications]:
+    """
+    身分証明を拒否する
+
+    Args:
+        db: データベースセッション
+        verification_id: 審査ID
+        admin_id: 拒否した管理者のID
+        notes: 拒否理由
+
+    Returns:
+        IdentityVerifications: 更新された審査情報、失敗時はNone
+    """
+    try:
+        verification = db.query(IdentityVerifications).filter(
+            IdentityVerifications.id == verification_id
+        ).first()
+
+        if not verification or verification.status != 1:  # 1 = WAITING (承認待ち)
+            return None
+
+        # 審査情報を更新
+        verification.status = VerificationStatus.REJECTED # REJECTED
+        verification.approved_by = admin_id
+        verification.checked_at = datetime.now(timezone.utc)
+        if notes:
+            verification.notes = notes
+
+        db.commit()
+        db.refresh(verification)
+        return verification
+    except Exception as e:
+        logger.error(f"Reject identity verification error: {e}")
+        db.rollback()
+        return None

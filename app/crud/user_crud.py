@@ -4,13 +4,14 @@ from app.models.user import Users
 from app.models.profiles import Profiles
 from app.schemas.user import UserCreate
 from app.core.security import hash_password
-from sqlalchemy import select, desc, func, update
+from sqlalchemy import select, desc, func, update, asc, case
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone
 from uuid import UUID
 from app.constants.enums import (
-    AccountType, 
-    AccountStatus
+    AccountType,
+    AccountStatus,
+    PlanStatus
 )
 from app.crud.profile_crud import get_profile_by_username
 from app.models.posts import Posts
@@ -20,6 +21,9 @@ from app.models.media_assets import MediaAssets
 from app.models.social import Likes, Follows
 from app.models.prices import Prices
 from app.constants.enums import PostStatus, MediaAssetKind, PlanStatus
+import os
+
+BASE_URL = os.getenv("CDN_BASE_URL")
 
 def check_email_exists(db: Session, email: str) -> bool:
     """
@@ -66,6 +70,40 @@ def get_user_by_email(db: Session, email: str) -> Users:
             .where(Users.email == email, Users.is_email_verified == True))
         )
 
+def get_plan_details(db: Session, plan_id: UUID) -> dict:
+    """
+    プランの詳細情報を取得（投稿数、サムネイル）
+    """
+    # プランに紐づく投稿のサムネイルを取得（最大3枚）
+    thumbnails_query = (
+        db.query(MediaAssets.storage_key)
+        .join(Posts, MediaAssets.post_id == Posts.id)
+        .join(PostPlans, Posts.id == PostPlans.post_id)
+        .filter(PostPlans.plan_id == plan_id)
+        .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == PostStatus.APPROVED)
+        .limit(3)
+        .all()
+    )
+
+    thumbnails = [f"{BASE_URL}/{thumb.storage_key}" for thumb in thumbnails_query]
+
+    # プランに紐づく投稿数を取得
+    post_count = (
+        db.query(func.count(Posts.id))
+        .join(PostPlans, Posts.id == PostPlans.post_id)
+        .filter(PostPlans.plan_id == plan_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == PostStatus.APPROVED)
+        .scalar()
+    )
+
+    return {
+        "thumbnails": thumbnails,
+        "post_count": post_count or 0
+    }
+
 def get_user_profile_by_username(db: Session, username: str) -> dict:
     """
     ユーザー名によるユーザープロフィール取得（関連データ含む）
@@ -74,59 +112,104 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
 
     if not profile:
         return None
-    
+
     user = get_user_by_id(db, profile.user_id)
     
+    # サムネイルのMediaAssetsを取得するサブクエリ
+    thumbnail_subq = (
+        db.query(
+            MediaAssets.post_id,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+        .subquery()
+    )
+
+    # メインビデオのduration_secを取得するサブクエリ
+    video_duration_subq = (
+        db.query(
+            MediaAssets.post_id,
+            MediaAssets.duration_sec.label('duration_sec')
+        )
+        .filter(MediaAssets.kind == MediaAssetKind.MAIN_VIDEO)
+        .subquery()
+    )
+
     posts = (
         db.query(
             Posts,
             func.count(Likes.post_id).label('likes_count'),
-            MediaAssets.storage_key.label('thumbnail_key')
+            thumbnail_subq.c.thumbnail_key,
+            video_duration_subq.c.duration_sec,
+            Prices.price.label('price'),
+            Prices.currency.label('currency')
         )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(thumbnail_subq, Posts.id == thumbnail_subq.c.post_id)
+        .outerjoin(video_duration_subq, Posts.id == video_duration_subq.c.post_id)
+        .outerjoin(Prices, (Posts.id == Prices.post_id) & (Prices.is_active == True))
         .filter(Posts.creator_user_id == user.id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
-        .group_by(Posts.id, MediaAssets.storage_key)  # GROUP BY句を追加
+        .group_by(Posts.id, thumbnail_subq.c.thumbnail_key, video_duration_subq.c.duration_sec, Prices.price, Prices.currency)
         .order_by(desc(Posts.created_at))
         .all()
     )
     
+    # プラン一覧を取得（typeはプランの種類：1=通常、2=おすすめ）
     plans = (
-        db.query(
-            Plans.id.label('id'),
-            Plans.name.label('name'),
-            Plans.description.label('description'),
-            Prices.price.label('price'),
-            Prices.currency.label('currency')
-        )
-        .join(Prices, Plans.id == Prices.plan_id)
+        db.query(Plans)
         .filter(Plans.creator_user_id == user.id)
-        .filter(Plans.type == PlanStatus.PLAN)
         .filter(Plans.deleted_at.is_(None))
-        .group_by(Plans.id, Prices.price, Prices.currency)
+        .order_by(
+            case((Plans.type == 2, 0), else_=1),  # typeが2のものを優先
+            asc(Plans.display_order),
+            asc(Plans.created_at)
+        )
         .all()
     )
     
+    # 単品購入の投稿を取得（Pricesテーブルに紐づく投稿）
+    # サムネイル用サブクエリ（再利用）
+    thumbnail_subq_purchase = (
+        db.query(
+            MediaAssets.post_id,
+            MediaAssets.storage_key.label('thumbnail_key')
+        )
+        .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+        .subquery()
+    )
+
+    # ビデオduration用サブクエリ（再利用）
+    video_duration_subq_purchase = (
+        db.query(
+            MediaAssets.post_id,
+            MediaAssets.duration_sec.label('duration_sec')
+        )
+        .filter(MediaAssets.kind == MediaAssetKind.MAIN_VIDEO)
+        .subquery()
+    )
+
     individual_purchases = (
         db.query(
-            Posts, 
+            Posts,
             func.count(Likes.post_id).label('likes_count'),
-            MediaAssets.storage_key.label('thumbnail_key')
+            thumbnail_subq_purchase.c.thumbnail_key,
+            Prices.price.label('price'),
+            Prices.currency.label('currency'),
+            video_duration_subq_purchase.c.duration_sec
         )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
-        .join(PostPlans, Posts.id == PostPlans.post_id)  # PostPlansテーブルを通じて結合
-        .join(Plans, PostPlans.plan_id == Plans.id)  # Plansテーブルと結合
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
+        .join(Prices, Posts.id == Prices.post_id)  # Pricesテーブルと結合
+        .outerjoin(thumbnail_subq_purchase, Posts.id == thumbnail_subq_purchase.c.post_id)
+        .outerjoin(video_duration_subq_purchase, Posts.id == video_duration_subq_purchase.c.post_id)
         .filter(Posts.creator_user_id == user.id)
         .filter(Posts.deleted_at.is_(None))
-        .filter(Plans.type == PlanStatus.SINGLE)  # typeが1（SINGLE）のもののみ
-        .filter(Plans.deleted_at.is_(None))  # 削除されていないプランのみ
+        .filter(Prices.is_active == True)  # 有効な価格設定のみ
         .filter(Posts.status == PostStatus.APPROVED)
-        .group_by(Posts.id, MediaAssets.storage_key)
+        .group_by(Posts.id, thumbnail_subq_purchase.c.thumbnail_key, Prices.price, Prices.currency, video_duration_subq_purchase.c.duration_sec)
         .order_by(desc(Posts.created_at))
         .all()
     )
@@ -218,12 +301,38 @@ def update_user(db: Session, user_id: str, profile_name: str) -> Users:
     db.flush()
     return user
 
-def update_user_email_verified_at(db: Session, user_id: str) -> Users:
+def update_user_phone_verified_at(db: Session, user_id: str) -> Users:
+    """
+    ユーザーの電話番号を検証済みに更新
+    """
+    # まず更新を実行
+    db.query(Users).filter(Users.id==user_id).update({
+        "is_phone_verified": True, 
+        "phone_verified_at": datetime.now(timezone.utc)
+    })
+    
+    # 更新されたオブジェクトを取得して返す
+    return db.query(Users).filter(Users.id==user_id).first()
+
+def update_user_identity_verified_at(db: Session, user_id: str, is_identity_verified: bool, identity_verified_at: datetime) -> Users:
+    """
+    ユーザーの身分証明を検証済みに更新
+    """
+    db.query(Users).filter(Users.id==user_id).update({
+        "is_identity_verified": is_identity_verified,
+        "identity_verified_at": identity_verified_at
+    })
+    db.commit()
+    return db.query(Users).filter(Users.id==user_id).first()
+
+def update_user_email_verified_at(db: Session, user_id: str, offical_flg: bool) -> Users:
     """
     ユーザーのメールアドレスを検証済みに更新
     """
     db.execute(update(Users).where(Users.id==user_id).values(
-        is_email_verified=True, email_verified_at=datetime.utcnow()
+        is_email_verified=True, 
+        email_verified_at=datetime.now(timezone.utc),
+        offical_flg=offical_flg
     ))
 
 def create_user_by_x(db: Session, user: Users) -> Users:

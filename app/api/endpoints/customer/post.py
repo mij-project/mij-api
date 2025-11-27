@@ -1,23 +1,35 @@
+import re
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
-from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse
-from app.constants.enums import PostVisibility, PostType, PlanStatus, PriceType
-from app.crud.post_crud import create_post, get_post_detail_by_id
+from app.constants.enums import PostStatus
+from app.models.user import Users
+from app.schemas.post import PostCreateRequest, PostResponse, NewArrivalsResponse, PostUpdateRequest, PostOGPResponse
+from app.constants.enums import PostVisibility, PostType, PlanStatus, PriceType, MediaAssetKind
+from app.crud.post_crud import create_post, get_post_detail_by_id, update_post, get_post_ogp_image_url, get_post_ogp_data
 from app.crud.plan_crud import create_plan
-from app.crud.price_crud import create_price
-from app.crud.post_plans_crud import create_post_plan
+from app.crud.price_crud import create_price, delete_price_by_post_id
+from app.crud.post_plans_crud import create_post_plan, delete_plan_by_post_id
 from app.crud.tags_crud import exit_tag, create_tag
-from app.crud.post_tags_crud import create_post_tag
-from app.crud.post_categories_crud import create_post_category
-from app.crud.top_crud import get_recent_posts
+from app.crud.post_tags_crud import create_post_tag, delete_post_tags_by_post_id
+from app.crud.post_categories_crud import create_post_category, delete_post_categories_by_post_id
+from app.crud.post_crud import get_recent_posts
+from app.crud.entitlements_crud import check_entitlement
+from app.crud.generation_media_crud import get_generation_media_by_post_id, create_generation_media
 from app.models.tags import Tags
+from app.services.s3.image_screening import generate_ogp_image
+from app.services.s3.client import upload_ogp_image_to_s3
+from app.services.s3.keygen import post_media_image_key
 from typing import List
+from app.constants.enums import GenerationMediaKind
 import os
 from os import getenv
+from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 router = APIRouter()
 
 # PostTypeの文字列からenumへのマッピングを定義
@@ -28,6 +40,8 @@ POST_TYPE_MAPPING = {
 
 
 BASE_URL = getenv("CDN_BASE_URL")
+MEDIA_CDN_URL = os.getenv("MEDIA_CDN_URL")
+CDN_BASE_URL = os.getenv("CDN_BASE_URL")
 
 @router.post("/create", response_model=PostResponse)
 async def create_post_endpoint(
@@ -35,68 +49,106 @@ async def create_post_endpoint(
     user = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
+    """投稿を作成する"""
     try:
         # 可視性を判定
         visibility = _determine_visibility(post_create.single, post_create.plan)
         
-        # 投稿データを準備
-        post_data = {
-            "creator_user_id": user.id,
-            "description": post_create.description,
-            "scheduled_at": post_create.formattedScheduledDateTime if post_create.scheduled else None,
-            "expiration_at": post_create.expirationDate if post_create.expiration else None,
-            "visibility": visibility,
-            "post_type": POST_TYPE_MAPPING.get(post_create.post_type),
-        }
+        # 関連オブジェクトを初期化
+        price = None
+        plan_posts = []
+        category_posts = []
+        tag_posts = []
         
         # 投稿を作成
-        post = create_post(db, post_data)
+        post = _create_post(db, post_create, user.id, visibility)
         
-        # 単品販売の設定
-        individual_plan = None
-        individual_price = None
+        # 単品販売の場合、価格を登録
         if post_create.single:
-            individual_plan, individual_price = _create_individual_plan(
-                db, user.id, post_create.price
-            )
-        
-        # プランを投稿に紐づけ
-        if post_create.plan or post_create.single:
-            _link_plans_to_post(
-                db, post.id, post_create.plan_ids, 
-                individual_plan.id if individual_plan else None
-            )
+            price = _create_price(db, post.id, post_create.price)
+
+        # プランの場合、プランを登録
+        if post_create.plan:
+            plan_posts = _create_plan(db, post.id, post_create.plan_ids)
         
         # カテゴリを投稿に紐づけ
-        category_posts = []
         if post_create.category_ids:
             category_posts = _create_post_categories(db, post.id, post_create.category_ids)
         
         # タグを投稿に紐づけ
-        post_tag = None
         if post_create.tags:
-            post_tag = _create_post_tag(db, post.id, post_create.tags)
+            tag_posts = _create_post_tag(db, post.id, post_create.tags)
         
         # データベースをコミット
         db.commit()
-        db.refresh(post)
         
-        # 必要に応じて他のオブジェクトもリフレッシュ
-        if individual_plan:
-            db.refresh(individual_plan)
-        if individual_price:
-            db.refresh(individual_price)
-        if category_posts:
-            for category_post in category_posts:
-                db.refresh(category_post)
-        if post_tag:
-            db.refresh(post_tag)
+        # オブジェクトをリフレッシュ
+        _refresh_related_objects(
+            db, post, price, plan_posts, category_posts, tag_posts
+        )
         
         return post
         
     except Exception as e:
-        print("投稿作成エラーが発生しました", e)
         db.rollback()
+        logger.error("投稿作成エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update")
+async def update_post_endpoint(
+    request_data: PostUpdateRequest,
+    current_user: Users = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """投稿を更新する"""
+    try:
+        # 投稿を更新
+        # 可視性を判定
+        visibility = _determine_visibility(request_data.single, request_data.plan)
+        
+        # 関連オブジェクトを初期化
+        price = None
+        plan_posts = []
+        category_posts = []
+        tag_posts = []
+        
+        # 投稿を更新
+        post = _update_post(db, request_data, current_user.id, visibility)
+        
+        # 単品販売の場合、価格をデリートインサート
+        if request_data.single:
+            delete_price_by_post_id(db, request_data.post_id)
+            price = _create_price(db, request_data.post_id, request_data.price)
+
+        # プランの場合、プランをデリートインサート
+        if request_data.plan:
+            delete_plan_by_post_id(db, request_data.post_id)
+            plan_posts = _create_plan(db, request_data.post_id, request_data.plan_ids)
+
+        
+        # カテゴリをデリートインサート
+        if request_data.category_ids:
+            delete_post_categories_by_post_id(db, request_data.post_id)
+            category_posts = _create_post_categories(db, request_data.post_id, request_data.category_ids)
+
+        
+        # タグをデリートインサート
+        if request_data.tags:
+            delete_post_tags_by_post_id(db, request_data.post_id)
+            tag_posts = _create_post_tag(db, request_data.post_id, request_data.tags)
+
+        
+        # データベースをコミット
+        db.commit()
+        
+        # オブジェクトをリフレッシュ
+        _refresh_related_objects(
+            db, post, price, plan_posts, category_posts, tag_posts
+        )
+        
+        return post
+    except Exception as e:
+        logger.error("投稿更新エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/detail")
@@ -108,63 +160,38 @@ async def get_post_detail(
     try:
         # CRUD関数を使用して投稿詳細を取得
         user_id = user.id if user else None
+
         post_data = get_post_detail_by_id(db, post_id, user_id)
-        
+
         if not post_data:
             raise HTTPException(status_code=404, detail="投稿が見つかりません")
-        
-        # 環境変数から設定を取得
-        media_cdn_url = os.getenv("MEDIA_CDN_URL", "")
-        cdn_base_url = os.getenv("CDN_BASE_URL", "")
-        
-        # レスポンス用のデータを構築
-        video_url = None
-        if post_data["video_rendition"]:
-            video_url = f"{media_cdn_url}/{post_data['video_rendition']}"
-        
-        thumbnail_url = None
-        if post_data["thumbnail_key"]:
-            thumbnail_url = f"{cdn_base_url}/{post_data['thumbnail_key']}"
-        
-        creator_avatar = None
-        if post_data["creator_profile"] and post_data["creator_profile"].avatar_url:
-            creator_avatar = f"{cdn_base_url}/{post_data['creator_profile'].avatar_url}"
-        
-        
+
+        # クリエイター情報を整形
+        creator_info = _format_creator_info(post_data["creator"], post_data["creator_profile"])
+
+        # メディア情報を整形
+        media_info, thumbnail_key = _format_media_info(
+            post_data["media_assets"],
+            post_data["is_entitlement"],
+            post_data["price"],
+        )
+
         # カテゴリ情報を整形
-        categories_data = []
-        if post_data["categories"]:
-            categories_data = [
-                {
-                    "id": str(category.id),
-                    "name": category.name,
-                    "slug": category.slug
-                }
-                for category in post_data["categories"]
-            ]
-        
+        categories_data = _format_categories_info(post_data["categories"])
+
+        # 販売情報を整形
+        sale_info = _format_sale_info(post_data["price"], post_data["plans"])
+
+        # 投稿詳細を整形
         post_detail = {
             "id": str(post_data["post"].id),
-            "title": post_data["post"].description or "無題",
+            "post_type": post_data["post"].post_type,
             "description": post_data["post"].description,
-            "purchased": post_data["purchased"],
-            "video_url": video_url,
-            "thumbnail": thumbnail_url,
-            "main_video_duration": post_data["main_video_duration"],
-            "sample_video_duration": post_data["sample_video_duration"],
-            "views": 0,
-            "likes": post_data["likes_count"],
-            "creator": {
-                "name": post_data["creator_profile"].username if post_data["creator_profile"] else post_data["creator"].email,
-                "profile_name": post_data["creator"].profile_name if post_data["creator_profile"] else post_data["creator"].email,
-                "avatar": creator_avatar,
-                "verified": True
-            },
-            "single": post_data["single"],
-            "subscription": post_data["subscription"],
+            "thumbnail_key": thumbnail_key,
+            "creator": creator_info,
             "categories": categories_data,
-            "created_at": post_data["post"].created_at.isoformat(),
-            "updated_at": post_data["post"].updated_at.isoformat()
+            "media_info": media_info,
+            "sale_info": sale_info,
         }
         
         return post_detail
@@ -172,7 +199,7 @@ async def get_post_detail(
     except HTTPException:
         raise
     except Exception as e:
-        print("投稿詳細取得エラーが発生しました", e)
+        logger.error("投稿詳細取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/new-arrivals" , response_model=List[NewArrivalsResponse])
@@ -192,9 +219,29 @@ async def get_new_arrivals(
             likes_count=post.likes_count or 0
         ) for post in recent_posts]
     except Exception as e:
-        print("新着投稿取得エラーが発生しました", e)
+        logger.error("新着投稿取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/{post_id}/ogp-image", response_model=PostOGPResponse)
+async def get_post_ogp_image(
+    post_id: str,
+    db: Session = Depends(get_db)
+):
+    """投稿のOGP情報を取得する（Lambda@Edge用）"""
+    try:
+        # OGP情報を取得（投稿詳細 + クリエイター情報 + OGP画像）
+        ogp_data = get_post_ogp_data(db, post_id)
+
+        if not ogp_data:
+            raise HTTPException(status_code=404, detail="投稿が見つかりません")
+
+        return ogp_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("OGP画像URL取得エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # utils
 def _determine_visibility(single: bool, plan: bool) -> int:
@@ -208,37 +255,17 @@ def _determine_visibility(single: bool, plan: bool) -> int:
     else:
         return PostVisibility.SINGLE  # デフォルト
 
-def _create_individual_plan(db: Session, user_id: str, price: int):
-    """単品販売用のプランと価格を作成する"""
-    plan_data = {
+def _create_post(db: Session, post_data: dict, user_id: str, visibility: int):
+    """投稿を作成する"""
+    post_data = {
         "creator_user_id": user_id,
-        "name": "単品販売",
-        "description": "単品販売",
-        "type": PlanStatus.SINGLE,
+        "description": post_data.description,
+        "scheduled_at": post_data.formattedScheduledDateTime if post_data.scheduled else None,
+        "expiration_at": post_data.expirationDate if post_data.expiration else None,
+        "visibility": visibility,
+        "post_type": POST_TYPE_MAPPING.get(post_data.post_type),
     }
-    plan = create_plan(db, plan_data)
-    
-    price_data = {
-        "plan_id": plan.id,
-        "type": PriceType.SINGLE,
-        "currency": "JPY",
-        "price": price,
-    }
-    price_obj = create_price(db, price_data)
-    
-    return plan, price_obj
-
-def _link_plans_to_post(db: Session, post_id: str, plan_ids: list, individual_plan_id: str = None):
-    """投稿にプランを紐づける"""
-    if individual_plan_id:
-        plan_ids.append(individual_plan_id)
-    
-    for plan_id in plan_ids:
-        plan_post_data = {
-            "post_id": post_id,
-            "plan_id": plan_id,
-        }
-        create_post_plan(db, plan_post_data)
+    return create_post(db, post_data)
 
 def _create_post_categories(db: Session, post_id: str, category_ids: list):
     """投稿にカテゴリを紐づける"""
@@ -272,3 +299,160 @@ def _create_post_tag(db: Session, post_id: str, tag_name: str):
         "tag_id": tag.id,
     }
     return create_post_tag(db, post_tag_data)
+
+def _update_post(db: Session, request_data: PostUpdateRequest, user_id: str, visibility: int):
+    """投稿を更新する"""
+    post_data = {
+        "id": request_data.post_id,
+        "creator_user_id": user_id,
+        "description": request_data.description,
+        "scheduled_at": request_data.formattedScheduledDateTime if request_data.scheduled else None,
+        "expiration_at": request_data.expirationDate if request_data.expiration else None,
+        "visibility": visibility,
+        "status": PostStatus.RESUBMIT,
+        "reject_comments": "",
+    }
+    return update_post(db, post_data)
+
+
+# def _delete_post_categories(db: Session, post_id: str):
+#     """投稿に紐づくカテゴリを削除する"""
+#     delete_post_category(db, post_id)
+#     return True
+
+# def _delete_post_tags(db: Session, post_id: str):
+#     """投稿に紐づくタグを削除する"""
+#     delete_post_tag(db, post_id)
+#     return True
+
+# def _delete_post_plans(db: Session, post_id: str):
+#     """投稿に紐づくプランを削除する"""
+#     delete_post_plans(db, post_id)
+#     return True
+
+# def _delete_post_price(db: Session, post_id: str):
+#     """投稿に紐づく価格を削除する"""
+#     delete_price(db, post_id)
+#     return True
+
+def _refresh_related_objects(
+    db: Session, 
+    post, 
+    price=None, 
+    plan_posts=None, 
+    category_posts=None, 
+    tag_posts=None
+):
+    """関連オブジェクトをリフレッシュする"""
+    db.refresh(post)
+    
+    if price:
+        db.refresh(price)
+    
+    if plan_posts:
+        for plan_post in plan_posts:
+            db.refresh(plan_post)
+    
+    if category_posts:
+        for category_post in category_posts:
+            db.refresh(category_post)
+    
+    if tag_posts:
+        for tag_post in tag_posts:
+            db.refresh(tag_post)
+
+def _create_price(db: Session, post_id: str, price: int):
+    """投稿に価格を紐づける"""
+    
+    price_data = {
+        "post_id": post_id,
+        "type": PriceType.SINGLE,
+        "currency": "JPY",
+        "is_active": True,
+        "price": price,
+        "starts_at": datetime.now(timezone.utc),
+    }
+    return create_price(db, price_data)
+
+def _create_plan(db: Session, post_id: str, plan_ids: list):
+    """投稿にプランを紐づける"""
+    plan_post = []
+    for plan_id in plan_ids:
+        plan_post_data = {
+            "post_id": post_id,
+            "plan_id": plan_id,
+        }
+        plan_post.append(create_post_plan(db, plan_post_data))
+    return plan_post
+
+def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
+    """メディア情報を整形する。priceは今後の判定用に受け取る。"""
+    set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
+    set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
+
+    # 単品販売で価格が0の場合フラグを立てる
+    free_flg = True if price and price.price == 0 else False
+
+    if free_flg:
+        set_file_name = "_1080w.webp"
+
+
+    media_info = []
+    for media_asset in media_assets:
+        if media_asset.kind == MediaAssetKind.THUMBNAIL:
+            thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
+        elif media_asset.kind == MediaAssetKind.IMAGES:
+            media_info.append({
+                "kind": media_asset.kind,
+                "duration": media_asset.duration_sec,
+                "media_assets_id": media_asset.id,
+                "orientation": media_asset.orientation,
+                "post_id": media_asset.post_id,
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{set_file_name}"
+            })
+        elif media_asset.kind == set_media_kind:
+            media_info.append({
+                "kind": media_asset.kind,
+                "duration": media_asset.duration_sec,
+                "media_assets_id": media_asset.id,
+                "orientation": media_asset.orientation,
+                "post_id": media_asset.post_id,
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
+            })
+
+    return media_info, thumbnail_key
+
+def _format_creator_info(creator: dict, creator_profile: dict):
+    """クリエイター情報を整形する"""
+    return {
+        "user_id": str(creator.id),
+        "username": creator_profile.username if creator_profile else creator.email,
+        "profile_name": creator.profile_name if creator_profile else creator.email,
+        "avatar": f"{BASE_URL}/{creator_profile.avatar_url}" if creator_profile.avatar_url else None,
+    }
+
+def _format_categories_info(categories: list):
+    """カテゴリ情報を整形する"""
+    return [
+        {
+            "id": str(category.id),
+            "name": category.name,
+            "slug": category.slug
+        }
+        for category in categories
+    ]
+
+def _format_sale_info(price: dict, plans: list):
+    """販売情報を整形する"""
+    return {
+        "price": price.price if price else None,
+        "plans": [
+            {
+                "id": str(plan.id),
+                "name": plan.name,
+                "description": plan.description,
+                "price": plan.price
+            }
+            for plan in plans
+        ]
+    }

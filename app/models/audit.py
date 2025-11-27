@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .user import Users
 
 class AuditLogs(Base):
+    """監査ログ"""
     __tablename__ = "audit_logs"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

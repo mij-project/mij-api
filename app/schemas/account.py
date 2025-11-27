@@ -35,6 +35,15 @@ class ProfileInfo(BaseModel):
     avatar_url: Optional[str] = None
     cover_url: Optional[str] = None
 
+class ProfileEditInfo(BaseModel):
+    """プロフィール編集用の情報"""
+    profile_name: str
+    username: str
+    avatar_url: Optional[str] = None
+    cover_url: Optional[str] = None
+    bio: Optional[str] = None
+    links: Optional[dict] = None
+
 class SocialInfo(BaseModel):
     followers_count: int
     following_count: int
@@ -118,6 +127,8 @@ class PostCardResponse(BaseModel):
     duration: Optional[str] = None
     is_video: bool
     created_at: datetime
+    price: Optional[int] = None
+    currency: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -136,11 +147,16 @@ class AccountPostResponse(BaseModel):
     description: str
     thumbnail_url: Optional[str] = None
     likes_count: int
+    comments_count: int = 0
+    purchase_count: int = 0
     creator_name: str
     username: str
     creator_avatar_url: Optional[str] = None
     price: int
     currency: str
+    created_at: Optional[str] = None
+    duration: Optional[str] = None
+    is_video: bool = False
 
 class AccountPostStatusResponse(BaseModel):
     pending_posts: List[AccountPostResponse] = []
@@ -148,3 +164,66 @@ class AccountPostStatusResponse(BaseModel):
     unpublished_posts: List[AccountPostResponse] = []
     deleted_posts: List[AccountPostResponse] = []
     approved_posts: List[AccountPostResponse] = []
+
+class AccountMediaAsset(BaseModel):
+    """クリエイター用投稿詳細のメディアアセット情報"""
+    kind: int
+    storage_key: Optional[str] = None
+    status: int
+    reject_comments: Optional[str] = None
+    duration_sec: Optional[Decimal] = None
+    orientation: Optional[int] = None
+    sample_type: Optional[str] = None
+    sample_start_time: Optional[Decimal] = None
+    sample_end_time: Optional[Decimal] = None
+
+
+class PlanSummary(BaseModel):
+    """投稿に紐づくプランの簡易情報"""
+    id: str
+    name: Optional[str] = None
+
+
+class AccountPostDetailResponse(BaseModel):
+    """クリエイター用投稿詳細レスポンス"""
+    id: str
+    description: str
+    scheduled_at: Optional[str] = None
+    expiration_at: Optional[str] = None
+    reject_comments: Optional[str] = None
+    likes_count: int
+    comments_count: int
+    purchase_count: int
+    creator_name: str
+    username: str
+    creator_avatar_url: Optional[str] = None
+    price: int
+    currency: str
+    duration: Optional[str] = None
+    is_video: bool
+    post_type: Optional[int] = None  # 1=VIDEO, 2=IMAGE
+    status: int
+    visibility: int
+    # メディア情報
+    media_assets: Dict[str, AccountMediaAsset] = Field(default_factory=dict)
+    # カテゴリー・プラン情報
+    category_ids: List[str] = Field(default_factory=list)
+    tags: Optional[str] = None
+    plan_list: List[PlanSummary] = Field(default_factory=list)
+
+class AccountPostUpdateRequest(BaseModel):
+    """投稿更新リクエスト"""
+    description: Optional[str] = None
+    status: Optional[int] = None
+    visibility: Optional[int] = None
+    scheduled_at: Optional[str] = None
+
+class AccountPostUpdateResponse(BaseModel):
+    """投稿更新レスポンス"""
+    message: str
+    success: bool
+
+class AccountEmailSettingRequest(BaseModel):
+    type: int # 1: メールアドレス設定, 2: メールアドレス認証
+    email: Optional[str] = None
+    token: Optional[str] = None

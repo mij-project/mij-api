@@ -18,11 +18,15 @@ if TYPE_CHECKING:
     from .orders import Orders
     from .creator_type import CreatorType
     from .gender import Gender
-    from .post_moderation_events import PostModerationEvents
-    from .purchases import Purchases
     from .email_verification_tokens import EmailVerificationTokens
     from .conversation_messages import ConversationMessages
     from .conversation_participants import ConversationParticipants
+    from .sms_verifications import SMSVerifications
+    from .banners import Banners
+    from .events import UserEvents
+    from .companies import CompanyUsers
+    from .password_reset_token import PasswordResetToken
+    from .generation_media import GenerationMedia
 
 class Users(Base):
     __tablename__ = "users"
@@ -31,10 +35,15 @@ class Users(Base):
     profile_name: Mapped[Optional[str]] = mapped_column(CITEXT, unique=True, nullable=True)
     email: Mapped[Optional[str]] = mapped_column(CITEXT, unique=True, nullable=True)
     is_email_verified: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
+    is_phone_verified: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
+    is_identity_verified: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
+    phone_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    identity_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     role: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    offical_flg: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -48,8 +57,12 @@ class Users(Base):
     orders: Mapped[List["Orders"]] = relationship("Orders", back_populates="user")
     creator_type: Mapped[List["CreatorType"]] = relationship("CreatorType", back_populates="user", cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
     genders: Mapped[List["Gender"]] = relationship("Gender", secondary="creator_type", viewonly=True, lazy="selectin")
-    moderation_events: Mapped[List["PostModerationEvents"]] = relationship("PostModerationEvents", back_populates="acted_by")
-    pure_purchases: Mapped[List["Purchases"]] = relationship("Purchases", back_populates="user")
     email_verification_tokens: Mapped[List["EmailVerificationTokens"]] = relationship("EmailVerificationTokens", back_populates="user")
-    conversations: Mapped[List["ConversationMessages"]] = relationship("ConversationMessages", back_populates="sender")
+    conversations: Mapped[List["ConversationMessages"]] = relationship("ConversationMessages", back_populates="sender_user", foreign_keys="ConversationMessages.sender_user_id")
     participants: Mapped[List["ConversationParticipants"]] = relationship("ConversationParticipants", back_populates="user")
+    sms_verifications: Mapped[List["SMSVerifications"]] = relationship("SMSVerifications", back_populates="user")
+    banners: Mapped[List["Banners"]] = relationship("Banners", back_populates="creator")
+    user_events: Mapped[List["UserEvents"]] = relationship("UserEvents", back_populates="user")
+    company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
+    password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship("PasswordResetToken", back_populates="user")
+    generation_media: Mapped[["GenerationMedia"]] = relationship("GenerationMedia", back_populates="user")

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .user import Users
 
 class Profiles(Base):
+    """プロフィール(ユーザーのプロフィール情報)"""
     __tablename__ = "profiles"
 
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)

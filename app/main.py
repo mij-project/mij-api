@@ -1,21 +1,35 @@
+from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
-from fastapi import Request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.db.migrations import run_migrations
 from app.middlewares.csrf import CSRFMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-
+from app.db.migrations import run_migrations
+from app.core.logger import Logger
+logger = Logger.get_logger()
 # ========================
 # ✅ .env スイッチング処理
 # ========================
 env = os.getenv("ENV", "development")
 env_file = f".env.{env}"
 load_dotenv(dotenv_path=env_file)
-print(f" Loaded FastAPI ENV: {env_file}")
+logger.info(f" Loaded FastAPI ENV: {env_file}")
 
 from app.routers import api_router
-app = FastAPI()
+
+# ========================
+# ✅ Auto Alembic Upgrade
+# ========================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- startup ---
+    run_migrations()   # auto alembic upgrade head mỗi lần app start
+
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # ========================
 # CORS
@@ -25,6 +39,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3003",
+    "http://localhost:3005",
 
     # 事前登録サイト
     "https://campaign.mijfans.jp",

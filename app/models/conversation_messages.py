@@ -11,14 +11,17 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from .user import Users
+    from .admins import Admins
     from .conversations import Conversations
 
 class ConversationMessages(Base):
+    """会話ルームメッセージ"""
     __tablename__ = "conversation_messages"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     conversation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False)
-    sender_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    sender_user_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    sender_admin_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("admins.id"), nullable=True)
     type: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     body_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     parent_message_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("conversation_messages.id"), nullable=True)
@@ -28,4 +31,5 @@ class ConversationMessages(Base):
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
     conversation: Mapped["Conversations"] = relationship("Conversations")
-    sender: Mapped["Users"] = relationship("Users")
+    sender_user: Mapped[Optional["Users"]] = relationship("Users", foreign_keys=[sender_user_id])
+    sender_admin: Mapped[Optional["Admins"]] = relationship("Admins", foreign_keys=[sender_admin_id])

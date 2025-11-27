@@ -54,7 +54,9 @@ def build_media_rendition_job_settings(input_key: str, output_prefix: str, userm
                 "Outputs": [{
                     "ContainerSettings": {"Container": "MP4"},
                     "VideoDescription": {
-                        "Height": 480, "Width": 854,
+                        "Height": 480,
+                        "RespondToAfd": "NONE",
+                        "ScalingBehavior": "DEFAULT",
                         "CodecSettings": {"Codec": "H_264","H264Settings": {
                             "RateControlMode": "QVBR",
                             "QvbrSettings": {"QvbrQualityLevel": 7},
@@ -119,7 +121,9 @@ def build_preview_mp4_settings(input_key: str, output_key: str, usermeta: dict):
                 "Outputs": [{
                     "ContainerSettings": {"Container": "MP4"},
                     "VideoDescription": {
-                        "Height": 480, "Width": 854,
+                        "Height": 480,
+                        "RespondToAfd": "NONE",
+                        "ScalingBehavior": "DEFAULT",
                         "CodecSettings": {"Codec": "H_264","H264Settings": {
                             "RateControlMode": "QVBR",
                             "QvbrSettings": {"QvbrQualityLevel": 7},
@@ -157,7 +161,9 @@ def build_hls_abr4_settings(input_key: str, output_prefix: str, usermeta: dict):
     def stream(h, w, max_br, a_br, name_suffix):
         return {
             "VideoDescription": {
-                "Height": h, "Width": w,
+                "Height": h,
+                "RespondToAfd": "NONE",
+                "ScalingBehavior": "DEFAULT",
                 "CodecSettings": {
                     "Codec": "H_264",
                     "H264Settings": {

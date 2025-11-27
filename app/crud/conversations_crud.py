@@ -1,15 +1,17 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func, desc
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from app.models.conversations import Conversations
 from app.models.conversation_messages import ConversationMessages
 from app.models.conversation_participants import ConversationParticipants
 from app.models.user import Users
-from app.constants.enums import ConversationType
+from app.models.admins import Admins
+from app.constants.enums import ConversationType, ParticipantType
 from app.models.profiles import Profiles
+from app.constants.messages import WelcomeMessage
 
 
 # ========== 会話管理 ==========
@@ -18,6 +20,7 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
     """
     妄想メッセージ用の会話を取得または作成する
     - 1ユーザーにつき1つの管理人トークルーム
+    - 新規作成時は自動的にウェルカムメッセージを挿入
     """
     # 既存の妄想メッセージ会話を検索
     participant = (
@@ -47,9 +50,52 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
     participant = ConversationParticipants(
         conversation_id=conversation.id,
         user_id=user_id,
+        participant_id=user_id,
+        participant_type=ParticipantType.USER,
         role=1  # 通常ユーザー
     )
     db.add(participant)
+    db.flush()
+
+    # ウェルカムメッセージを自動挿入（システムメッセージ）
+    base_timestamp = datetime.utcnow()
+    welcome_message = ConversationMessages(
+        conversation_id=conversation.id,
+        sender_user_id=None,  # システムメッセージはsender_user_idをNULLに
+        type=0,  # システムメッセージタイプ
+        body_text=WelcomeMessage.MESSAGE,
+        moderation=1,  # 自動承認
+        created_at=base_timestamp
+    )
+    db.add(welcome_message)
+    db.flush()
+
+
+    # 管理人メッセージを挿入（管理人が存在しない場合はシステムメッセージとして挿入）
+    admin = (
+        db.query(Admins)
+        .filter(Admins.status == 1, Admins.deleted_at.is_(None))
+        .order_by(Admins.created_at.asc())
+        .first()
+    )
+
+    admin_message = ConversationMessages(
+        conversation_id=conversation.id,
+        sender_user_id=None if admin is None else None,
+        sender_admin_id=admin.id if admin else None,
+        type=1 if admin else 0,
+        body_text=WelcomeMessage.SECOND_MESSAGE,
+        moderation=1,  # 自動承認
+        created_at=base_timestamp + timedelta(microseconds=1)
+    )
+    db.add(admin_message)
+    db.flush()
+
+    # 会話の最終メッセージ情報を更新
+    last_message = admin_message or welcome_message
+    conversation.last_message_id = last_message.id
+    conversation.last_message_at = last_message.created_at
+
     db.commit()
     db.refresh(conversation)
 
@@ -87,13 +133,20 @@ def is_user_in_conversation(db: Session, conversation_id: UUID, user_id: UUID) -
 def create_message(
     db: Session,
     conversation_id: UUID,
-    sender_user_id: UUID,
-    body_text: str
+    sender_user_id: UUID | None = None,
+    sender_admin_id: UUID | None = None,
+    body_text: str = ""
 ) -> ConversationMessages:
-    """メッセージを作成"""
+    """
+    メッセージを作成
+    - sender_user_id と sender_admin_id の両方が None の場合はシステムメッセージ
+    - sender_user_id が指定されている場合はユーザーメッセージ
+    - sender_admin_id が指定されている場合は管理者メッセージ
+    """
     message = ConversationMessages(
         conversation_id=conversation_id,
         sender_user_id=sender_user_id,
+        sender_admin_id=sender_admin_id,
         type=1,  # テキストメッセージ
         body_text=body_text,
         moderation=1  # デフォルト: 承認済み
@@ -121,19 +174,23 @@ def get_messages_by_conversation(
     conversation_id: UUID,
     skip: int = 0,
     limit: int = 50
-) -> List[Tuple[ConversationMessages, Users, Profiles]]:
+) -> List[Tuple[ConversationMessages, Optional[Users], Optional[Profiles], Optional[Admins]]]:
     """
     会話のメッセージ一覧を取得（送信者情報含む）
     古い順にソート
+    システムメッセージ（sender_user_id/sender_admin_id共にNULL）も含む
+    Returns: (message, user, profile, admin) のタプルリスト
     """
     messages = (
         db.query(
-            ConversationMessages, 
-            Users, 
-            Profiles
+            ConversationMessages,
+            Users,
+            Profiles,
+            Admins
         )
         .join(Users, ConversationMessages.sender_user_id == Users.id, isouter=True)
-        .join(Profiles, Users.id == Profiles.user_id)
+        .join(Profiles, Users.id == Profiles.user_id, isouter=True)
+        .join(Admins, ConversationMessages.sender_admin_id == Admins.id, isouter=True)
         .filter(ConversationMessages.conversation_id == conversation_id, ConversationMessages.deleted_at.is_(None))
         .order_by(ConversationMessages.created_at.asc())
         .offset(skip).limit(limit).all())
@@ -149,6 +206,17 @@ def get_message_by_id(db: Session, message_id: UUID) -> Optional[ConversationMes
         )
         .filter(ConversationMessages.id == message_id, ConversationMessages.deleted_at.is_(None))
         .first())
+
+
+def delete_message(db: Session, message_id: UUID) -> bool:
+    """メッセージを論理削除"""
+    message = get_message_by_id(db, message_id)
+    if not message:
+        return False
+
+    message.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+    return True
 
 
 # ========== 既読管理 ==========

@@ -11,7 +11,8 @@ class MessageCreate(BaseModel):
 class MessageResponse(BaseModel):
     id: UUID
     conversation_id: UUID
-    sender_user_id: Optional[UUID]
+    sender_user_id: Optional[UUID] = None
+    sender_admin_id: Optional[UUID] = None
     type: int
     body_text: Optional[str]
     created_at: datetime

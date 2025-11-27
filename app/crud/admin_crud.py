@@ -1,9 +1,10 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc, asc
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
+from app.models.notifications import Notifications
 from app.models.user import Users
 from app.models.creators import Creators
 from app.models.identity import IdentityVerifications
@@ -13,15 +14,110 @@ from app.models.orders import Orders
 from app.models.subscriptions import Subscriptions
 from app.models.media_assets import MediaAssets
 from app.models.media_rendition_jobs import MediaRenditionJobs
+from app.models.admins import Admins
+from app.models.profile_image_submissions import ProfileImageSubmissions
+from app.constants.enums import PostStatus, MediaAssetStatus
 import os
 
+from app.schemas.notification import NotificationType
+from app.core.logger import Logger
+logger = Logger.get_logger()
+
 CDN_URL = os.getenv("CDN_BASE_URL")
-
-
 
 """管理機能用のCRUD操作クラス"""
 
 
+# ==================== Admin CRUD Functions ====================
+
+def get_admin_by_id(db: Session, admin_id: str) -> Optional[Admins]:
+    """
+    IDで管理者を取得
+
+    Args:
+        db: データベースセッション
+        admin_id: 管理者ID
+
+    Returns:
+        Optional[Admins]: 管理者情報
+    """
+    try:
+        admin = db.query(Admins).filter(
+            Admins.id == admin_id,
+            Admins.deleted_at.is_(None)
+        ).first()
+        return admin
+    except Exception as e:
+        logger.error(f"Get admin by id error: {e}")
+        return None
+
+
+def get_admin_by_email(db: Session, email: str) -> Optional[Admins]:
+    """
+    メールアドレスで管理者を取得
+
+    Args:
+        db: データベースセッション
+        email: メールアドレス
+
+    Returns:
+        Optional[Admins]: 管理者情報
+    """
+    try:
+        admin = db.query(Admins).filter(
+            Admins.email == email,
+            Admins.deleted_at.is_(None)
+        ).first()
+        return admin
+    except Exception as e:
+        logger.error(f"Get admin by email error: {e}")
+        return None
+
+
+def create_admin(
+    db: Session,
+    email: str,
+    password_hash: str,
+    role: int = 1,
+    status: int = 1
+) -> Optional[Admins]:
+    """
+    新しい管理者を作成
+
+    Args:
+        db: データベースセッション
+        email: メールアドレス
+        password_hash: ハッシュ化されたパスワード
+        role: 役割（デフォルト: 1）
+        status: ステータス（デフォルト: 1=有効）
+
+    Returns:
+        Optional[Admins]: 作成された管理者情報
+    """
+    try:
+        # メールアドレスの重複チェック
+        existing_admin = get_admin_by_email(db, email)
+        if existing_admin:
+            return None
+
+        new_admin = Admins(
+            email=email,
+            password_hash=password_hash,
+            role=role,
+            status=status,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+
+        db.add(new_admin)
+        db.commit()
+        db.refresh(new_admin)
+
+        return new_admin
+    except Exception as e:
+        logger.error(f"Create admin error: {e}")
+        db.rollback()
+        return None
 def get_dashboard_info(db: Session) -> Dict[str, Any]:
     """
     ダッシュボード統計情報を取得
@@ -56,28 +152,36 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
             .filter(Posts.status == 1)
             .count()
         )
-        
+
+        # プロフィール画像審査中件数（status=1が審査待ち）
+        pending_profile_reviews = (
+            db.query(ProfileImageSubmissions)
+            .filter(ProfileImageSubmissions.status == 1)
+            .count()
+        )
+
         # 月間売上（仮の値 - 実際のOrdersテーブルから計算する場合）
         monthly_revenue = 100000
-        
+
         # アクティブな購読数
         active_subscriptions = (
             db.query(Subscriptions)
             .filter(Subscriptions.status == 1)  # アクティブな購読
             .count()
         )
-        
+
         return {
             "total_users": total_users,
             "total_posts": total_posts,
             "pending_identity_verifications": pending_identity_verifications,
             "pending_creator_applications": pending_creator_applications,
             "pending_post_reviews": pending_post_reviews,
+            "pending_profile_reviews": pending_profile_reviews,
             "monthly_revenue": monthly_revenue,
             "active_subscriptions": active_subscriptions
         }
     except Exception as e:
-        print(f"Dashboard stats error: {e}")
+        logger.error(f"Dashboard stats error: {e}")
         # エラー時はデフォルト値を返す
         return {
             "total_users": 0,
@@ -85,6 +189,7 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
             "pending_identity_verifications": 0,
             "pending_creator_applications": 0,
             "pending_post_reviews": 0,
+            "pending_profile_reviews": 0,
             "monthly_revenue": 0,
             "active_subscriptions": 0
         }
@@ -238,15 +343,15 @@ def get_identity_verifications_paginated(
     
     # ソート処理
     if sort == "created_at_desc":
-        query = query.order_by(desc(IdentityVerifications.created_at))
+        query = query.order_by(desc(IdentityVerifications.checked_at))
     elif sort == "created_at_asc":
-        query = query.order_by(asc(IdentityVerifications.created_at))
+        query = query.order_by(asc(IdentityVerifications.checked_at))
     elif sort == "user_name_asc":
         query = query.join(Profiles).order_by(asc(Profiles.username))
     elif sort == "user_name_desc":
         query = query.join(Profiles).order_by(desc(Profiles.username))
     else:
-        query = query.order_by(desc(IdentityVerifications.created_at))
+        query = query.order_by(desc(IdentityVerifications.checked_at))
     
     total = query.count()
     verifications = query.offset(skip).limit(limit).all()
@@ -286,8 +391,15 @@ def get_posts_paginated(
         )
     
     if status:
-        status_map = {"draft": 1, "published": 2, "archived": 3}
-        query = query.filter(Posts.status == status_map.get(status, 2))
+        status_map = {
+            "approved": PostStatus.APPROVED, 
+            "rejected": PostStatus.REJECTED, 
+            "resubmit": PostStatus.RESUBMIT,
+            "deleted": PostStatus.DELETED,
+            "pending": PostStatus.PENDING,
+            "converting": PostStatus.CONVERTING,
+        }
+        query = query.filter(Posts.status == status_map.get(status, PostStatus.PENDING))
     
     # ソート処理
     if sort == "created_at_desc":
@@ -326,11 +438,11 @@ def update_user_status(db: Session, user_id: str, status: str) -> bool:
         
         # ステータス更新（実装に応じて調整）
         user.status = 2 if status == "suspended" else 1
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         db.commit()
         return True
     except Exception as e:
-        print(f"Update user status error: {e}")
+        logger.error(f"Update user status error: {e}")
         db.rollback()
         return False
 
@@ -348,26 +460,26 @@ def update_creator_application_status(db: Session, application_id: str, status: 
         bool: 更新成功フラグ
     """
     try:
-        application = db.query(Creators).filter(Creators.id == application_id).first()
+        application = db.query(Creators).filter(Creators.user_id == application_id).first()
         if not application or application.status != 1:  # 1 = pending
             return False
         
         # 申請ステータス更新
         status_map = {"approved": 2, "rejected": 3}
         application.status = status_map[status]
-        application.updated_at = datetime.utcnow()
+        application.updated_at = datetime.now(timezone.utc)
         
         # 承認の場合、ユーザーのロールをクリエイターに更新
         if status == "approved":
             user = db.query(Users).filter(Users.id == application.user_id).first()
             if user:
                 user.role = 2  # 2 = creator
-                user.updated_at = datetime.utcnow()
+                user.updated_at = datetime.now(timezone.utc)
         
         db.commit()
         return True
     except Exception as e:
-        print(f"Update creator application status error: {e}")
+        logger.error(f"Update creator application status error: {e}")
         db.rollback()
         return False
 
@@ -394,12 +506,12 @@ def update_identity_verification_status(db: Session, verification_id: str, statu
         # 審査ステータス更新
         status_map = {"approved": 2, "rejected": 3}
         verification.status = status_map[status]
-        verification.updated_at = datetime.utcnow()
+        verification.updated_at = datetime.now(timezone.utc)
         
         db.commit()
         return True
     except Exception as e:
-        print(f"Update identity verification status error: {e}")
+        logger.error(f"Update identity verification status error: {e}")
         db.rollback()
         return False
 
@@ -421,113 +533,133 @@ def update_post_status(db: Session, post_id: str, status: str) -> bool:
         if not post:
             return False
         
-        status_map = {"published": 2, "archived": 3, "draft": 1}
-        post.status = status_map.get(status, 2)
-        post.updated_at = datetime.utcnow()
+        status_map = {
+            "approved": PostStatus.APPROVED, 
+            "rejected": PostStatus.REJECTED, 
+            "resubmit": PostStatus.RESUBMIT,
+            "deleted": PostStatus.DELETED,
+            "pending": PostStatus.PENDING,
+        }
+        post.status = status_map.get(status, PostStatus.PENDING)
+        post.updated_at = datetime.now(timezone.utc)
         
         db.commit()
         return True
     except Exception as e:
-        print(f"Update post status error: {e}")
+        logger.error(f"Update post status error: {e}")
         db.rollback()
         return False
 
 
-def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
+def reject_post_with_comments(
+    db: Session,
+    post_id: str,
+    post_reject_comment: str,
+    media_reject_comments: Optional[Dict[str, str]] = None
+) -> bool:
     """
-    投稿IDをキーにして投稿情報、ユーザー情報、メディア情報を取得
+    投稿を拒否し、拒否理由をpostsとmedia_assetsに保存
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+        post_reject_comment: 投稿全体に対する拒否理由
+        media_reject_comments: メディア別の拒否理由 {media_asset_id: comment}
+
+    Returns:
+        bool: 更新成功フラグ
     """
     try:
-        # UUIDに変換
-        post_uuid = UUID(post_id)
-    except ValueError:
-        return None
+        # 投稿を取得
+        post = db.query(Posts).filter(Posts.id == post_id).first()
+        if not post:
+            return False
 
-    # 投稿情報と関連データを取得
-    result = (
-        db.query(
-            Posts,
-            Users,
-            Profiles,
-            MediaAssets,
-            MediaRenditionJobs.output_key.label('rendition_output_key')
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, Posts.id == MediaAssets.post_id)
-        .outerjoin(MediaRenditionJobs, MediaAssets.id == MediaRenditionJobs.asset_id)
-        .filter(Posts.id == post_uuid)
-        .filter(Posts.deleted_at.is_(None))
-        .all()
-    )
+        # 投稿のステータスを拒否に更新し、拒否理由を保存
+        post.status = PostStatus.REJECTED
+        post.reject_comments = post_reject_comment
+        post.updated_at = datetime.now(timezone.utc)
 
-    if not result:
-        return None
+        # メディア別の拒否理由を保存
+        if media_reject_comments:
+            for media_id, comment in media_reject_comments.items():
+                media_asset = db.query(MediaAssets).filter(
+                    MediaAssets.id == media_id,
+                    MediaAssets.post_id == post_id
+                ).first()
+                if media_asset:
+                    media_asset.reject_comments = comment
+                    media_asset.status = MediaAssetStatus.REJECTED
 
-    # 最初のレコードから基本情報を取得
-    first_row = result[0]
-    post = first_row.Posts
-    user = first_row.Users
-    profile = first_row.Profiles
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Reject post with comments error: {e}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        return False
 
-    # メディアアセット情報を整理
-    media_assets = []
-    rendition_jobs = []
-
-    for row in result:
-        if row.MediaAssets:
-            media_asset = {
-                'id': str(row.MediaAssets.id),
-                'post_id': str(row.MediaAssets.post_id),
-                'kind': row.MediaAssets.kind,
-                'storage_key': row.MediaAssets.storage_key,
-                'file_size': row.MediaAssets.bytes,
-                'duration': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
-                'width': row.MediaAssets.width,
-                'height': row.MediaAssets.height,
-                'created_at': row.MediaAssets.created_at.isoformat() if row.MediaAssets.created_at else None,
-                'updated_at': None
-            }
-            
-            # 重複を避けるため、既に存在するかチェック
-            if not any(ma['id'] == media_asset['id'] for ma in media_assets):
-                media_assets.append(media_asset)
-
-        if row.rendition_output_key:
-            rendition_job = {
-                'output_key': row.rendition_output_key
-            }
-            
-            # 重複を避けるため、既に存在するかチェック
-            if not any(rj['output_key'] == rendition_job['output_key'] for rj in rendition_jobs):
-                rendition_jobs.append(rendition_job)
-
-    # CDN_URLを取得
-    from os import getenv
-
-    CDN_URL = getenv("CDN_BASE_URL", "")
-    MEDIA_ASSETS_CDN_URL = getenv("MEDIA_CDN_URL", "")
-
-    # 指定された内容を返却
-    return {
-        # 投稿情報
-        'id': str(post.id),
-        'description': post.description,
-        'status': post.status,
-        'created_at': post.created_at.isoformat() if post.created_at else None,
-        # ユーザー情報
-        'user_id': str(user.id),
-        'user_profile_name': user.profile_name,
-        # プロフィール情報
-        'profile_username': profile.username,
-        'profile_avatar_url': f"{CDN_URL}/{profile.avatar_url}" if profile.avatar_url else None,
-        'post_type': post.post_type,
-        # メディアアセット情報
-        'media_assets': {
-            ma['id']: {
-                'kind': ma['kind'],
-                'storage_key': ma['storage_key']
-            } 
-            for ma in media_assets if ma['storage_key']
-        }  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
-    }
+def add_notification_for_creator_application(
+    db: Session, 
+    application_id: str, 
+    type: str
+) -> bool:
+    """
+    クリエイター申請に対する通知を追加
+    
+    Args:
+        db: データベースセッション
+        application_id: 申請ID
+        status: ステータス
+    """
+    try:
+        if type == "approved":
+            try:
+                notification = Notifications(
+                    user_id=application_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "クリエイター申請が承認されました",
+                        "subtitle": "クリエイター申請が承認されました",
+                        "message": "クリエイター申請が承認されました",
+                        "avatar": None,
+                        "redirect_url": f"/account",
+                    },
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Add notification for creator application approved error: {e}")
+                pass
+        
+        elif type == "rejected":
+            try:
+                notification = Notifications(
+                    user_id=application_id,
+                    type=NotificationType.USERS,
+                    payload={
+                        "title": "クリエイター申請が拒否されました",
+                        "subtitle": "クリエイター申請が拒否されました",
+                        "avatar": None,
+                        "redirect_url": f"/account",
+                    },
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                    is_read=False,
+                    read_at=None,
+                )
+                db.add(notification)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Add notification for creator application rejected error: {e}")
+                pass
+    except Exception as e:
+        logger.error(f"Add notification for creator application error: {e}")
+        pass

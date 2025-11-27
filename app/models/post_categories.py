@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from .categories import Categories
 
 class PostCategories(Base):
+    """投稿カテゴリ"""
     __tablename__ = "post_categories"
 
     post_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True, index=True)

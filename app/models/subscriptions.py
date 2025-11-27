@@ -12,7 +12,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from .user import Users
     from .plans import Plans
-    from .subscription_periods import SubscriptionPeriods
+
 
 class Subscriptions(Base):
     __tablename__ = "subscriptions"
@@ -29,3 +29,4 @@ class Subscriptions(Base):
 
     user: Mapped["Users"] = relationship("Users", back_populates="subscriptions")
     plan: Mapped["Plans"] = relationship("Plans", back_populates="subscriptions")
+    

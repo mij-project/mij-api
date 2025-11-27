@@ -11,6 +11,7 @@ from app.db.base import Base
 
 
 class Preregistrations(Base):
+    """事前登録"""
     __tablename__ = "preregistrations"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

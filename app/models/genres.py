@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .categories import Categories
 
 class Genres(Base):
+    """ジャンル(カテゴリの親)"""
     __tablename__ = "genres"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

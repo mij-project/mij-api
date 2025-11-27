@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from .gender import Gender
 
 class CreatorType(Base):
+    """クリエイタータイプ (ユーザーと性別の多対多)"""
     __tablename__ = "creator_type"
 
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)

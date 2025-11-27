@@ -66,18 +66,35 @@ def get_delusion_messages(
 
     # レスポンスを構築
     response = []
-    for message, sender, profile in messages:
+    for message, sender, profile, admin in messages:
+        # 送信者情報の判定
+        sender_username = None
+        sender_avatar = None
+        sender_profile_name = None
+
+        if sender and profile:
+            # ユーザーメッセージの場合
+            sender_username = sender.profile_name
+            sender_avatar = f"{BASE_URL}/{profile.avatar_url}" if profile.avatar_url else None
+            sender_profile_name = sender.profile_name
+        elif admin:
+            # 管理者メッセージの場合
+            sender_username = "運営"
+            sender_avatar = None
+            sender_profile_name = "運営"
+
         response.append(MessageResponse(
             id=message.id,
             conversation_id=message.conversation_id,
             sender_user_id=message.sender_user_id,
+            sender_admin_id=message.sender_admin_id,
             type=message.type,
             body_text=message.body_text,
             created_at=message.created_at,
             updated_at=message.updated_at,
-            sender_username=sender.profile_name if sender else None,
-            sender_avatar=f"{BASE_URL}/{profile.avatar_url}" if profile and profile.avatar_url else None,
-            sender_profile_name=sender.profile_name if sender else None
+            sender_username=sender_username,
+            sender_avatar=sender_avatar,
+            sender_profile_name=sender_profile_name
         ))
 
     return response

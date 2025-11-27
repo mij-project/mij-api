@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .post_categories import PostCategories
 
 class Categories(Base):
+    """カテゴリ(ジャンルの子)"""
     __tablename__ = "categories"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

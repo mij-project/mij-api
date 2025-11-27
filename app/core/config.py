@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     EMAIL_ENABLED: bool = True
     EMAIL_BACKEND: str = "auto"  # "auto" | "mailhog" | "ses"
     MAIL_FROM: str = "no-reply@mijfans.jp"
-    MAIL_FROM_NAME: str = "MIJ Fans"
+    MAIL_FROM_NAME: str = "mijfans"
     REPLY_TO: str | None = None
     LIST_UNSUBSCRIBE: str | None = None
     EMAIL_TEMPLATE_DIR: str = "app/templates"  # 必要なら app/templates/email などへ

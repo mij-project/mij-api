@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc
+from sqlalchemy import desc, asc, or_
 from app.models.preregistrations import Preregistrations
 from uuid import UUID
 from typing import List, Optional, Tuple
@@ -74,3 +74,38 @@ def get_preregistrations_paginated(
     preregistrations = query.offset(skip).limit(limit).all()
 
     return preregistrations, total
+
+def get_preregistration_by_email(db: Session, email: str) -> bool:
+    """
+    事前登録データが存在するかを確認
+    """
+    return db.query(Preregistrations).filter(Preregistrations.email == email).first() is not None
+
+def get_preregistration_by_X_name(db: Session, x_username: str, x_name: str) -> bool:
+    """Xの名前に紐づく事前登録データが存在するかを確認
+
+    Args:
+        db (Session): データベースセッション
+        x_username (str): Xユーザー名
+        x_name (str): Xの名前
+
+    Returns:
+        bool: _description_
+    """
+    filters = []
+
+    username_candidates = set()
+    if x_username:
+        username_candidates.add(x_username)
+        username_candidates.add(x_username.lstrip("@"))
+
+    if username_candidates:
+        filters.append(Preregistrations.x_name.in_(username_candidates))
+
+    if x_name:
+        filters.append(Preregistrations.name == x_name)
+
+    if not filters:
+        return False
+
+    return db.query(Preregistrations).filter(or_(*filters)).first() is not None

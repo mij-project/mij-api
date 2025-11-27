@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from .posts import Posts
 
 class Tags(Base):
+    """投稿タグ"""
     __tablename__ = "tags"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -19,6 +20,7 @@ class Tags(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
 
 class PostTags(Base):
+    """投稿に紐づくタグ"""
     __tablename__ = "post_tags"
 
     post_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .user import Users
 
 class EmailVerificationTokens(Base):
+    """メールアドレス認証トークン"""
     __tablename__ = "email_verification_tokens"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

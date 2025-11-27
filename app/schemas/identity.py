@@ -16,7 +16,7 @@ class CompleteRequest(BaseModel):
 class VerifyFileSpec(BaseModel):
     kind: Kind
     ext: Literal["jpg","jpeg","png","webp"]
-    content_type: str
+    content_type: str | None = None
 
 
 class VerifyRequest(BaseModel):
