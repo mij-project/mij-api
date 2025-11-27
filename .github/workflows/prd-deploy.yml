@@ -7,7 +7,7 @@ on:
 
 env:
   AWS_REGION: ap-northeast-1
-  SLACK_CHANNEL: C08MV1PPBAP
+  SLACK_CHANNEL: C0A0YDFF5PS
   ECR_BATCHS_REPOSITORY: mijfans-batchs:prd
   ECR_API_REPOSITORY: prd-mij-api:latest
   ECS_API_CLUSTER: prd-mij-api
