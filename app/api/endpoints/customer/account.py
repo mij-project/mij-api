@@ -1,11 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+import jwt
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, HTTPException, Response, background
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Dict
+from app.constants.enums import PostType
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
 from app.schemas.account import (
+    AccountEmailSettingRequest,
     Kind,
     AccountInfoResponse,
     AccountUpdateRequest,
@@ -53,8 +57,9 @@ from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id
 from app.crud.purchases_crud import get_single_purchases_count_by_user_id, get_single_purchases_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
-from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile
+from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile, exist_profile_by_username
 from app.crud import profile_image_crud
+from app.services.email.send_email import send_email_verification
 from app.services.s3.keygen import account_asset_key
 from app.services.s3.presign import presign_put_public
 from app.crud.post_crud import get_post_by_id
@@ -275,13 +280,31 @@ def update_account_info(
         HTTPException: エラーが発生した場合
     """
     try:
-    
-        if update_data.name:
-            if check_profile_name_exists(db, update_data.name) and update_data.name != current_user.profile_name:
-                raise HTTPException(status_code=400, detail="このユーザー名は既に使用されています")
+        # 現在のプロフィール情報を取得
+        current_profile = get_profile_by_user_id(db, current_user.id)
 
+        # 氏名の変更チェックと重複確認
+        name_changed = update_data.name and update_data.name != current_user.profile_name
+        if name_changed:
+            logger.info(f"氏名変更を検出: {current_user.profile_name} -> {update_data.name}")
+            if check_profile_name_exists(db, update_data.name):
+                logger.warning(f"氏名の重複エラー: {update_data.name}")
+                return Response(content="このユーザ名は既に使用されています", status_code=400)
+
+        # ユーザーネームの変更チェックと重複確認
+        username_changed = (update_data.username and current_profile
+                           and update_data.username != current_profile.username)
+        if username_changed:
+            logger.info(f"ユーザーネーム変更を検出: {current_profile.username} -> {update_data.username}")
+            if exist_profile_by_username(db, update_data.username):
+                logger.warning(f"ユーザーネームの重複エラー: {update_data.username}")
+                return Response(content="このユーザーネームは既に使用されています", status_code=400)
+
+        # ユーザー情報の更新（氏名が変更された場合のみ）
+        if name_changed:
             user = update_user(db, current_user.id, update_data.name)
-        links = update_data.links
+
+        links = update_data.links if update_data.links else {}
         instagram = links.get("instagram", "")
         instagram_link = f"{INSTAGRAM_URL}/{instagram.replace('@', '')}" if instagram else ""
         tiktok = links.get("tiktok", "")
@@ -318,12 +341,18 @@ def update_account_info(
 
         update_data.links = update_links
 
-        if update_data.username:
+        # プロフィール情報の更新（username、description、links、avatar_url、cover_urlのいずれかがある場合）
+        if any([update_data.username, update_data.description, update_data.links,
+                update_data.avatar_url, update_data.cover_url]):
             profile = update_profile(db, current_user.id, update_data)
 
         db.commit()
-        db.refresh(user)
-        db.refresh(profile)
+
+        # 更新されたオブジェクトのリフレッシュ
+        if 'user' in locals():
+            db.refresh(user)
+        if 'profile' in locals():
+            db.refresh(profile)
 
         return AccountUpdateResponse(
             message="アカウント情報が正常に更新されました",
@@ -523,7 +552,7 @@ def get_bookmarks(
         bookmarks_data = get_bookmarked_posts_by_user_id(db, current_user.id)
 
         bookmarks = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, bookmarked_at in bookmarks_data:
+        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, bookmarked_at in bookmarks_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -541,8 +570,10 @@ def get_bookmarks(
                 likes_count=likes_count or 0,
                 comments_count=comments_count or 0,
                 duration=duration,
-                is_video=(post.post_type == 2),  # 2が動画
-                created_at=bookmarked_at
+                is_video=(post.post_type == PostType.VIDEO),  # 2が動画
+                created_at=bookmarked_at,
+                price=int(post_price) if post_price else None,
+                currency=post_currency or "JPY"
             )
             bookmarks.append(bookmark)
 
@@ -563,7 +594,7 @@ def get_likes(
         liked_posts_data = get_liked_posts_list_by_user_id(db, current_user.id)
 
         liked_posts = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, liked_at in liked_posts_data:
+        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, liked_at in liked_posts_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -581,8 +612,10 @@ def get_likes(
                 likes_count=likes_count or 0,
                 comments_count=comments_count or 0,
                 duration=duration,
-                is_video=(post.post_type == 2),  # 2が動画
-                created_at=liked_at
+                is_video=(post.post_type == PostType.VIDEO),  # 1が動画
+                created_at=liked_at,
+                price=int(post_price) if post_price else None,
+                currency=post_currency or "JPY"
             )
             liked_posts.append(liked_post)
 
@@ -793,3 +826,68 @@ def update_account_post(
         db.rollback()
         logger.error(f"投稿更新エラー: {e}")
         raise HTTPException(status_code=500, detail="投稿の更新に失敗しました")
+
+@router.post("/setting-email")
+async def setting_email(
+    email_setting: AccountEmailSettingRequest,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    メールアドレスを設定
+    """
+    try:
+        if email_setting.type == 1:
+            logger.info(f"メールアドレス設定: {email_setting.email}")
+            email_existing = db.query(Users).filter(Users.email == email_setting.email).first()
+            if email_existing or (current_user.email == email_setting.email):
+                return Response(content="既に使用されているメールアドレスです。", status_code=400)
+            token = __generate_email_verification_token(db, email_setting.email, current_user.id)
+            if not token:
+                raise HTTPException(status_code=500, detail="メールアドレスの認証トークンの生成に失敗しました")
+            verify_url = f"{os.environ.get('FRONTEND_URL')}/setting/verify-email?token={token}"
+            send_email_verification(to=email_setting.email, verify_url=verify_url, display_name=current_user.profile_name)
+        elif email_setting.type == 2:
+            logger.info(f"メールアドレス認証: {email_setting.token}")
+            payload = __verify_email_verification_token(db, email_setting.token)
+            exp_dt = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+            if exp_dt < datetime.now(timezone.utc):
+                return Response(content="リンクが無効か、期限切れです。", status_code=400)
+            current_user.email = payload["email"]
+            current_user.email_verified_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(current_user)
+            return {"message": "メールアドレスを認証しました", "success": True}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"メールアドレス設定エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def __generate_email_verification_token(db: Session, email: str, user_id: UUID) -> str:
+    """
+    メールアドレスの認証トークンを生成
+    """
+    exp_time = datetime.now(timezone.utc) + timedelta(hours=48)
+    payload = {
+        "user_id": str(user_id),
+        "email": email,
+        "exp": exp_time
+    }
+    secret_key = os.environ.get("SECRET_KEY", "SECRET_KEY")
+    token = jwt.encode(payload, secret_key, algorithm="HS256")
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+    return token
+
+def __verify_email_verification_token(db: Session, token: str) -> dict:
+    """
+    メールアドレスの認証トークンを検証
+    """
+    secret_key = os.environ.get("SECRET_KEY", "SECRET_KEY")
+    try:
+        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="リンクが無効か、期限切れです。")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail="不正なトークンです。")
+    return payload

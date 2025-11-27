@@ -30,7 +30,7 @@ from app.constants.enums import (
 )
 from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
 from app.crud.media_rendition_crud import create_media_rendition
-from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status
+from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status, update_media_asset_rejected_comments 
 from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, update_post_status
 from app.crud.media_assets_crud import get_media_asset_by_id
 from app.schemas.transcode_mc import TranscodeMCUpdateRequest
@@ -290,6 +290,10 @@ def transcode_mc_update(
 
         post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
 
+        result = _update_media_asset_rejected_comments(db, post_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Media asset not found")
+
         if not post:
             raise HTTPException(status_code=404, detail="Post not found")
 
@@ -304,6 +308,20 @@ def transcode_mc_update(
         assets = get_media_assets_by_ids(db, media_asset_ids, type)
         if not assets:
             raise HTTPException(status_code=404, detail="Media asset not found")
+
+        logger.info(f"MediaConvert処理対象アセット: post_id={post_id}, asset_ids={[a.id for a in assets]}, kinds={[a.kind for a in assets]}")
+
+        # 動画投稿の場合、メイン・サンプル動画のステータスをRESUBMITに更新
+        # （どちらかが再提出された場合、両方を再変換するため）
+        if type == "video":
+            for asset in assets:
+                if asset.kind in [MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
+                    video_update_data = {
+                        "status": MediaAssetStatus.RESUBMIT
+                    }
+                    update_media_asset(db, asset.id, video_update_data)
+                    kind_label = "メイン動画" if asset.kind == MediaAssetKind.MAIN_VIDEO else "サンプル動画"
+                    logger.info(f"{kind_label}のステータスをRESUBMITに更新: asset_id={asset.id}")
 
         for asset in assets:
             if type == "video":
@@ -357,3 +375,10 @@ def _update_post_status_for_convert(db: Session, post_id: str, status: int) -> O
     db.commit()
     db.refresh(post)
     return post
+
+def _update_media_asset_rejected_comments(db: Session, post_id: str) -> bool:
+    """
+    メディアアセットを拒否して拒否理由を更新する
+    """
+    result = update_media_asset_rejected_comments(db, post_id)
+    return True

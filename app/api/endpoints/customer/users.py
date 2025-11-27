@@ -1,5 +1,5 @@
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
 from app.schemas.user import UserCreate, UserOut, UserProfileResponse, UserRegisterCompany, UserOGPResponse
 from app.db.base import get_db
 from sqlalchemy.orm import Session
@@ -52,7 +52,13 @@ def register_user(
         UserOut: ユーザー情報
     """
     try:
-        db_user, db_profile = _insert_user(db, user_create.email, user_create.password, user_create.name)
+        result = _insert_user(db, user_create.email, user_create.password, user_create.name)
+
+        # エラーレスポンスの場合はそのまま返す
+        if isinstance(result, Response):
+            return result
+
+        db_user, db_profile = result
 
         # メールアドレスの認証トークンを発行
         _send_email_verification(db, db_user, background)
@@ -77,12 +83,18 @@ def get_user_profile_by_company_code(
     企業コードによるユーザープロフィール取得
     """
     try:
-        db_user, db_profile = _insert_user(db, user_register_company.email, user_register_company.password, user_register_company.name)
+        result = _insert_user(db, user_register_company.email, user_register_company.password, user_register_company.name)
+
+        # エラーレスポンスの場合はそのまま返す
+        if isinstance(result, Response):
+            return result
+
+        db_user, db_profile = result
         _send_email_verification(db, db_user, background, user_register_company.company_code)
 
         company = get_company_by_code(db, user_register_company.company_code)
         if not company:
-            raise HTTPException(status_code=404, detail="企業が見つかりません")  
+            raise HTTPException(status_code=404, detail="企業が見つかりません")
 
         db.commit()
         db.refresh(db_user)
@@ -251,17 +263,17 @@ def _insert_user(db: Session, email: str, password: str, name: str, company_code
     """
     is_email_exists = check_email_exists(db, email)
     if is_email_exists:
-        raise HTTPException(status_code=400, detail="存在しているメールアドレスです")
+        return Response(content="このメールアドレスは既に登録されています。", status_code=400)
     is_profile_name_exists = check_profile_name_exists(db, name)
     if is_profile_name_exists:
-        raise HTTPException(status_code=400, detail="存在しているユーザー名です")
+        return Response(content="この名前は既に登録されています。", status_code=400)
 
     for _ in range(10):  # 最大10回リトライ
         username_code = generate_code(5)
         is_profile_name_exists = check_profile_name_exists(db, username_code)
         if not is_profile_name_exists:
             break
-        raise HTTPException(status_code=500, detail="ユーザー名の生成に失敗しました")
+        return Response(content="ユーザー名の生成に失敗しました。再度お試しください。", status_code=500)
 
     db_user = create_user(db, UserCreate(email=email, password=password, name=name))
     db_profile = create_profile(db, db_user.id, username_code)

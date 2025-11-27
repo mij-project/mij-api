@@ -6,7 +6,7 @@ from datetime import datetime
 class PlanCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    price: int = Field(..., gt=0)
+    price: int = Field(..., ge=0)
     currency: str = Field(default="JPY")
     billing_cycle: int = Field(default=1)
     type: int = Field(default=1, description="1=通常, 2=おすすめ")

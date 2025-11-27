@@ -157,7 +157,7 @@ def delete_media_asset(db: Session, asset_id: str) -> bool:
     asset = db.query(MediaAssets).filter(MediaAssets.id == asset_id).first()
     if asset:
         db.delete(asset)
-        db.commit()
+        db.flush()  # commitではなくflushを使用（外部でcommitを制御）
         return True
     return False
 
@@ -179,3 +179,13 @@ def get_all_media_assets_by_post_id_and_kind(db: Session, post_id: str, kind: st
         .order_by(MediaAssets.created_at.asc())
         .all()
     )
+
+def update_media_asset_rejected_comments(db: Session, post_id: str) -> bool:
+    """
+    メディアアセットを拒否して拒否理由を更新する
+    """
+    # post_idに一致するメメディアアセットのreject_ccommentを空にする
+    db.query(MediaAssets).filter(MediaAssets.post_id == post_id).update({"reject_comments": None})
+    db.flush()
+    db.commit()
+    return True

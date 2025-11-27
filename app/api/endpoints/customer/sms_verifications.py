@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.functions import now
 from app.models.sms_verifications import SMSVerifications
@@ -18,9 +18,11 @@ from app.crud.sms_verifications_crud import (
 from app.crud.creater_crud import create_creator
 from app.crud.user_crud import update_user_phone_verified_at
 from app.services.s3.sms_auth import send_sms
-from app.constants.enums import SMSStatus, SMSPurpose, CreatorStatus
+from app.constants.enums import SMSStatus, CreatorStatus
+from app.constants.limits import SMSVerificationLimits  
 from datetime import datetime, timedelta, timezone
 from app.core.logger import Logger
+from app.constants.number import PlatformFeePercent
 logger = Logger.get_logger()
 router = APIRouter()
 
@@ -47,11 +49,15 @@ def send_sms_verification(
 
         user_id = user.id
 
+        phone_e164_count = db.query(Creators).filter(Creators.phone_number == sms_verification_request.phone_e164).count()
+        if phone_e164_count >= SMSVerificationLimits.PHONE_NUMBER_MAX_COUNT:
+            return Response(content="電話番号の登録上限に達しました。", status_code=400)
+
         latest_sms_verification = get_latest_sms_verification(db, sms_verification_request.phone_e164, sms_verification_request.purpose, user_id)
 
         # クールダウン
         if latest_sms_verification and (datetime.now(timezone.utc) - latest_sms_verification.last_sent_at.replace(tzinfo=timezone.utc)).total_seconds() < RESEND_COOLDOWN:
-            raise HTTPException(status_code=429, detail="送信間隔が短すぎます。しばらくしてから再試行してください。")
+            raise Response(status_code=429, detail="送信間隔が短すぎます。しばらくしてから再試行してください。")
 
         # 既存PENDINGは無効化（同一目的で並行利用させない）
         if latest_sms_verification and latest_sms_verification.status == SMSStatus.PENDING:
@@ -155,6 +161,7 @@ def _insert_creator(db: Session, user_id: str, phone_e164: str) -> Creators:
     creator_create = {
         "user_id": user_id,
         "phone_number": phone_e164,
-        "status": CreatorStatus.PHONE_NUMBER_ENTERED
+        "status": CreatorStatus.PHONE_NUMBER_ENTERED,
+        "platform_fee_percent": PlatformFeePercent.DEFAULT
     }
     return create_creator(db, creator_create)

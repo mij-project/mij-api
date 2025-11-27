@@ -127,6 +127,8 @@ class PostCardResponse(BaseModel):
     duration: Optional[str] = None
     is_video: bool
     created_at: datetime
+    price: Optional[int] = None
+    currency: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -220,3 +222,8 @@ class AccountPostUpdateResponse(BaseModel):
     """投稿更新レスポンス"""
     message: str
     success: bool
+
+class AccountEmailSettingRequest(BaseModel):
+    type: int # 1: メールアドレス設定, 2: メールアドレス認証
+    email: Optional[str] = None
+    token: Optional[str] = None

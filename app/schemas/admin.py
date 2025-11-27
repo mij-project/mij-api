@@ -91,6 +91,14 @@ class IdentityDocumentResponse(BaseModel):
     created_at: datetime
     presigned_url: Optional[str] = None
 
+class CreatorInfoResponse(BaseModel):
+    """クリエイター情報レスポンス"""
+    name: Optional[str] = None
+    first_name_kana: Optional[str] = None
+    last_name_kana: Optional[str] = None
+    address: Optional[str] = None
+    birth_date: Optional[str] = None  # YYYY-MM-DD形式
+
 class AdminIdentityVerificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -101,9 +109,11 @@ class AdminIdentityVerificationResponse(BaseModel):
     checked_at: Optional[datetime]
     notes: Optional[str]
     documents: List['IdentityDocumentResponse'] = []
+    has_creator_info: bool = False  # クリエイター情報入力済みかどうか
+    creator_info: Optional[CreatorInfoResponse] = None  # クリエイター情報
 
     @classmethod
-    def from_orm(cls, verification):
+    def from_orm(cls, verification, has_creator_info: bool = False, creator_info: Optional['CreatorInfoResponse'] = None):
         data = {
             "id": str(verification.id),
             "user_id": str(verification.user_id),
@@ -112,12 +122,22 @@ class AdminIdentityVerificationResponse(BaseModel):
             "checked_at": verification.checked_at,
             "notes": verification.notes,
             "documents": [],
+            "has_creator_info": has_creator_info,
+            "creator_info": creator_info,
         }
         return cls(**data)
+
+class CreatorInfoForApproval(BaseModel):
+    name: str
+    first_name_kana: str
+    last_name_kana: str
+    address: str
+    birth_date: str  # YYYY-MM-DD形式
 
 class IdentityVerificationReview(BaseModel):
     status: str  # "approved" or "rejected"
     notes: Optional[str] = None
+    creator_info: Optional[CreatorInfoForApproval] = None  # 承認時のみ必須
 
 class AdminPostResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -132,6 +152,7 @@ class AdminPostResponse(BaseModel):
     visibility: int
     view_count: int = 0  # フロントエンド側で期待されるフィールドを追加
     like_count: int = 0  # フロントエンド側で期待されるフィールドを追加
+    is_uploading: bool = False  # S3にメディアがアップロード中かどうか
     created_at: datetime
     updated_at: datetime
 
@@ -233,6 +254,12 @@ class MediaAssetData(BaseModel):
     storage_key: str
     status: int
 
+class PlanInfo(BaseModel):
+    """プラン情報"""
+    plan_id: str
+    plan_name: str
+    price: int
+
 class AdminPostDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -247,6 +274,11 @@ class AdminPostDetailResponse(BaseModel):
     username: Optional[str]
     profile_avatar_url: Optional[str]
     media_assets: Dict[str, MediaAssetData]
+    authenticated_flg: int
+
+    # 価格情報
+    single_price: Optional[int] = Field(None, description="単品販売価格")
+    plans: Optional[List[PlanInfo]] = Field(None, description="プラン販売情報")
 
 class AdminPreregistrationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

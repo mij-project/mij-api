@@ -19,6 +19,7 @@ class CreatorUpdate(BaseModel):
     address: Optional[str] = Field(None, max_length=200)
     phone_number: Optional[str] = Field(None, min_length=10, max_length=15)
     birth_date: Optional[datetime] = None
+    platform_fee_percent: Optional[int] = Field(None, ge=0, le=100)
 
 class CreatorOut(BaseModel):
     user_id: UUID

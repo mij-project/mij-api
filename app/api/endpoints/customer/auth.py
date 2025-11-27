@@ -188,6 +188,9 @@ def x_callback(
         # ユーザー存在チェック
         user_exists = check_email_exists(db, x_email)
 
+        # 新規ユーザーフラグ
+        is_new_user = False
+
         if not user_exists:
             # 事前登録対象者かチェック
             preregistration = get_preregistration_by_X_name(db, x_username, x_name)
@@ -202,9 +205,12 @@ def x_callback(
 
             if preregistration:
                 _insert_user_event(db, user.id, EventCode.PRE_REGISTRATION)
+
+            is_new_user = True
         else:
             # 既存ユーザーの場合、ユーザー情報を取得して更新
-            user, profile = _update_user_and_profile(db, user, x_username, x_name)
+            # user, profile = _update_user_and_profile(db, user, x_username, x_name)
+            user, profile = _update_user_and_profile(db, x_username, x_name)
 
         db.commit()
         db.refresh(user)
@@ -217,7 +223,10 @@ def x_callback(
 
         # フロントエンドのX認証コールバックページにリダイレクト
         frontend_url = os.getenv("FRONTEND_URL")
-        redirect_response = RedirectResponse(url=f"{frontend_url}/auth/x/callback", status_code=302)
+        callback_url = f"{frontend_url}/auth/x/callback"
+        if is_new_user:
+            callback_url = f"{callback_url}?is_new_user=true"
+        redirect_response = RedirectResponse(url=callback_url, status_code=302)
 
         # RedirectResponseに直接Cookieを設定
         set_auth_cookies(redirect_response, access_token, refresh_token, csrf)
@@ -399,7 +408,8 @@ def _create_user_and_profile(db: Session, x_email: str, x_username: str, x_name:
     return user, profile
 
 
-def _update_user_and_profile(db: Session, user: Users, x_username: str, x_name: str) -> Tuple[Users, Profiles]:
+# def _update_user_and_profile(db: Session, user: Users, x_username: str, x_name: str) -> Tuple[Users, Profiles]:
+def _update_user_and_profile(db: Session, x_username: str, x_name: str) -> Tuple[Users, Profiles]:
     """ユーザーとプロフィールを更新
 
     Args:
@@ -429,6 +439,7 @@ def _update_user_and_profile(db: Session, user: Users, x_username: str, x_name: 
     # プロフィール情報も更新
     profile = update_profile_by_x(db, user.id, x_username)
     db.commit()
+    return user, profile
 
 def _insert_company_user(db: Session, company_code: str, user_id: str) -> bool:
     """企業にユーザーを追加

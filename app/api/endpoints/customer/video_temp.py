@@ -12,11 +12,21 @@ from app.db.base import get_db
 from app.deps.auth import get_current_user_optional
 from app.models.user import Users
 from typing import Optional
-from pydantic import BaseModel
-from app.schemas.video_temp import CreateSampleRequest, TempVideoResponse, SampleVideoResponse
+from app.schemas.video_temp import (
+    CreateSampleRequest,
+    TempVideoMultipartInitResponse,
+    SampleVideoResponse,
+    TempVideoPartPresignResponse,
+    TempVideoMultipartCompleteRequest,
+    BulkPartPresignRequest,
+    BulkPartPresignResponse,
+    PartPresignUrl,
+)
 import tempfile
 import shutil
 from app.core.logger import Logger
+from app.services.s3.keygen import temp_video_key
+from app.services.s3.presign import init_multipart_temp_video, presign_multipart_part_temp_video, complete_multipart_temp_video, presign_get_temp_video
 logger = Logger.get_logger()
 router = APIRouter()
 
@@ -25,42 +35,190 @@ TEMP_VIDEO_DIR = os.getenv("TEMP_VIDEO_DIR", "/tmp/mij_temp_videos")
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
 
-@router.post("/video-temp/temp-upload/main-video", response_model=TempVideoResponse)
+@router.post("/video-temp/temp-upload/main-video", response_model=TempVideoMultipartInitResponse)
 async def upload_temp_main_video(
-    file: UploadFile = File(...),
+    filename: str = Form(...),
+    content_type: str = Form(...),
     user: Users = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
-    本編動画を一時ストレージにアップロード
+    本編動画を一時保存バケットにマルチパートアップロードするための
+    アップロードID (upload_id) を発行する
     """
     try:
-        # 一時IDを生成
-        temp_video_id = str(uuid.uuid4())
+        # ユーザー認証チェック
+        if not user:
+            raise HTTPException(status_code=401, detail="ログインが必要です")
 
         # ファイル拡張子を取得
-        file_ext = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
+        file_ext = os.path.splitext(filename)[1].lstrip('.') if filename else "mp4"
 
-        # 保存パス
-        temp_file_path = os.path.join(TEMP_VIDEO_DIR, f"{temp_video_id}{file_ext}")
+        # 一時保存ビデオキーを生成
+        s3_key = temp_video_key(str(user.id), filename, file_ext)
 
-        # ファイルを保存
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # 署名付きPUT URLを生成
+        multipart = init_multipart_temp_video("temp-video", s3_key, content_type)
 
-        # 動画の長さを取得（ffprobeを使用）
-        duration = _get_video_duration(temp_file_path)
-
-        return TempVideoResponse(
-            temp_video_id=temp_video_id,
-            temp_video_url=f"/temp-videos/{temp_video_id}{file_ext}",
-            duration=duration
+        return TempVideoMultipartInitResponse(
+            s3_key=s3_key,
+            bucket=multipart["bucket"],
+            upload_id=multipart["upload_id"],
+            expires_in=multipart["expires_in"],
         )
-
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"一時動画アップロードエラー: {e}")
+        logger.exception(f"署名付きURL発行エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/video-temp/temp-upload/main-video/part-presign", response_model=TempVideoPartPresignResponse)
+async def presign_temp_main_video_part(
+    s3_key: str = Form(...),
+    upload_id: str = Form(...),
+    part_number: int = Form(...),
+    user: Users = Depends(get_current_user_optional),
+):
+    """
+    マルチパートアップロード用: 各パートの署名付きURLを発行
+    """
+    try:
+        if not user:
+            raise HTTPException(status_code=401, detail="ログインが必要です")
+
+        presign = presign_multipart_part_temp_video(
+            resource="temp-video",
+            key=s3_key,
+            upload_id=upload_id,
+            part_number=part_number,
+        )
+
+        return TempVideoPartPresignResponse(
+            s3_key=s3_key,
+            upload_id=upload_id,
+            part_number=part_number,
+            upload_url=presign["upload_url"],
+            expires_in=presign["expires_in"],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"マルチパートアップロード用: 各パートの署名付きURL発行エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/video-temp/temp-upload/bulk-part-presign", response_model=BulkPartPresignResponse)
+async def bulk_presign_temp_main_video_parts(
+    request: BulkPartPresignRequest,
+    user: Users = Depends(get_current_user_optional),
+):
+    """
+    マルチパートアップロード用: 複数パートの署名付きURLを一括発行
+    並列アップロードを可能にするため、一度に複数のURLを取得
+    """
+    try:
+        if not user:
+            raise HTTPException(status_code=401, detail="ログインが必要です")
+
+        # S3キーにユーザーIDが含まれているか確認（セキュリティチェック）
+        if not request.s3_key.startswith(f"temp-videos/{user.id}/"):
+            raise HTTPException(status_code=403, detail="アクセス権限がありません")
+
+        # パート数の上限チェック（S3の制限: 最大10,000パート）
+        if len(request.part_numbers) > 10000:
+            raise HTTPException(status_code=400, detail="パート数が上限を超えています（最大10,000）")
+
+        # 有効期限を2時間に設定（大容量ファイル対応）
+        expires_in = 7200
+
+        urls: list[PartPresignUrl] = []
+        for part_number in request.part_numbers:
+            presign = presign_multipart_part_temp_video(
+                resource="temp-video",
+                key=request.s3_key,
+                upload_id=request.upload_id,
+                part_number=part_number,
+                expires_in=expires_in,
+            )
+            urls.append(PartPresignUrl(
+                part_number=part_number,
+                upload_url=presign["upload_url"],
+            ))
+
+        return BulkPartPresignResponse(
+            s3_key=request.s3_key,
+            upload_id=request.upload_id,
+            urls=urls,
+            expires_in=expires_in,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"一括署名付きURL発行エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/video-temp/playback-url/{s3_key:path}")
+async def get_temp_video_playback_url(
+    s3_key: str,
+    user: Users = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    一時保存された動画の再生用署名付きGET URLを取得
+    """
+    try:
+        # ユーザー認証チェック
+        if not user:
+            raise HTTPException(status_code=401, detail="ログインが必要です")
+
+        # S3キーにユーザーIDが含まれているか確認（セキュリティチェック）
+        if not s3_key.startswith(f"temp-videos/{user.id}/"):
+            raise HTTPException(status_code=403, detail="アクセス権限がありません")
+
+        # 署名付きGET URLを生成（1時間有効）
+
+        presign_data = presign_get_temp_video(
+            "temp-video",
+            s3_key,
+            expires_in=3600,  # 1時間
+            content_type="video/mp4"
+        )
+
+        return {
+            "playback_url": presign_data["download_url"],
+            "expires_in": presign_data["expires_in"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"再生用URL取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/video-temp/temp-upload/main-video/complete")
+async def complete_temp_main_video_upload(
+    req: TempVideoMultipartCompleteRequest,
+    user: Users = Depends(get_current_user_optional),
+):
+    try:
+        if not user:
+            raise HTTPException(status_code=401, detail="ログインが必要です")
+
+        resp = complete_multipart_temp_video(
+            resource="temp-video",
+            key=req.s3_key,
+            upload_id=req.upload_id,
+            parts=req.parts,
+        )
+        return resp
+    except Exception:
+        # 必要であれば abort_multipart_upload を呼ぶ
+        raise HTTPException(
+            status_code=500,
+            detail="マルチパートアップロードの完了に失敗しました",
+        )
 
 @router.post("/video-temp/temp-upload/create-sample", response_model=SampleVideoResponse)
 async def create_sample_video(
@@ -69,14 +227,17 @@ async def create_sample_video(
     db: Session = Depends(get_db)
 ):
     """
-    一時保存された本編動画から指定範囲を切り取ってサンプル動画を生成
+    S3の一時保存バケットにある本編動画から指定範囲を切り取ってサンプル動画を生成
     """
     try:
-        # 本編動画のパスを探索
-        temp_video_path = _find_temp_video_file(request.temp_video_id)
+        # ユーザー認証チェック
+        if not user:
+            raise HTTPException(status_code=401, detail="ログインが必要です")
 
-        if not temp_video_path:
-            raise HTTPException(status_code=404, detail="一時動画が見つかりません")
+        # S3キー（temp_video_id）にユーザーIDが含まれているか確認（セキュリティチェック）
+        s3_key = request.temp_video_id
+        if not s3_key.startswith(f"temp-videos/{user.id}/"):
+            raise HTTPException(status_code=403, detail="アクセス権限がありません")
 
         # バリデーション: 5分以内
         duration = request.end_time - request.start_time
@@ -86,22 +247,38 @@ async def create_sample_video(
         if request.start_time < 0 or request.end_time <= request.start_time:
             raise HTTPException(status_code=400, detail="無効な時間範囲です")
 
-        # サンプル動画ID生成
+        # S3から一時ファイルをダウンロード
+        from app.services.s3.client import s3_client, TEMP_VIDEO_BUCKET_NAME
+        import tempfile
+
+        s3 = s3_client()
+
+        # 一時ディレクトリに動画をダウンロード
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_input:
+            s3.download_file(TEMP_VIDEO_BUCKET_NAME, s3_key, temp_input.name)
+            temp_input_path = temp_input.name
+
+        # サンプル動画の一時ファイルパスを生成
         sample_video_id = str(uuid.uuid4())
-        sample_file_path = os.path.join(TEMP_VIDEO_DIR, f"{sample_video_id}.mp4")
+        temp_output_path = os.path.join(TEMP_VIDEO_DIR, f"{sample_video_id}.mp4")
 
-        # ffmpegで切り取り
-        _cut_video(
-            input_path=temp_video_path,
-            output_path=sample_file_path,
-            start_time=request.start_time,
-            end_time=request.end_time
-        )
+        try:
+            # ffmpegで切り取り
+            _cut_video(
+                input_path=temp_input_path,
+                output_path=temp_output_path,
+                start_time=request.start_time,
+                end_time=request.end_time
+            )
 
-        return SampleVideoResponse(
-            sample_video_url=f"/temp-videos/{sample_video_id}.mp4",
-            duration=duration
-        )
+            return SampleVideoResponse(
+                sample_video_url=f"/temp-videos/{sample_video_id}.mp4",
+                duration=duration
+            )
+        finally:
+            # 入力ファイルを削除
+            if os.path.exists(temp_input_path):
+                os.remove(temp_input_path)
 
     except HTTPException:
         raise

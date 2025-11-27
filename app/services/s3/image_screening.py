@@ -46,15 +46,15 @@ def _is_supported_magic(img_bytes: bytes) -> bool:
 def _sanitize_and_variants(
     img_bytes: bytes,
     *,
-    mosaic_boxes: Optional[List[Tuple[int, int, int, int]]] = None,
-    mosaic_block: int = 20,
+    blur_boxes: Optional[List[Tuple[int, int, int, int]]] = None,
+    blur_radius: int = 15,
 ) -> Dict[str, Tuple[bytes, str]]:
     """
     出力:
       {
         "original.jpg":    (bytes, "image/jpeg"),
         "1080w.webp":      (bytes, "image/webp"),
-        "mosaic.webp":     (bytes, "image/webp"),
+        "blurred.webp":    (bytes, "image/webp"),
       }
     """
     try:
@@ -88,33 +88,53 @@ def _sanitize_and_variants(
     im_t.save(out_thumb, format="WEBP", quality=75, method=6)
     thumb_bytes = out_thumb.getvalue()
 
-    # ★ モザイク（全面 or 指定領域）
-    im_mosaic = _apply_mosaic(im, boxes=mosaic_boxes, block=mosaic_block)
-    out_mosaic = io.BytesIO()
-    im_mosaic.save(out_mosaic, format="WEBP", quality=80, method=6)
-    mosaic_bytes = out_mosaic.getvalue()
+    # ★ ぼかし（全面 or 指定領域）
+    im_blurred = _apply_blur(im, boxes=blur_boxes, radius=blur_radius)
+    out_blurred = io.BytesIO()
+    im_blurred.save(out_blurred, format="WEBP", quality=80, method=6)
+    blurred_bytes = out_blurred.getvalue()
 
-    # モザイク版サムネ（先にモザイク→その後thumbnailで“粗さ”を維持）
-    im_mosaic_t = im_mosaic.copy()
-    im_mosaic_t.thumbnail((256, 256), Image.NEAREST)  # サムネはNEARESTで荒さを保つ
-    out_mosaic_thumb = io.BytesIO()
-    im_mosaic_t.save(out_mosaic_thumb, format="WEBP", quality=80, method=6)
-    mosaic_thumb_bytes = out_mosaic_thumb.getvalue()
+    # ぼかし版サムネ
+    im_blurred_t = im_blurred.copy()
+    im_blurred_t.thumbnail((256, 256), Image.LANCZOS)
+    out_blurred_thumb = io.BytesIO()
+    im_blurred_t.save(out_blurred_thumb, format="WEBP", quality=80, method=6)
+    blurred_thumb_bytes = out_blurred_thumb.getvalue()
 
     return {
         "original.jpg":        (original_bytes, "image/jpeg"),
         "1080w.webp":          (w1080_bytes,   "image/webp"),
-        "mosaic.webp":         (mosaic_bytes,  "image/webp"),
+        "blurred.webp":        (blurred_bytes,  "image/webp"),
     }
 
 def _moderation_check(img_bytes: bytes, min_conf: float = 80.0) -> Dict:
     """
     任意: 不適切判定。NGなら {'flagged': True, 'labels': [...]} を返す。
+
+    ヌード系コンテンツは許容し、以下のカテゴリのみブロック:
+    - Drugs (薬物)
+    - Hate Symbols (ヘイトシンボル)
     """
     try:
         resp = REKOG.detect_moderation_labels(Image={"Bytes": img_bytes})
         labels = resp.get("ModerationLabels", [])
-        flagged = any(l["Confidence"] >= min_conf for l in labels)
+
+        # ブロックするカテゴリ（ヌード系を除外）
+        BLOCKED_CATEGORIES = [
+            "Drugs",
+            "Hate Symbols",
+        ]
+
+        # ブロック対象カテゴリに該当するラベルのみチェック
+        flagged_labels = [
+            l for l in labels
+            if l["Confidence"] >= min_conf and any(
+                blocked in l.get("Name", "") or blocked in l.get("ParentName", "")
+                for blocked in BLOCKED_CATEGORIES
+            )
+        ]
+
+        flagged = len(flagged_labels) > 0
         return {"flagged": flagged, "labels": labels}
     except Exception:
         # Rekognition障害時は通し、ログのみ（必要なら厳格にfailに変更）
@@ -126,55 +146,41 @@ def _make_variant_keys(base_key: str) -> dict:
     return {
         "original.jpg": f"{stem}_original.jpg",
         "1080w.webp":   f"{stem}_1080w.webp",
-        "mosaic.webp":   f"{stem}_mosaic.webp",
+        "blurred.webp": f"{stem}_blurred.webp",
     }
 
-def _apply_mosaic(
+def _apply_blur(
     im: Image.Image,
     boxes: Optional[List[Tuple[int, int, int, int]]] = None,
-    block: int = 40,
+    radius: int = 15,
 ) -> Image.Image:
     """
-    画像にピクセル化モザイクを適用。
+    画像にガウスぼかしを適用。
     - boxes を指定しない/空: 画像全体に適用
     - boxes を指定: 各矩形領域のみに適用
-    block: ピクセル化の粒度（大きいほど粗くなる、デフォルト40でより荒いモザイク）
+    radius: ぼかしの強さ（大きいほど強くぼかす、デフォルト15）
     """
-    im_px = im.copy()
+    from PIL import ImageFilter
 
-    def _pixelate_region(img: Image.Image) -> Image.Image:
-        w, h = img.size
-        # より粗いピクセル化のため、より小さく縮小
-        # 段階的に縮小してより効果的なモザイクを実現
-        down_w = max(1, w // block)
-        down_h = max(1, h // block)
-
-        # 非常に小さなサイズに縮小してから拡大することで、より粗いモザイクを実現
-        if down_w < 4 or down_h < 4:
-            # 極端に小さくしてから拡大
-            down_w = max(1, w // (block * 2))
-            down_h = max(1, h // (block * 2))
-
-        small = img.resize((down_w, down_h), Image.NEAREST)
-        return small.resize((w, h), Image.NEAREST)
+    im_blurred = im.copy()
 
     if not boxes:
-        # 全面モザイク
-        return _pixelate_region(im_px)
+        # 全面ぼかし
+        return im_blurred.filter(ImageFilter.GaussianBlur(radius=radius))
 
-    # 領域モザイク
+    # 領域ぼかし
     for (l, t, r, b) in boxes:
         # 領域は画像範囲にクリップ
-        l2 = max(0, min(l, im_px.width))
-        t2 = max(0, min(t, im_px.height))
-        r2 = max(l2, min(r, im_px.width))
-        b2 = max(t2, min(b, im_px.height))
+        l2 = max(0, min(l, im_blurred.width))
+        t2 = max(0, min(t, im_blurred.height))
+        r2 = max(l2, min(r, im_blurred.width))
+        b2 = max(t2, min(b, im_blurred.height))
         if r2 - l2 <= 0 or b2 - t2 <= 0:
             continue
-        crop = im_px.crop((l2, t2, r2, b2))
-        crop_px = _pixelate_region(crop)
-        im_px.paste(crop_px, (l2, t2))
-    return im_px
+        crop = im_blurred.crop((l2, t2, r2, b2))
+        crop_blurred = crop.filter(ImageFilter.GaussianBlur(radius=radius))
+        im_blurred.paste(crop_blurred, (l2, t2))
+    return im_blurred
 
 
 # ========== OGP画像生成関連 ==========
