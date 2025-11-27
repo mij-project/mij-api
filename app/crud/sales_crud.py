@@ -1,5 +1,4 @@
 from sqlalchemy.orm import Session
-from app.models.orders import OrderItems
 from uuid import UUID
 from sqlalchemy import func
 

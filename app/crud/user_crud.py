@@ -16,7 +16,6 @@ from app.constants.enums import (
 from app.crud.profile_crud import get_profile_by_username
 from app.models.posts import Posts
 from app.models.plans import Plans, PostPlans
-from app.models.orders import Orders, OrderItems
 from app.models.media_assets import MediaAssets
 from app.models.social import Likes, Follows
 from app.models.prices import Prices
@@ -214,7 +213,7 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .all()
     )
     
-    gacha_items = db.query(OrderItems).join(Orders).filter(Orders.user_id == user.id).filter(OrderItems.item_type == 2).all()
+    gacha_items = []
     
     # フォロワー数とフォロー数を取得
     follower_count = get_follower_count(db, user.id)

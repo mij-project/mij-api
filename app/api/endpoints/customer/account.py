@@ -55,7 +55,6 @@ from app.crud.post_crud import (
 from app.crud.post_categries import get_post_categories
 from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id
-from app.crud.purchases_crud import get_single_purchases_count_by_user_id, get_single_purchases_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
 from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile, exist_profile_by_username
 from app.crud import profile_image_crud
@@ -154,8 +153,8 @@ def get_account_info(
         # プラン情報
         plan_data = get_plan_by_user_id(db, current_user.id)
         # 単品購入データ
-        single_purchases_count = get_single_purchases_count_by_user_id(db, current_user.id)
-        single_purchases_data = get_single_purchases_by_user_id(db, current_user.id)
+        single_purchases_count = 0
+        single_purchases_data = []
 
         # subscribed_plan_detailsのURLを構築
         subscribed_plan_details = []

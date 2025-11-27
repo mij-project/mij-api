@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from .creators import Creators
     from .posts import Posts
     from .plans import Plans
-    from .subscriptions import Subscriptions
-    from .orders import Orders
     from .creator_type import CreatorType
     from .gender import Gender
     from .email_verification_tokens import EmailVerificationTokens
@@ -53,8 +51,6 @@ class Users(Base):
     creator: Mapped[Optional["Creators"]] = relationship("Creators", back_populates="user", uselist=False)
     posts: Mapped[List["Posts"]] = relationship("Posts", back_populates="creator")
     plans: Mapped[List["Plans"]] = relationship("Plans", back_populates="creator")
-    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="user")
-    orders: Mapped[List["Orders"]] = relationship("Orders", back_populates="user")
     creator_type: Mapped[List["CreatorType"]] = relationship("CreatorType", back_populates="user", cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
     genders: Mapped[List["Gender"]] = relationship("Gender", secondary="creator_type", viewonly=True, lazy="selectin")
     email_verification_tokens: Mapped[List["EmailVerificationTokens"]] = relationship("EmailVerificationTokens", back_populates="user")

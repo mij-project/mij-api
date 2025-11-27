@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from .user import Users
     from .posts import Posts
     from .subscriptions import Subscriptions
-    from .orders import OrderItems
 
 class Entitlements(Base):
     """視聴権利 (ユーザーと投稿の多対多)"""
@@ -35,7 +34,6 @@ class Entitlements(Base):
     post: Mapped[Optional["Posts"]] = relationship("Posts")
     creator: Mapped[Optional["Users"]] = relationship("Users", foreign_keys=[creator_user_id])
     granted_by_subscription: Mapped[Optional["Subscriptions"]] = relationship("Subscriptions")
-    granted_by_order_item: Mapped[Optional["OrderItems"]] = relationship("OrderItems")
 
     __table_args__ = (
         Index('idx_entitlements_user_scope', 'user_id', 'scope', 'creator_user_id', 'ends_at'),
