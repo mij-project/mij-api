@@ -105,7 +105,7 @@ def get_posts_count_by_user_id(db: Session, user_id: UUID) -> dict:
         db.query(Posts)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.PENDING)
+        .filter(Posts.status.in_([PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]))
         .count()
     )
 
