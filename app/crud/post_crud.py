@@ -249,7 +249,7 @@ def get_post_status_by_user_id(db: Session, user_id: UUID) -> dict:
     """
 
     # 審査中の投稿を取得
-    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]).all()
+    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING, PostStatus.CONVERT_FAILED]).all()
 
     # 拒否された投稿を取得
     rejected_posts = _build_post_status_query(db, user_id, [PostStatus.REJECTED]).all()
