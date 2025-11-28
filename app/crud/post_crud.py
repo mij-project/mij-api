@@ -57,7 +57,6 @@ POST_APPROVED_MD = """## mijfans 投稿の審査が完了しました
 
 [投稿を確認する](--post-url--)
 
-すぐに公開しましょう。  
 ご不明な点がございましたら、サポートまでお問い合わせください。
 """
 
@@ -101,7 +100,7 @@ def get_posts_count_by_user_id(db: Session, user_id: UUID) -> dict:
     """
     
     # 審査中
-    peding_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status == PostStatus.PENDING).count()
+    peding_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status.in_([PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING, PostStatus.CONVERT_FAILED])).count()
 
     # 修正
     rejected_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status == PostStatus.REJECTED).count()
