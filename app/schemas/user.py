@@ -35,6 +35,8 @@ class ProfilePostResponse(BaseModel):
     video_duration: Optional[int] = None
     price: Optional[int] = None
     currency: Optional[str] = "JPY"
+    is_reserved: Optional[bool] = False
+    is_expired: Optional[bool] = False
 
 class ProfilePlanResponse(BaseModel):
     id: UUID
@@ -55,6 +57,7 @@ class ProfilePurchaseResponse(BaseModel):
     video_duration: Optional[int] = None
     price: Optional[int] = None
     currency: Optional[str] = "JPY"
+    is_reserved: Optional[bool] = False
 
 class ProfileGachaResponse(BaseModel):
     id: UUID

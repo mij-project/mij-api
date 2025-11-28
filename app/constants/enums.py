@@ -44,6 +44,7 @@ class PostStatus:
     APPROVED = 5 # 公開
     RESUBMIT = 6 # 再申請
     CONVERTING = 7 # 変換中
+    CONVERT_FAILED = 8 # 変換失敗
 
 # 投稿の種類
 class PostType:
@@ -94,6 +95,7 @@ class MediaAssetStatus:
     UNPUBLISHED = 5 # 非公開
     RESUBMIT = 6 # 再申請
     CONVERTING = 7 # 変換中
+    CONVERT_FAILED = 8 # 変換失敗
 
 # メディアアセットのkind
 class MediaAssetKind:

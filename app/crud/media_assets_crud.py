@@ -2,9 +2,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.models.media_assets import MediaAssets
 from app.models.posts import Posts
-from app.constants.enums import MediaAssetKind
-from app.constants.enums import PostType
+from app.constants.enums import MediaAssetKind, MediaAssetStatus, PostType
 from typing import List
+from uuid import UUID
 
 def create_media_asset(db: Session, media_asset_data: dict) -> MediaAssets:
     """
@@ -138,6 +138,30 @@ def get_media_assets_by_post_id(db: Session, post_id: str, kind: str) -> str:
         .order_by(MediaAssets.created_at.desc())
         .first()
     )
+
+def check_all_media_assets_approved(db: Session, post_id: str) -> bool:
+    """
+    投稿に紐づく全てのメディアアセットがAPPROVED状態かチェック
+
+    Args:
+        db: データベースセッション
+        post_id: 投稿ID
+
+    Returns:
+        全てのメディアアセットがAPPROVED状態の場合True、それ以外はFalse
+    """
+
+    # 投稿に紐づく全てのメディアアセットを取得
+    media_assets = db.query(MediaAssets).filter(
+        MediaAssets.post_id == post_id
+    ).all()
+
+    # メディアアセットが存在しない場合はFalse
+    if not media_assets:
+        return False
+
+    # 全てのメディアアセットがAPPROVED状態かチェック
+    return all(asset.status == MediaAssetStatus.APPROVED for asset in media_assets)
 
 def get_media_assets_by_post_id_and_kind(db: Session, post_id: str, kind: str) -> MediaAssets:
     """
