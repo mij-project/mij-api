@@ -575,7 +575,10 @@ async def presign_update_video_upload(
 
             # 新しいメディアアセットを作成
             media_asset_data = create_media_asset_data(
-                str(request.post_id), f.kind, new_key, f.orientation,
+                str(request.post_id), 
+                f.kind, 
+                new_key, 
+                f.orientation,
                 f.content_type, MediaAssetStatus.RESUBMIT,
                 sample_type=f.sample_type,
                 sample_start_time=f.sample_start_time,
@@ -949,6 +952,7 @@ async def trigger_batch_process(
         )
 
         logger.info(f"バッチ処理トリガー: user_id={user.id}, post_id={request.post_id}, tmp_key={request.tmp_storage_key}")
+        logger.info(f"リクエスト内容ログ: request={request}")
 
         # 投稿の存在確認
         post = get_post_by_id(db, str(request.post_id))
@@ -971,16 +975,16 @@ async def trigger_batch_process(
 
         # 既存サンプル動画アセットの削除判定
         # - need_trim=True（cut_outモード）: 新しいサンプル動画を生成するため、既存を削除
-        # - need_trim=False（uploadモード）: 既存サンプル動画がcut_outモードの場合のみ削除
-        #   （uploadモードの既存サンプル動画は保持）
+        # - need_trim=False & sample_orientation=None: サンプル動画未変更のため、既存を保持
+        # - need_trim=False & sample_orientation!=None: 新しいサンプル動画（upload）をアップロードするため、既存を削除
         should_delete_sample = False
         if request.need_trim:
             # cut_outモードで新しいサンプル動画を生成する場合は削除
             should_delete_sample = True
-        elif existing_sample_asset and existing_sample_asset.sample_type == "cut_out":
-            # uploadモードだが、既存がcut_outモードの場合は削除
-            # （メイン動画が変わると、cut_outで切り出したサンプル動画は無効になる）
+        elif request.sample_orientation is not None:
+            # サンプル動画が指定されている（uploadモードまたはcut_out再設定）場合は既存を削除
             should_delete_sample = True
+        # sample_orientation=Noneの場合は既存のサンプル動画を保持（削除しない）
 
         if should_delete_sample:
             delete_existing_video_asset(db, existing_sample_asset, resource, post['authenticated_flg'])
@@ -990,7 +994,6 @@ async def trigger_batch_process(
 
         db.commit()
 
-        logger.info(f"既存アセット処理完了: post_id={request.post_id}")
 
         # バックグラウンドタスクとしてバッチ処理を登録
         background_tasks.add_task(
