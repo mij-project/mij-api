@@ -56,6 +56,7 @@ class PostsInfo(BaseModel):
     unpublished_posts_count: int
     deleted_posts_count: int
     approved_posts_count: int
+    reserved_posts_count: int
 
 class SalesInfo(BaseModel):
     total_sales: int
@@ -164,6 +165,7 @@ class AccountPostStatusResponse(BaseModel):
     unpublished_posts: List[AccountPostResponse] = []
     deleted_posts: List[AccountPostResponse] = []
     approved_posts: List[AccountPostResponse] = []
+    reserved_posts: List[AccountPostResponse] = []
 
 class AccountMediaAsset(BaseModel):
     """クリエイター用投稿詳細のメディアアセット情報"""
