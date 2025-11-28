@@ -1,0 +1,92 @@
+name: Staging Deploy
+
+on:
+  push:
+    branches:
+      - staging
+
+env:
+  AWS_REGION: ap-northeast-1
+  SLACK_CHANNEL: C0A0YDFF5PS
+  ECR_BATCHS_REPOSITORY: mijfans-batchs:stg
+  ECR_API_REPOSITORY: stg-mij-api:latest
+  ECS_API_CLUSTER: stg-mij-api
+  ECS_API_SERVICE: mij-api-stg-svc
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    environment: mijfans
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Api Image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_API_REPOSITORY }}
+        run: |
+          DOCKER_DEFAULT_PLATFORM=linux/amd64 docker build -t $ECR_REGISTRY/$ECR_REPOSITORY .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY
+
+      - name: Build and Push Baths Image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_BATCHS_REPOSITORY }}
+        run: |
+          cd batchs
+          DOCKER_DEFAULT_PLATFORM=linux/amd64 docker build -t $ECR_REGISTRY/$ECR_REPOSITORY .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY
+          cd ..
+      
+      - name: Notify Slack (failure)
+        if: failure()
+        run: |
+          TOKEN=${{ secrets.SLACK_BOT_TOKEN }}
+          CHANNEL=${{ env.SLACK_CHANNEL }}
+          MESSAGE="<!channel>\n❌ [STG] [mij-api] Deployment failed"
+          curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"channel\": \"$CHANNEL\", \"text\": \"$MESSAGE\"}" https://slack.com/api/chat.postMessage
+  
+  deploy-api-to-ecs:
+    runs-on: ubuntu-latest
+    environment: mijfans
+    needs: build-and-push-image
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force new deployment
+        run: |
+          aws ecs update-service --cluster ${{ env.ECS_API_CLUSTER }} --service ${{ env.ECS_API_SERVICE }} --force-new-deployment
+
+      - name: Notify Slack (success)
+        if: success()
+        run: |
+          TOKEN=${{ secrets.SLACK_BOT_TOKEN }}
+          CHANNEL=${{ env.SLACK_CHANNEL }}
+          MESSAGE="<!channel>\n✅ [STG] [mij-api] Deployment successful"
+          curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"channel\": \"$CHANNEL\", \"text\": \"$MESSAGE\"}" https://slack.com/api/chat.postMessage
+      
+      - name: Notify Slack (failure)
+        if: failure()
+        run: |
+          TOKEN=${{ secrets.SLACK_BOT_TOKEN }}
+          CHANNEL=${{ env.SLACK_CHANNEL }}
+          MESSAGE="<!channel>\n❌ [STG] [mij-api] Deployment failed"
+          curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"channel\": \"$CHANNEL\", \"text\": \"$MESSAGE\"}" https://slack.com/api/chat.postMessage

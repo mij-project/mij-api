@@ -290,6 +290,8 @@ def transcode_mc_update(
 
         post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
 
+        logger.info(f"MediaConvert処理対象アセット更新処理: post_id={post_id}, media_asset_ids={media_asset_ids}")
+
         result = _update_media_asset_rejected_comments(db, post_id)
         if not result:
             raise HTTPException(status_code=404, detail="Media asset not found")
