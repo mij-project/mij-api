@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from sqlalchemy import ForeignKey, SmallInteger, Text, func
+from sqlalchemy import SmallInteger, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from common.db_session import Base
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -10,7 +10,7 @@ class Posts(Base):
     __tablename__ = "posts"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    creator_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    creator_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=False)
     visibility: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     post_type: Mapped[int] = mapped_column(SmallInteger, nullable=True)
