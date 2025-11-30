@@ -3097,10 +3097,10 @@ def add_mail_notification_for_post(
         type: 通知タイプ "approved" | "rejected"
     """
     try:
-        user = (
+        result = (
             db.query(
                 Users,
-                Profiles.username,
+                Profiles,
                 Posts,
                 UserSettings.settings,
             )
@@ -3117,27 +3117,36 @@ def add_mail_notification_for_post(
             .first()
         )
 
-        if not user:
+        if not result:
             raise Exception("Can not query user settings")
+        
+        # タプルをアンパック
+        user, profile, post, settings = result
+        
+        # メール通知の設定をチェック
+        # settingsがNoneの場合、またはpostApproveがTrue/Noneの場合は送信
+        should_send = True
+        if settings is not None and isinstance(settings, dict):
+            post_approve_setting = settings.get("postApprove", True)
+            if post_approve_setting is False:
+                should_send = False
+        
+        if not should_send:
+            return
+            
         if type == "approved":
-            if (
-                (user.settings is None)
-                or (user.settings.get("postApprove", True) == True)
-                or (user.settings.get("postApprove", True) is None)
-            ):
-                send_post_approval_email(user.Users.email, user.username, user.Posts.id)
+            send_post_approval_email(
+                user.email,
+                profile.username if profile else user.profile_name,
+                str(post.id)
+            )
         elif type == "rejected":
-            if (
-                (user.settings is None)
-                or (user.settings.get("postApprove", True) == True)
-                or (user.settings.get("postApprove", True) is None)
-            ):
-                send_post_rejection_email(
-                    user.Users.email,
-                    user.username,
-                    user.Posts.reject_comments,
-                    user.Posts.id,
-                )
+            send_post_rejection_email(
+                user.email,
+                profile.username if profile else user.profile_name,
+                post.reject_comments,
+                str(post.id)
+            )
     except Exception as e:
         logger.exception(f"{e}")
         logger.error(f"Add mail notification for post error: {e}")

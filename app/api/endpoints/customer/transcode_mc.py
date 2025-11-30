@@ -220,7 +220,7 @@ def transcode_mc_unified(
             raise HTTPException(status_code=404, detail="Media asset not found")
 
 
-        result = False
+        image_processing_result = False
         for row in assets:
             # HLS ABR4処理（ビデオの場合のみ）
             if type == "video":
@@ -242,20 +242,22 @@ def transcode_mc_unified(
 
             # FFmpeg処理（画像の場合のみ）
             if type == "image":
-                result = _process_image_asset(db, row, post_id)
-                if not result:
+                image_processing_result = _process_image_asset(db, row, post_id)
+                if not image_processing_result:
                     raise HTTPException(status_code=500, detail="Image processing failed")
-                else:
-                    # 投稿ステータスの更新
-                    post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
-                    
-                    db.commit()
-                    db.refresh(post)
 
-                    # Email通知を追加
-                    add_mail_notification_for_post(db, post_id=post_id, type="approved")
-                    # 投稿に対する通知を追加
-                    add_notification_for_post(db, post, row.creator_user_id, type="approved")
+        # 画像処理の場合のみ、最後のループ処理でステータス更新と通知を送信
+        if type == "image" and image_processing_result:
+            # 投稿ステータスの更新
+            post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
+            
+            db.commit()
+            db.refresh(post)
+
+            # Email通知を追加（メール通知設定をチェック）
+            add_mail_notification_for_post(db, post_id=post_id, type="approved")
+            # 投稿に対する通知を追加
+            add_notification_for_post(db, post, post.creator_user_id, type="approved")
 
         return {"status": True, "message": f"Media conversion completed for {type}"}
 

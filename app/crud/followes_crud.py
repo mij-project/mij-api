@@ -167,15 +167,20 @@ def add_notification_follow(db: Session, follower_user_id: UUID, creator_user_id
     """
     try:
         follower_profile = db.query(Profiles).filter(Profiles.user_id == follower_user_id).first()
-        
+        follower_user = db.query(Users).filter(Users.id == follower_user_id).first()
+        if not follower_user:
+            logger.error(f"Follower user not found: {follower_user_id}")
+            return
+        display_name = follower_user.profile_name if follower_user.profile_name else (follower_user.email or "ユーザー")
+        avatar_url = f"{os.environ.get('CDN_BASE_URL')}/{follower_profile.avatar_url}" if (follower_profile and follower_profile.avatar_url) else f"{os.environ.get('FRONTEND_URL')}/assets/no-image.svg"
         notification = Notifications(
             user_id=creator_user_id,
             type=NotificationType.USERS,
             payload={
-                "title": f"{follower_profile.username} があなたをフォローしました",
-                "subtitle": f"{follower_profile.username} があなたをフォローしました",
-                "avatar": f"{BASE_URL}/{follower_profile.avatar_url}" if follower_profile.avatar_url else f"{FRONTEND_URL}/assets/no-image.svg",
-                "redirect_url": f"{FRONTEND_URL}/profile?username={follower_profile.username}"
+                "title": f"{display_name} があなたをフォローしました",
+                "subtitle": f"{display_name} があなたをフォローしました",
+                "avatar": avatar_url,
+                "redirect_url": f"/profile?username={follower_profile.username}"
             },
             is_read=False,
             read_at=None,

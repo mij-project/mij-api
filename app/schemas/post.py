@@ -31,6 +31,7 @@ class PostCategoryResponse(BaseModel):
 	username: str
 	creator_avatar_url: Optional[str] = None
 	duration: Optional[str] = None
+	category_name: str
 
 class PaginatedPostCategoryResponse(BaseModel):
 	posts: List[PostCategoryResponse]
@@ -39,6 +40,7 @@ class PaginatedPostCategoryResponse(BaseModel):
 	per_page: int
 	has_next: bool
 	has_previous: bool
+	category_name: str
 
 class NewArrivalsResponse(BaseModel):
     id: str
