@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
 from datetime import datetime
 
@@ -11,6 +11,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from .posts import Posts
+    from .subscriptions import Subscriptions
 
 class Prices(Base):
     __tablename__ = "prices"
@@ -25,3 +26,4 @@ class Prices(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     post: Mapped["Posts"] = relationship("Posts")
+    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="price_model")

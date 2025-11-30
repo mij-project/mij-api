@@ -10,7 +10,6 @@ from app.models.creators import Creators
 from app.models.identity import IdentityVerifications
 from app.models.posts import Posts
 from app.models.profiles import Profiles
-from app.models.subscriptions import Subscriptions
 from app.models.media_assets import MediaAssets
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
@@ -163,11 +162,7 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
         monthly_revenue = 100000
 
         # アクティブな購読数
-        active_subscriptions = (
-            db.query(Subscriptions)
-            .filter(Subscriptions.status == 1)  # アクティブな購読
-            .count()
-        )
+        active_subscriptions = 0
 
         return {
             "total_users": total_users,

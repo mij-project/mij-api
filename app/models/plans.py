@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .user import Users
     from .posts import Posts
     from .prices import Prices
+    from .subscriptions import Subscriptions
 
 class Plans(Base):
     __tablename__ = "plans"
@@ -32,6 +33,7 @@ class Plans(Base):
 
     creator: Mapped["Users"] = relationship("Users", back_populates="plans")
     post_plans: Mapped[List["PostPlans"]] = relationship("PostPlans", back_populates="plan")
+    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="plan")
 
 class PostPlans(Base):
     __tablename__ = "post_plans"

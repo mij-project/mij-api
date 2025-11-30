@@ -9,11 +9,10 @@ from .media_assets import MediaAssets
 from .media_renditions import MediaRenditions
 from .plans import Plans
 from .prices import Prices
-from .subscriptions import Subscriptions
 from .payments import Payments
 from .providers import Providers
 from .payment_transactions import PaymentTransactions
-from .entitlements import Entitlements
+from .subscriptions import Subscriptions
 from .social import Follows, Likes, Comments, Bookmarks
 from .notifications import Notifications
 from .identity import IdentityVerifications, IdentityDocuments
@@ -38,15 +37,21 @@ from .search_history import SearchHistory
 from .password_reset_token import PasswordResetToken
 from .user_settings import UserSettings
 from .generation_media import GenerationMedia
+from .banks import Banks
+from .user_banks import UserBanks
+from .user_providers import UserProviders
+from .withdraws import Withdraws
+from .bank_request_histories import BankRequestHistories
 
 __all__ = [
     "Users", "Profiles", "Creators", "Genres", "Categories", "Posts", "PostCategories",
     "MediaAssets", "MediaRenditions", "Plans", "Prices", "Subscriptions",
-    "Payments", "Entitlements", "Follows", "Likes", "Comments",
+    "Payments",  "Follows", "Likes", "Comments",
     "Bookmarks", "Notifications", "IdentityVerifications", "IdentityDocuments", "ProfileImageSubmissions",
     "AuditLogs", "Tags", "PostTags", "I18nLanguages", "I18nTexts",
     "CreatorType", "Gender", "MediaRenditionJobs", "Preregistrations",
     "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants",
     "Admins", "SMSVerifications", "Banners", "Events", "UserEvents", "Companies", "CompanyUsers",
-    "SearchHistory", "PasswordResetToken", "UserSettings", "GenerationMedia"
+    "SearchHistory", "PasswordResetToken", "UserSettings", "GenerationMedia",
+    "Banks", "UserBanks", "UserProviders", "Withdraws", "BankRequestHistories"
 ]

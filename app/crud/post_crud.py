@@ -27,7 +27,6 @@ from app.models.plans import Plans, PostPlans
 from app.models.prices import Prices
 from app.models.media_renditions import MediaRenditions
 from app.models.payments import Payments
-from app.crud.entitlements_crud import check_entitlement
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PlanStatus
 from app.models.media_rendition_jobs import MediaRenditionJobs
@@ -60,6 +59,7 @@ POST_APPROVED_MD = """## mijfans 投稿の審査が完了しました
 
 [投稿を確認する](--post-url--)
 
+すぐに公開しましょう。  
 ご不明な点がございましたら、サポートまでお問い合わせください。
 """
 
@@ -1092,7 +1092,7 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
 def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     """メディア情報を取得・処理"""
     media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
-    is_entitlement = check_entitlement(db, user_id, post_id) if user_id else False
+    is_entitlement = False
 
     set_media_kind = (
         MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO

@@ -12,6 +12,8 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from .identity import IdentityVerifications
     from .conversation_messages import ConversationMessages
+    from .user_banks import UserBanks
+    from .withdraws import Withdraws
 class Admins(Base):
     """管理者"""
     __tablename__ = "admins"
@@ -28,3 +30,7 @@ class Admins(Base):
 
     identity_verifications: Mapped[List["IdentityVerifications"]] = relationship("IdentityVerifications", back_populates="approver")
     conversations: Mapped[List["ConversationMessages"]] = relationship("ConversationMessages", back_populates="sender_admin", foreign_keys="ConversationMessages.sender_admin_id")
+
+    # 決済システム関連
+    verified_user_banks: Mapped[List["UserBanks"]] = relationship("UserBanks", back_populates="verifier")
+    approved_withdraws: Mapped[List["Withdraws"]] = relationship("Withdraws", back_populates="approver")

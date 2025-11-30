@@ -25,6 +25,13 @@ if TYPE_CHECKING:
     from .companies import CompanyUsers
     from .password_reset_token import PasswordResetToken
     from .generation_media import GenerationMedia
+    from .subscriptions import Subscriptions
+    from .payment_transactions import PaymentTransactions
+    from .payments import Payments
+    from .user_providers import UserProviders
+    from .user_banks import UserBanks
+    from .withdraws import Withdraws
+    from .bank_request_histories import BankRequestHistories
 
 class Users(Base):
     __tablename__ = "users"
@@ -62,3 +69,15 @@ class Users(Base):
     company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
     password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship("PasswordResetToken", back_populates="user")
     generation_media: Mapped[["GenerationMedia"]] = relationship("GenerationMedia", back_populates="user")
+
+    # 決済システム関連
+    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="user", foreign_keys="Subscriptions.user_id")
+    creator_subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="creator", foreign_keys="Subscriptions.creator_id")
+    buyer_transactions: Mapped[List["PaymentTransactions"]] = relationship("PaymentTransactions", back_populates="buyer", foreign_keys="PaymentTransactions.user_id")
+    seller_transactions: Mapped[List["PaymentTransactions"]] = relationship("PaymentTransactions", back_populates="seller", foreign_keys="PaymentTransactions.creator_id")
+    purchases: Mapped[List["Payments"]] = relationship("Payments", back_populates="buyer", foreign_keys="Payments.buyer_user_id")
+    sales: Mapped[List["Payments"]] = relationship("Payments", back_populates="seller", foreign_keys="Payments.seller_user_id")
+    user_providers: Mapped[List["UserProviders"]] = relationship("UserProviders", back_populates="user")
+    user_banks: Mapped[List["UserBanks"]] = relationship("UserBanks", back_populates="user")
+    withdraws: Mapped[List["Withdraws"]] = relationship("Withdraws", back_populates="user")
+    bank_request_histories: Mapped[List["BankRequestHistories"]] = relationship("BankRequestHistories", back_populates="user")

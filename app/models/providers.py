@@ -1,21 +1,46 @@
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, SmallInteger, BigInteger, func, CHAR, String
+from sqlalchemy import SmallInteger, func, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from app.db.base import Base
 
+if TYPE_CHECKING:
+    from .payment_transactions import PaymentTransactions
+    from .payments import Payments
+    from .subscriptions import Subscriptions
+    from .user_providers import UserProviders
+
 class Providers(Base):
-    """決済プロバイダ"""
+    """決済プロバイダー"""
     __tablename__ = "providers"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    code: Mapped[str] = mapped_column(String(255), nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # プロバイダー基本情報
+    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, comment="プロバイダーコード（例: credix, stripe）")
+    name: Mapped[str] = mapped_column(String(255), nullable=False, comment="表示名（例: Credix, Stripe）")
+
+    # Credix固有設定
+    credix_ip_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, comment="Credix IPコード（clientip）")
+    credix_zkey: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Credix認証キー（zkey）")
+    credix_webhook_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Credix Webhook受信URL")
+
+    # プロバイダー別設定（JSON形式で柔軟に対応）
+    settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="プロバイダー固有設定（JSON）")
+
+    # ステータス
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, comment="1=active, 2=inactive")
+
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    payment_transactions: Mapped[List["PaymentTransactions"]] = relationship("PaymentTransactions", back_populates="provider")
+    payments: Mapped[List["Payments"]] = relationship("Payments", back_populates="provider")
+    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="provider")
+    user_providers: Mapped[List["UserProviders"]] = relationship("UserProviders", back_populates="provider")
