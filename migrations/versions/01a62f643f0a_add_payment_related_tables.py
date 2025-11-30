@@ -277,7 +277,6 @@ def downgrade() -> None:
     op.drop_constraint(op.f('fk_payments_buyer_user_id_users'), 'payments', type_='foreignkey')
     op.drop_constraint(op.f('fk_payments_transaction_id_payment_transactions'), 'payments', type_='foreignkey')
     op.drop_constraint(op.f('fk_payments_provider_id_providers'), 'payments', type_='foreignkey')
-    op.create_foreign_key(op.f('fk_payments_order_id_orders'), 'payments', 'orders', ['order_id'], ['id'])
     op.drop_index(op.f('ix_payments_transaction_id'), table_name='payments')
     op.drop_index(op.f('ix_payments_status'), table_name='payments')
     op.drop_index(op.f('ix_payments_seller_user_id'), table_name='payments')
@@ -297,6 +296,7 @@ def downgrade() -> None:
     op.alter_column('payments', 'order_id',
                existing_type=sa.String(length=255),
                type_=sa.UUID(),
+               postgresql_using='order_id::uuid',
                comment=None,
                existing_comment='plan_id（サブスク）またはprice_id（単品販売）',
                existing_nullable=False)
@@ -313,6 +313,19 @@ def downgrade() -> None:
     op.drop_column('payments', 'order_type')
     op.drop_column('payments', 'payment_type')
     op.drop_column('payments', 'transaction_id')
+    # Create tables in correct order (reverse of upgrade drop order)
+    op.create_table('orders',
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), autoincrement=False, nullable=False),
+    sa.Column('user_id', sa.UUID(), autoincrement=False, nullable=False),
+    sa.Column('total_amount', sa.BIGINT(), autoincrement=False, nullable=False),
+    sa.Column('currency', sa.TEXT(), autoincrement=False, nullable=False),
+    sa.Column('status', sa.SMALLINT(), autoincrement=False, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), autoincrement=False, nullable=False),
+    sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), autoincrement=False, nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_orders_user_id_users'),
+    sa.PrimaryKeyConstraint('id', name='pk_orders'),
+    postgresql_ignore_search_path=False
+    )
     op.create_table('order_items',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), autoincrement=False, nullable=False),
     sa.Column('order_id', sa.UUID(), autoincrement=False, nullable=False),
@@ -328,6 +341,15 @@ def downgrade() -> None:
     sa.PrimaryKeyConstraint('id', name='pk_order_items'),
     postgresql_ignore_search_path=False
     )
+    op.create_table('refunds',
+    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), autoincrement=False, nullable=False),
+    sa.Column('payment_id', sa.UUID(), autoincrement=False, nullable=False),
+    sa.Column('amount', sa.BIGINT(), autoincrement=False, nullable=False),
+    sa.Column('reason', sa.TEXT(), autoincrement=False, nullable=True),
+    sa.Column('processed_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), autoincrement=False, nullable=False),
+    sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], name=op.f('fk_refunds_payment_id_payments'), ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_refunds'))
+    )
     op.create_table('payment_events',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), autoincrement=False, nullable=False),
     sa.Column('payment_id', sa.UUID(), autoincrement=False, nullable=False),
@@ -338,27 +360,8 @@ def downgrade() -> None:
     sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], name=op.f('fk_payment_events_payment_id_payments'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_payment_events'))
     )
-    op.create_table('refunds',
-    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), autoincrement=False, nullable=False),
-    sa.Column('payment_id', sa.UUID(), autoincrement=False, nullable=False),
-    sa.Column('amount', sa.BIGINT(), autoincrement=False, nullable=False),
-    sa.Column('reason', sa.TEXT(), autoincrement=False, nullable=True),
-    sa.Column('processed_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), autoincrement=False, nullable=False),
-    sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], name=op.f('fk_refunds_payment_id_payments'), ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_refunds'))
-    )
-    op.create_table('orders',
-    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), autoincrement=False, nullable=False),
-    sa.Column('user_id', sa.UUID(), autoincrement=False, nullable=False),
-    sa.Column('total_amount', sa.BIGINT(), autoincrement=False, nullable=False),
-    sa.Column('currency', sa.TEXT(), autoincrement=False, nullable=False),
-    sa.Column('status', sa.SMALLINT(), autoincrement=False, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), autoincrement=False, nullable=False),
-    sa.Column('updated_at', postgresql.TIMESTAMP(), server_default=sa.text('now()'), autoincrement=False, nullable=False),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_orders_user_id_users'),
-    sa.PrimaryKeyConstraint('id', name='pk_orders'),
-    postgresql_ignore_search_path=False
-    )
+    # Re-create foreign key from payments to orders
+    op.create_foreign_key(op.f('fk_payments_order_id_orders'), 'payments', 'orders', ['order_id'], ['id'])
     op.create_table('entitlements',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), autoincrement=False, nullable=False),
     sa.Column('user_id', sa.UUID(), autoincrement=False, nullable=False),
