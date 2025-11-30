@@ -73,8 +73,7 @@ class Users(Base):
     # 決済システム関連
     subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="user", foreign_keys="Subscriptions.user_id")
     creator_subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="creator", foreign_keys="Subscriptions.creator_id")
-    buyer_transactions: Mapped[List["PaymentTransactions"]] = relationship("PaymentTransactions", back_populates="buyer", foreign_keys="PaymentTransactions.user_id")
-    seller_transactions: Mapped[List["PaymentTransactions"]] = relationship("PaymentTransactions", back_populates="seller", foreign_keys="PaymentTransactions.creator_id")
+    user_transactions: Mapped[List["PaymentTransactions"]] = relationship("PaymentTransactions", back_populates="user", foreign_keys="PaymentTransactions.user_id")
     purchases: Mapped[List["Payments"]] = relationship("Payments", back_populates="buyer", foreign_keys="Payments.buyer_user_id")
     sales: Mapped[List["Payments"]] = relationship("Payments", back_populates="seller", foreign_keys="Payments.seller_user_id")
     user_providers: Mapped[List["UserProviders"]] = relationship("UserProviders", back_populates="user")

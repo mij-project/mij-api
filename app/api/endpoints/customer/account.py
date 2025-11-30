@@ -205,6 +205,7 @@ def get_account_info(
                 unpublished_posts_count=0,
                 deleted_posts_count=0,
                 approved_posts_count=0,
+                reserved_posts_count=0,
             ),
             sales_info=SalesInfo(
                 total_sales=0,

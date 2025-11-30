@@ -11,7 +11,6 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from .posts import Posts
-    from .subscriptions import Subscriptions
 
 class Prices(Base):
     __tablename__ = "prices"
@@ -26,4 +25,3 @@ class Prices(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     post: Mapped["Posts"] = relationship("Posts")
-    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="price_model")

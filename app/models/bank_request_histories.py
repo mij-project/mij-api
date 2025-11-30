@@ -29,19 +29,6 @@ class BankRequestHistories(Base):
     branch_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True, comment="支店コード（検索時）")
     account_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, comment="口座番号（確認時）")
 
-    # APIレスポンス
-    status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, index=True, comment="1=pending, 2=success, 3=failed, 4=rate_limited")
-
-    response_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="APIレスポンスコード")
-    response_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="APIレスポンスメッセージ")
-    response_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="APIレスポンスの生データ（JSON）")
-
-    # API制限管理
-    api_quota_remaining: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True, comment="API残回数（レスポンスヘッダーから取得）")
-    api_quota_reset_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, comment="API制限リセット日時")
-
-    # リクエスト日時
-    requested_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), index=True, comment="APIリクエスト日時")
 
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

@@ -27,14 +27,94 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
     ユーザーが加入中のプラン数と詳細を取得
     """
 
+    # サブスクリプション中のプラン（type=2）を取得
+    # TODO: 仮の値として空のリストを設定
+    subscribed_subscriptions = []
+
+    subscribed_plan_count = 0
+    subscribed_total_price = 0
+    subscribed_plan_names = []
+    subscribed_plan_details = []
+
+    # 加入中のプランの詳細情報を取得
+    for subscription in subscribed_subscriptions:
+        # プランから価格情報を取得（Pricesテーブルではなくplansテーブルから）
+        plan_price = subscription.plan.price
+
+        # クリエイター情報を取得
+        creator_profile = (
+            db.query(
+                Profiles.avatar_url,
+                Profiles.username,
+                Users.profile_name,
+            )
+            .join(Users, Profiles.user_id == Users.id)
+            .filter(
+                Users.id == subscription.plan.creator_user_id,
+                Profiles.user_id == subscription.plan.creator_user_id,
+                Users.deleted_at.is_(None)
+            )
+            .first()
+        )
+
+        # プランに紐づく投稿数を取得
+        post_count = (
+            db.query(
+                func.count(PostPlans.post_id)
+            )
+            .join(Posts, PostPlans.post_id == Posts.id)
+            .filter(
+                PostPlans.plan_id == subscription.plan_id,
+                Posts.deleted_at.is_(None),
+                Posts.status == PostStatus.APPROVED
+            ).scalar()
+        )
+
+        # プランに紐づく投稿のサムネイルを取得（最大4件）
+        thumbnails = (
+            db.query(MediaAssets.storage_key)
+            .join(Posts, MediaAssets.post_id == Posts.id)
+            .join(PostPlans, Posts.id == PostPlans.post_id)
+            .filter(
+                PostPlans.plan_id == subscription.plan_id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+                Posts.deleted_at.is_(None),
+                Posts.status == PostStatus.APPROVED
+            )
+            .order_by(Posts.created_at.desc())
+            .limit(4)
+            .all()
+        )
+
+        thumbnail_keys = [thumb.storage_key for thumb in thumbnails]
+
+        subscribed_total_price += plan_price
+        subscribed_plan_names.append(subscription.plan.name)
+
+        # 詳細情報を追加
+        subscribed_plan_details.append({
+            "subscription_id": str(subscription.id),
+            "plan_id": str(subscription.plan.id),
+            "plan_name": subscription.plan.name,
+            "plan_description": subscription.plan.description,
+            "price": plan_price,
+            "subscription_created_at": subscription.created_at,
+            "current_period_start": subscription.current_period_start,
+            "current_period_end": subscription.current_period_end,
+            "creator_avatar_url": creator_profile.avatar_url if creator_profile and creator_profile.avatar_url else None,
+            "creator_username": creator_profile.username if creator_profile else None,
+            "creator_profile_name": creator_profile.profile_name if creator_profile else None,
+            "post_count": post_count or 0,
+            "thumbnail_keys": thumbnail_keys
+        })
 
     return {
-        "plan_count": 0,
-        "total_price": 0,
-        "subscribed_plan_count": 0,
-        "subscribed_total_price": 0,
-        "subscribed_plan_names": [],
-        "subscribed_plan_details": []
+        "plan_count": subscribed_plan_count,
+        "total_price": subscribed_total_price,
+        "subscribed_plan_count": subscribed_plan_count,
+        "subscribed_total_price": subscribed_total_price,
+        "subscribed_plan_names": subscribed_plan_names,
+        "subscribed_plan_details": subscribed_plan_details
     }
 
 def create_plan(db: Session, plan_data: dict, post_ids: List[UUID] = None) -> Plans:
@@ -88,6 +168,17 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 .scalar() or 0
             )
 
+            # 加入者数を取得
+            subscriber_count = (
+                db.query(func.count(Subscriptions.id))
+                .filter(
+                    Subscriptions.plan_id == plan.id,
+                    Subscriptions.status == 1,
+                    Subscriptions.canceled_at.is_(None)
+                )
+                .scalar() or 0
+            )
+
             plans_response.append({
                 "id": plan.id,
                 "name": plan.name,
@@ -97,7 +188,7 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 "display_order": plan.display_order,
                 "welcome_message": plan.welcome_message,
                 "post_count": post_count,
-                "subscriber_count": 0
+                "subscriber_count": subscriber_count
             })
 
     return plans_response
@@ -152,7 +243,16 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
     )
 
     # サブスクリプション状態を確認
-    is_subscribed = False
+    is_subscribed = (
+        db.query(Subscriptions)
+        .filter(
+            Subscriptions.user_id == current_user_id,
+            Subscriptions.plan_id == plan_id,
+            Subscriptions.status == 1,
+            Subscriptions.canceled_at.is_(None)
+        )
+        .first() is not None
+    )
 
     return {
         "id": plan.id,
@@ -305,12 +405,51 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
     offset = (page - 1) * per_page
     
     # 加入者の総数を取得
-    total = 0
+    total = (
+        db.query(func.count(Subscriptions.id))
+        .filter(
+            Subscriptions.plan_id == plan_id,
+            Subscriptions.status == 1,
+            Subscriptions.canceled_at.is_(None)
+        )
+        .scalar()
+    )
     
     # 加入者データを取得
-    subscribers = []
+    subscribers_query = (
+        db.query(
+            Users.id,
+            Profiles.username,
+            Users.profile_name,
+            Profiles.avatar_url,
+            Subscriptions.created_at,
+            Subscriptions.current_period_end
+        )
+        .join(Subscriptions, Users.id == Subscriptions.user_id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .filter(
+            Subscriptions.plan_id == plan_id,
+            Subscriptions.status == 1,
+            Subscriptions.canceled_at.is_(None)
+        )
+        .order_by(Subscriptions.created_at.desc())
+        .offset(offset)
+        .limit(per_page)
+        .all()
+    )
     
-    has_next = False
+    subscribers = []
+    for user_id, username, profile_name, avatar_url, subscribed_at, current_period_end in subscribers_query:
+        subscribers.append({
+            "user_id": user_id,
+            "username": username,
+            "profile_name": profile_name,
+            "avatar_url": f"{BASE_URL}/{avatar_url}" if avatar_url else None,
+            "subscribed_at": subscribed_at,
+            "current_period_end": current_period_end
+        })
+    
+    has_next = (offset + per_page) < total
     
     return {
         "subscribers": subscribers,

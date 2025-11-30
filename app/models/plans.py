@@ -33,7 +33,6 @@ class Plans(Base):
 
     creator: Mapped["Users"] = relationship("Users", back_populates="plans")
     post_plans: Mapped[List["PostPlans"]] = relationship("PostPlans", back_populates="plan")
-    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="plan")
 
 class PostPlans(Base):
     __tablename__ = "post_plans"
