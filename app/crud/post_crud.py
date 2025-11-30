@@ -1,27 +1,29 @@
 from operator import or_
 import os
-import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import distinct, distinct, distinct, func, desc, exists, and_, BigInteger
+from sqlalchemy import distinct, func, desc, exists, and_
 from app.models import UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
 from app.models.posts import Posts
-from app.models.social import Follows, Follows, Follows, Likes, Bookmarks, Comments
+from app.models.social import Follows, Likes, Bookmarks, Comments
 from uuid import UUID
-from datetime import datetime, timezone
-from app.constants.enums import AccountType, AccountType, AccountType, PostStatus, MediaAssetKind, MediaAssetStatus, GrantedByType
+from datetime import datetime, timezone, timedelta
+from app.constants.enums import (
+    AccountType,
+    PostStatus,
+    MediaAssetKind,
+    MediaAssetStatus,
+)
 from app.schemas.notification import NotificationType
-from app.schemas.post import PostCreateRequest
 from app.models.post_categories import PostCategories
 from app.models.categories import Categories
 from typing import List, Dict, Any
 from app.models.user import Users
 from app.models.profiles import Profiles
-from app.models.post_categories import PostCategories
 from app.models.media_assets import MediaAssets
-from app.models.plans import Plans, PostPlans   
+from app.models.plans import Plans, PostPlans
 from app.models.prices import Prices
 from app.models.media_renditions import MediaRenditions
 from app.models.payments import Payments
@@ -30,12 +32,14 @@ from app.api.commons.utils import get_video_duration
 from app.constants.enums import PlanStatus
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.constants.enums import PostType
-from datetime import datetime, timedelta
 from app.schemas.user_settings import UserSettingsType
-from app.services.email.send_email import send_post_approval_email, send_post_rejection_email
+from app.services.email.send_email import (
+    send_post_approval_email,
+    send_post_rejection_email,
+)
 from app.services.s3.presign import presign_get
-from app.constants.enums import MediaAssetKind, MediaAssetStatus
-from app.core.logger import Logger  
+from app.core.logger import Logger
+
 logger = Logger.get_logger()
 # エイリアスを定義
 ThumbnailAssets = aliased(MediaAssets)
@@ -75,13 +79,12 @@ POST_REJECTED_MD = """## mijfans 投稿の審査が完了しました
 """
 
 
-
 # ========== 取得系 ==========
 def get_total_likes_by_user_id(db: Session, user_id: UUID) -> int:
     """
     ユーザーの投稿についた総合いいね数を取得
     """
-    
+
     # いいねテーブルと結合していいね数を取得
     total_likes = (
         db.query(func.count(Likes.post_id))
@@ -90,38 +93,84 @@ def get_total_likes_by_user_id(db: Session, user_id: UUID) -> int:
         .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
         .scalar()
     )
-    
+
     return total_likes or 0
+
 
 def get_posts_count_by_user_id(db: Session, user_id: UUID) -> dict:
     """
     各ステータスの投稿数を取得
     """
-    
+
     # 審査中
-    peding_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status.in_([PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING, PostStatus.CONVERT_FAILED])).count()
+    peding_posts_count = (
+        db.query(Posts)
+        .filter(Posts.creator_user_id == user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status.in_([PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]))
+        .count()
+    )
 
     # 修正
-    rejected_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status == PostStatus.REJECTED).count()
+    rejected_posts_count = (
+        db.query(Posts)
+        .filter(Posts.creator_user_id == user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == PostStatus.REJECTED)
+        .count()
+    )
 
     # 非公開
-    unpublished_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status == PostStatus.UNPUBLISHED).count()
+    unpublished_posts_count = (
+        db.query(Posts)
+        .filter(Posts.creator_user_id == user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == PostStatus.UNPUBLISHED)
+        .count()
+    )
 
     # 削除
-    deleted_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status == PostStatus.DELETED).count()
+    deleted_posts_count = (
+        db.query(Posts)
+        .filter(Posts.creator_user_id == user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == PostStatus.DELETED)
+        .count()
+    )
 
     # 公開
-    approved_posts_count = db.query(Posts).filter(Posts.creator_user_id == user_id).filter(Posts.deleted_at.is_(None)).filter(Posts.status == PostStatus.APPROVED).count()
+    approved_posts_count = (
+        db.query(Posts)
+        .filter(Posts.creator_user_id == user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= func.now()))
+        .count()
+    )
+    # 予約された投稿数
+    reserved_posts_count = (
+        db.query(Posts)
+        .filter(Posts.creator_user_id == user_id)
+        .filter(Posts.deleted_at.is_(None))
+        .filter(Posts.status == PostStatus.APPROVED)
+        .filter(Posts.scheduled_at.is_not(None))
+        .filter(Posts.scheduled_at > func.now())
+        .count()
+    )
 
     return {
         "peding_posts_count": peding_posts_count,
         "rejected_posts_count": rejected_posts_count,
         "unpublished_posts_count": unpublished_posts_count,
         "deleted_posts_count": deleted_posts_count,
-        "approved_posts_count": approved_posts_count
+        "approved_posts_count": approved_posts_count,
+        "reserved_posts_count": reserved_posts_count,
     }
 
-def get_posts_by_category_slug(db: Session, slug: str, page: int = 1, per_page: int = 100) -> List[Posts]:
+
+def get_posts_by_category_slug(
+    db: Session, slug: str, page: int = 1, per_page: int = 100
+) -> List[Posts]:
     """
     カテゴリーに紐づく投稿を取得
     """
@@ -148,7 +197,7 @@ def get_posts_by_category_slug(db: Session, slug: str, page: int = 1, per_page: 
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"), 
+            VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
         )
         .select_from(Categories)
@@ -162,7 +211,11 @@ def get_posts_by_category_slug(db: Session, slug: str, page: int = 1, per_page: 
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
         .outerjoin(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(
             MediaAssets,
             and_(
@@ -206,7 +259,10 @@ def get_posts_by_category_slug(db: Session, slug: str, page: int = 1, per_page: 
 
     return result, total
 
-def _build_post_status_query(db: Session, user_id: UUID, post_statuses: List[PostStatus]):
+
+def _build_post_status_query(
+    db: Session, user_id: UUID, post_statuses: List[PostStatus]
+):
     """
     投稿ステータス取得クエリの共通部分
     """
@@ -221,24 +277,40 @@ def _build_post_status_query(db: Session, user_id: UUID, post_statuses: List[Pos
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            func.min(Prices.price).label('post_price'),
-            func.min(Prices.currency).label('post_currency'),
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAsset.duration_sec
+            func.min(Prices.price).label("post_price"),
+            func.min(Prices.currency).label("post_currency"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAsset.duration_sec,
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAsset, (Posts.id == VideoAsset.post_id) & (VideoAsset.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAsset,
+            (Posts.id == VideoAsset.post_id)
+            & (VideoAsset.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status.in_(post_statuses))
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAsset.duration_sec)
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAsset.duration_sec,
+        )
         .order_by(desc(Posts.created_at))
     )
+
 
 def get_post_status_by_user_id(db: Session, user_id: UUID) -> dict:
     """
@@ -246,27 +318,46 @@ def get_post_status_by_user_id(db: Session, user_id: UUID) -> dict:
     """
 
     # 審査中の投稿を取得
-    pending_posts = _build_post_status_query(db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING, PostStatus.CONVERT_FAILED]).all()
+    pending_posts = _build_post_status_query(
+        db, user_id, [PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]
+    ).all()
 
     # 拒否された投稿を取得
     rejected_posts = _build_post_status_query(db, user_id, [PostStatus.REJECTED]).all()
 
     # 非公開の投稿を取得
-    unpublished_posts = _build_post_status_query(db, user_id, [PostStatus.UNPUBLISHED]).all()
+    unpublished_posts = _build_post_status_query(
+        db, user_id, [PostStatus.UNPUBLISHED]
+    ).all()
 
     # 削除された投稿を取得
     deleted_posts = _build_post_status_query(db, user_id, [PostStatus.DELETED]).all()
 
-    # 公開された投稿を取得
     approved_posts = _build_post_status_query(db, user_id, [PostStatus.APPROVED]).all()
+
+    # 公開された投稿を取得
+    approved = []
+    # 予約された投稿を取得
+    reserved = []
+    now = datetime.now(timezone.utc)
+    for post in approved_posts:
+        if (
+            post.Posts.scheduled_at
+            and post.Posts.scheduled_at.replace(tzinfo=timezone.utc) > now
+        ):
+            reserved.append(post)
+        else:
+            approved.append(post)
 
     return {
         "pending_posts": pending_posts,
         "rejected_posts": rejected_posts,
         "unpublished_posts": unpublished_posts,
         "deleted_posts": deleted_posts,
-        "approved_posts": approved_posts
+        "approved_posts": approved,
+        "reserved_posts": reserved,
     }
+
 
 def get_post_detail_by_id(db: Session, post_id: str, user_id: str | None) -> dict:
     """
@@ -276,7 +367,7 @@ def get_post_detail_by_id(db: Session, post_id: str, user_id: str | None) -> dic
     post, creator, creator_profile = _get_post_and_creator_info(db, post_id)
     if not post:
         return None
-        
+
     # 各種情報を取得
     categories = _get_post_categories(db, post_id)
     sale_info = _get_sale_info(db, post_id)
@@ -290,8 +381,9 @@ def get_post_detail_by_id(db: Session, post_id: str, user_id: str | None) -> dic
         "categories": categories,
         "price": sale_info["price"],
         "plans": sale_info["plans"],
-        **media_info
+        **media_info,
     }
+
 
 def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tuple]:
     """
@@ -314,22 +406,26 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec,
-            func.count(func.distinct(Likes.user_id)).label('likes_count'),
-            func.count(func.distinct(Comments.id)).label('comments_count'),
-            Posts.created_at
+            func.count(func.distinct(Likes.user_id)).label("likes_count"),
+            func.count(func.distinct(Comments.id)).label("comments_count"),
+            Posts.created_at,
         )
         .join(PostPlans, Posts.id == PostPlans.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .filter(
             PostPlans.plan_id == plan_id,
             Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
+            Posts.status == PostStatus.APPROVED,
         )
         .group_by(
             Posts.id,
@@ -338,11 +434,12 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
-            Posts.created_at
+            Posts.created_at,
         )
         .order_by(Posts.created_at.desc())
         .all()
     )
+
 
 # def get_post_by_id(db: Session, post_id: UUID) -> Posts:
 #     """
@@ -352,7 +449,10 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
 
 # ========== いいねした投稿用 ==========
 
-def get_liked_posts_by_user_id(db: Session, user_id: UUID, limit: int = 50) -> List[tuple]:
+
+def get_liked_posts_by_user_id(
+    db: Session, user_id: UUID, limit: int = 50
+) -> List[tuple]:
     """
     ユーザーがいいねした投稿を取得（top_crud.pyの121-126行目の項目と合わせる）
     """
@@ -362,22 +462,35 @@ def get_liked_posts_by_user_id(db: Session, user_id: UUID, limit: int = 50) -> L
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
-            ThumbnailAssets.duration_sec.label('duration_sec'),
-            Likes.created_at.label('created_at')
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            ThumbnailAssets.duration_sec.label("duration_sec"),
+            Likes.created_at.label("created_at"),
         )
         .join(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
         .filter(Likes.user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, ThumbnailAssets.storage_key, ThumbnailAssets.duration_sec, Likes.created_at)
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            ThumbnailAssets.storage_key,
+            ThumbnailAssets.duration_sec,
+            Likes.created_at,
+        )
         .order_by(desc(Likes.created_at))  # いいねした日時の新しい順
         .limit(limit)
         .all()
     )
+
 
 def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     """
@@ -389,18 +502,22 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec,
-            func.count(func.distinct(Likes.user_id)).label('likes_count'),
-            func.count(func.distinct(Comments.id)).label('comments_count'),
-            func.min(Prices.price).label('post_price'),
-            func.min(Prices.currency).label('post_currency'),
-            Bookmarks.created_at.label('bookmarked_at')
+            func.count(func.distinct(Likes.user_id)).label("likes_count"),
+            func.count(func.distinct(Comments.id)).label("comments_count"),
+            func.min(Prices.price).label("post_price"),
+            func.min(Prices.currency).label("post_currency"),
+            Bookmarks.created_at.label("bookmarked_at"),
         )
         .join(Bookmarks, Posts.id == Bookmarks.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
@@ -414,11 +531,12 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
-            Bookmarks.created_at
+            Bookmarks.created_at,
         )
         .order_by(desc(Bookmarks.created_at))
         .all()
     )
+
 
 def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     """
@@ -430,18 +548,22 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec,
-            func.count(func.distinct(Likes.user_id)).label('likes_count'),
-            func.count(func.distinct(Comments.id)).label('comments_count'),
-            func.min(Prices.price).label('post_price'),
-            func.min(Prices.currency).label('post_currency'),
-            Likes.created_at.label('liked_at')
+            func.count(func.distinct(Likes.user_id)).label("likes_count"),
+            func.count(func.distinct(Comments.id)).label("comments_count"),
+            func.min(Prices.price).label("post_price"),
+            func.min(Prices.currency).label("post_currency"),
+            Likes.created_at.label("liked_at"),
         )
         .join(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Likes.user_id == user_id)
@@ -454,11 +576,12 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
-            Likes.created_at
+            Likes.created_at,
         )
         .order_by(desc(Likes.created_at))
         .all()
     )
+
 
 def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     """
@@ -472,7 +595,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec,
             func.count(func.distinct(Likes.user_id)).label('likes_count'),
             func.count(func.distinct(Comments.id)).label('comments_count'),
@@ -480,7 +603,11 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .select_from(Posts)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .filter(Posts.deleted_at.is_(None))
@@ -496,7 +623,9 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .all()
     )
 
+
 # ========== トップページ用 ==========
+
 
 def get_ranking_posts(db: Session, limit: int = 5):
     """
@@ -513,12 +642,12 @@ def get_ranking_posts(db: Session, limit: int = 5):
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec'),
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
@@ -526,22 +655,31 @@ def get_ranking_posts(db: Session, limit: int = 5):
         # post_plansテーブルとの結合
         .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
         # サムネイル用のMediaAssets（kind=2）
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
         # メインビデオ用のMediaAssets（kind=4）
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .filter(active_post_cond)
         .group_by(
-            Posts.id, 
+            Posts.id,
             Users.profile_name,
-            Profiles.username, 
-            Profiles.avatar_url, 
-            ThumbnailAssets.storage_key, 
+            Profiles.username,
+            Profiles.avatar_url,
+            ThumbnailAssets.storage_key,
             VideoAssets.duration_sec,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 def get_recent_posts(db: Session, limit: int = 5):
     """
@@ -560,18 +698,26 @@ def get_recent_posts(db: Session, limit: int = 5):
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label('thumbnail_key'),
-            func.count(Likes.post_id).label('likes_count'),
-            VideoAssets.duration_sec.label('duration_sec')
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            func.count(Likes.post_id).label("likes_count"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
         # post_plansテーブルとの結合
         .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
         # サムネイル用のMediaAssets（kind=2）
-        .outerjoin(ThumbnailAssets, (Posts.id == ThumbnailAssets.post_id) & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL))
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
         # メインビデオ用のMediaAssets（kind=4）
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         # いいね数を取得するためのLikesテーブル
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(active_post_cond)
@@ -581,14 +727,16 @@ def get_recent_posts(db: Session, limit: int = 5):
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
-            VideoAssets.duration_sec
+            VideoAssets.duration_sec,
         )
         .order_by(desc(Posts.created_at))
         .limit(limit)
         .all()
     )
 
+
 # ========== ランキング用 集合==========
+
 
 def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
     """
@@ -605,26 +753,42 @@ def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec')
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
         .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
         .filter(active_post_cond)
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
     """
@@ -643,27 +807,43 @@ def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec')
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)
         .filter(active_post_cond)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.created_at >= one_month_ago)  # 過去30日以内のいいね
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
     """
@@ -681,27 +861,43 @@ def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec')
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)
         .filter(active_post_cond)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.created_at >= one_week_ago)  # 過去7日以内のいいね
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
     """
@@ -718,27 +914,43 @@ def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec')
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)
         .filter(active_post_cond)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.created_at >= one_day_ago)  # 過去1日以内のいいね
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 # ========== 作成・更新・削除系 ==========
 def create_post(db: Session, post_data: dict):
@@ -750,6 +962,7 @@ def create_post(db: Session, post_data: dict):
     db.flush()
     return post
 
+
 def update_post(db: Session, post_data: dict):
     """
     投稿を更新
@@ -757,14 +970,15 @@ def update_post(db: Session, post_data: dict):
     post = db.query(Posts).filter(Posts.id == post_data["id"]).first()
     if not post:
         return None
-    
+
     for key, value in post_data.items():
         if hasattr(post, key) and value is not None:
             setattr(post, key, value)
-    
+
     post.updated_at = datetime.now(timezone.utc)
     db.flush()
     return post
+
 
 def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
     """
@@ -773,7 +987,7 @@ def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
     post = db.query(Posts).filter(Posts.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    
+
     # kindを整数値にマッピング
     kind_mapping = {
         "ogp": MediaAssetKind.OGP,
@@ -782,7 +996,7 @@ def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
         "sample": MediaAssetKind.SAMPLE_VIDEO,
         "images": MediaAssetKind.IMAGES,
     }
-    
+
     kind_int = kind_mapping.get(kind)
     if kind_int is None:
         raise HTTPException(status_code=400, detail=f"Unsupported kind: {kind}")
@@ -792,43 +1006,44 @@ def update_post_media_assets(db: Session, post_id: UUID, key: str, kind: str):
     db.flush()
     return post
 
-def update_post_status(db: Session, post_id: UUID, status: int, authenticated_flg: int = None):
+
+def update_post_status(
+    db: Session, post_id: UUID, status: int, authenticated_flg: int = None
+):
     """
     投稿のステータスを更新
     """
     post = db.query(Posts).filter(Posts.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    
+
     post.status = status
     if authenticated_flg is not None:
         post.authenticated_flg = authenticated_flg
     post.updated_at = datetime.now(timezone.utc)
-    db.add(post)    
+    db.add(post)
     db.flush()
     return post
+
 
 # ========== 内部関数 ==========
 
 def _get_post_and_creator_info(db: Session, post_id: str) -> tuple:
     """投稿とクリエイター情報を取得"""
-    post = db.query(Posts).filter(
-        Posts.id == post_id,
-        Posts.deleted_at.is_(None)
-    ).first()
-    
+    post = (
+        db.query(Posts).filter(Posts.id == post_id, Posts.deleted_at.is_(None)).first()
+    )
+
     if not post:
         return None, None, None
-    
-    creator = (
-        db.query(
-            Users
-        )
-        .filter(
-            Users.id == post.creator_user_id).first())
-    creator_profile = db.query(Profiles).filter(Profiles.user_id == post.creator_user_id).first()
-    
+
+    creator = db.query(Users).filter(Users.id == post.creator_user_id).first()
+    creator_profile = (
+        db.query(Profiles).filter(Profiles.user_id == post.creator_user_id).first()
+    )
+
     return post, creator, creator_profile
+
 
 def _get_post_categories(db: Session, post_id: str) -> list:
     """投稿のカテゴリ情報を取得"""
@@ -840,9 +1055,14 @@ def _get_post_categories(db: Session, post_id: str) -> list:
         .all()
     )
 
+
 def _get_likes_count(db: Session, post_id: str) -> int:
     """投稿のいいね数を取得"""
-    return db.query(func.count(Likes.post_id)).filter(Likes.post_id == post_id).scalar() or 0
+    return (
+        db.query(func.count(Likes.post_id)).filter(Likes.post_id == post_id).scalar()
+        or 0
+    )
+
 
 def _get_sale_info(db: Session, post_id: str) -> dict:
     """投稿に紐づく単品情報とプラン金額を取得
@@ -854,54 +1074,58 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
     Returns:
         dict: 単品売上情報
     """
-    
+
     # Priceテーブルから金額を取得
     price = db.query(Prices).filter(Prices.post_id == post_id).first()
-    
-    #Planテーブルからプラン金額を取得（post_plansテーブルを経由）
+
+    # Planテーブルからプラン金額を取得（post_plansテーブルを経由）
     plans = (
         db.query(Plans)
         .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(PostPlans.post_id == post_id)
         .all()
     )
-    
-    return {
-        "price": price,
-        "plans": plans
-    }
+
+    return {"price": price, "plans": plans}
+
 
 def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     """メディア情報を取得・処理"""
     media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
     is_entitlement = check_entitlement(db, user_id, post_id) if user_id else False
 
-    set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
+    set_media_kind = (
+        MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
+    )
     set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
-    
+
     media_info = []
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
         elif media_asset.kind == MediaAssetKind.IMAGES:
-            media_info.append({
-                "kind": media_asset.kind,
-                "duration": media_asset.duration_sec,
-                "media_assets_id": media_asset.id,
-                "orientation": media_asset.orientation,
-                "post_id": media_asset.post_id,
-                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{set_file_name}"
-            })
+            media_info.append(
+                {
+                    "kind": media_asset.kind,
+                    "duration": media_asset.duration_sec,
+                    "media_assets_id": media_asset.id,
+                    "orientation": media_asset.orientation,
+                    "post_id": media_asset.post_id,
+                    "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{set_file_name}",
+                }
+            )
         elif media_asset.kind == set_media_kind:
-            media_info.append({
-                "kind": media_asset.kind,
-                "duration": media_asset.duration_sec,
-                "media_assets_id": media_asset.id,
-                "orientation": media_asset.orientation,
-                "post_id": media_asset.post_id,
-                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
-            })
-    
+            media_info.append(
+                {
+                    "kind": media_asset.kind,
+                    "duration": media_asset.duration_sec,
+                    "media_assets_id": media_asset.id,
+                    "orientation": media_asset.orientation,
+                    "post_id": media_asset.post_id,
+                    "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}",
+                }
+            )
+
     return {
         "media_assets": media_assets,
         "is_entitlement": is_entitlement,
@@ -919,32 +1143,32 @@ def _get_media_info_for_creator(db: Session, post_id: str, status: int) -> dict:
     ogp_image = None
     images = []
     upload_flg = True if status != PostStatus.APPROVED else False
-    
+
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail = {
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
-                "url": f"{CDN_BASE_URL}/{media_asset.storage_key}"
+                "url": f"{CDN_BASE_URL}/{media_asset.storage_key}",
             }
         elif media_asset.kind == MediaAssetKind.SAMPLE_VIDEO:
             if upload_flg:
                 presign_url = presign_get("ingest", media_asset.storage_key)
-                sample_video_url = presign_url['download_url']
+                sample_video_url = presign_url["download_url"]
             else:
                 sample_video_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
-                
+
             sample_video = {
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
                 "url": sample_video_url,
                 "duration": media_asset.duration_sec,
-                "reject_comments": media_asset.reject_comments
+                "reject_comments": media_asset.reject_comments,
             }
         elif media_asset.kind == MediaAssetKind.MAIN_VIDEO:
             if upload_flg:
                 presign_url = presign_get("ingest", media_asset.storage_key)
-                main_video_url = presign_url['download_url']
+                main_video_url = presign_url["download_url"]
             else:
                 main_video_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
 
@@ -953,29 +1177,35 @@ def _get_media_info_for_creator(db: Session, post_id: str, status: int) -> dict:
                 "storage_key": media_asset.storage_key,
                 "url": main_video_url,
                 "duration": media_asset.duration_sec,
-                "reject_comments": media_asset.reject_comments
+                "reject_comments": media_asset.reject_comments,
             }
         elif media_asset.kind == MediaAssetKind.IMAGES:
-            if upload_flg and media_asset.status in [MediaAssetStatus.PENDING, MediaAssetStatus.RESUBMIT, MediaAssetStatus.CONVERTING]:
+            if upload_flg and media_asset.status in [
+                MediaAssetStatus.PENDING,
+                MediaAssetStatus.RESUBMIT,
+                MediaAssetStatus.CONVERTING,
+            ]:
                 presign_url = presign_get("ingest", media_asset.storage_key)
-                image_url = presign_url['download_url']
+                image_url = presign_url["download_url"]
             else:
                 image_url = f"{MEDIA_CDN_URL}/{media_asset.storage_key}_1080w.webp"
-            images.append({
-                "id": str(media_asset.id),  # IDをstringとして返す
-                "kind": media_asset.kind,
-                "storage_key": media_asset.storage_key,
-                "url": image_url,
-                "duration": media_asset.duration_sec,
-                "orientation": media_asset.orientation,
-                "reject_comments": media_asset.reject_comments
-            })
+            images.append(
+                {
+                    "id": str(media_asset.id),  # IDをstringとして返す
+                    "kind": media_asset.kind,
+                    "storage_key": media_asset.storage_key,
+                    "url": image_url,
+                    "duration": media_asset.duration_sec,
+                    "orientation": media_asset.orientation,
+                    "reject_comments": media_asset.reject_comments,
+                }
+            )
         elif media_asset.kind == MediaAssetKind.OGP:
             ogp_image = {
                 "kind": media_asset.kind,
                 "storage_key": media_asset.storage_key,
                 "url": f"{CDN_BASE_URL}/{media_asset.storage_key}",
-                "reject_comments": media_asset.reject_comments
+                "reject_comments": media_asset.reject_comments,
             }
 
     return {
@@ -984,10 +1214,13 @@ def _get_media_info_for_creator(db: Session, post_id: str, status: int) -> dict:
         "main_video": main_video,
         "images": images,
         "ogp_image": ogp_image,
-        "media_assets": media_assets
+        "media_assets": media_assets,
     }
 
-def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUID) -> dict | None:
+
+def get_post_detail_for_creator(
+    db: Session, post_id: UUID, creator_user_id: UUID
+) -> dict | None:
     """
     クリエイター自身の投稿詳細を取得（統計情報含む）
     """
@@ -1004,15 +1237,23 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            func.min(Prices.price).label('post_price'),
-            func.min(Prices.currency).label('post_currency'),
-            ThumbnailAsset.storage_key.label('thumbnail_key'),
-            VideoAsset.duration_sec
+            func.min(Prices.price).label("post_price"),
+            func.min(Prices.currency).label("post_currency"),
+            ThumbnailAsset.storage_key.label("thumbnail_key"),
+            VideoAsset.duration_sec,
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(ThumbnailAsset, (Posts.id == ThumbnailAsset.post_id) & (ThumbnailAsset.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAsset, (Posts.id == VideoAsset.post_id) & (VideoAsset.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            ThumbnailAsset,
+            (Posts.id == ThumbnailAsset.post_id)
+            & (ThumbnailAsset.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAsset,
+            (Posts.id == VideoAsset.post_id)
+            & (VideoAsset.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
@@ -1025,7 +1266,7 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAsset.storage_key,
-            VideoAsset.duration_sec
+            VideoAsset.duration_sec,
         )
         .first()
     )
@@ -1062,10 +1303,7 @@ def get_post_detail_for_creator(db: Session, post_id: UUID, creator_user_id: UUI
 
 
 def update_post_by_creator(
-    db: Session,
-    post_id: UUID,
-    creator_user_id: UUID,
-    update_data: dict
+    db: Session, post_id: UUID, creator_user_id: UUID, update_data: dict
 ) -> Posts | None:
     """
     クリエイターが自分の投稿を更新
@@ -1093,14 +1331,20 @@ def update_post_by_creator(
         return None
 
     # 更新可能なフィールド
-    allowed_fields = ['description', 'status', 'visibility', 'scheduled_at', 'expiration_at']
+    allowed_fields = [
+        "description",
+        "status",
+        "visibility",
+        "scheduled_at",
+        "expiration_at",
+    ]
 
     for field, value in update_data.items():
         if field in allowed_fields and value is not None:
             setattr(post, field, value)
 
     # ステータスがDELETEDの場合、deleted_atを設定
-    if 'status' in update_data and update_data['status'] == PostStatus.DELETED:
+    if "status" in update_data and update_data["status"] == PostStatus.DELETED:
         post.deleted_at = datetime.now(timezone.utc)
 
     post.updated_at = datetime.now(timezone.utc)
@@ -1121,7 +1365,7 @@ def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1137,10 +1381,11 @@ def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
     """
@@ -1154,7 +1399,7 @@ def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1171,10 +1416,11 @@ def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
     """
@@ -1188,7 +1434,7 @@ def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1205,10 +1451,11 @@ def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
+
 
 def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
     """
@@ -1222,7 +1469,7 @@ def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1239,12 +1486,15 @@ def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .limit(limit)
         .all()
     )
 
-def get_ranking_creators_overall_detail_all_time(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_creators_overall_detail_all_time(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     いいね数が多いCreator overalltime
     """
@@ -1256,7 +1506,7 @@ def get_ranking_creators_overall_detail_all_time(db: Session, page: int = 1, lim
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1272,13 +1522,16 @@ def get_ranking_creators_overall_detail_all_time(db: Session, page: int = 1, lim
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-def get_ranking_creators_overall_detail_daily(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_creators_overall_detail_daily(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     いいね数が多いCreator daily
     """
@@ -1291,7 +1544,7 @@ def get_ranking_creators_overall_detail_daily(db: Session, page: int = 1, limit:
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1308,13 +1561,16 @@ def get_ranking_creators_overall_detail_daily(db: Session, page: int = 1, limit:
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-def get_ranking_creators_overall_detail_weekly(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_creators_overall_detail_weekly(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     いいね数が多いCreator weekly
     """
@@ -1327,7 +1583,7 @@ def get_ranking_creators_overall_detail_weekly(db: Session, page: int = 1, limit
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1344,13 +1600,16 @@ def get_ranking_creators_overall_detail_weekly(db: Session, page: int = 1, limit
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-def get_ranking_creators_overall_detail_monthly(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_creators_overall_detail_monthly(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     いいね数が多いCreator monthly
     """
@@ -1363,7 +1622,7 @@ def get_ranking_creators_overall_detail_monthly(db: Session, page: int = 1, limi
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label('followers_count'),
+            func.count(Follows.creator_user_id).label("followers_count"),
             func.array_agg(Follows.follower_user_id).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
@@ -1380,7 +1639,7 @@ def get_ranking_creators_overall_detail_monthly(db: Session, page: int = 1, limi
             Profiles.avatar_url,
             Profiles.cover_url,
         )
-        .order_by(desc('likes_count'))
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
@@ -1404,7 +1663,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
             Users,
             Profiles,
             MediaAssets,
-            MediaRenditionJobs.output_key.label('rendition_output_key')
+            MediaRenditionJobs.output_key.label("rendition_output_key"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
@@ -1431,49 +1690,56 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     for row in result:
         if row.MediaAssets:
             media_asset = {
-                'id': str(row.MediaAssets.id),
-                'status': row.MediaAssets.status,
-                'post_id': str(row.MediaAssets.post_id),
-                'kind': row.MediaAssets.kind,
-                'storage_key': row.MediaAssets.storage_key,
-                'file_size': row.MediaAssets.bytes,
-                'reject_comments': row.MediaAssets.reject_comments,
-                'duration': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
-                'duration_sec': float(row.MediaAssets.duration_sec) if row.MediaAssets.duration_sec else None,
-                'orientation': row.MediaAssets.orientation,
-                'sample_type': row.MediaAssets.sample_type,
-                'sample_start_time': float(row.MediaAssets.sample_start_time) if row.MediaAssets.sample_start_time else None,
-                'sample_end_time': float(row.MediaAssets.sample_end_time) if row.MediaAssets.sample_end_time else None,
-                'created_at': row.MediaAssets.created_at.isoformat() if row.MediaAssets.created_at else None,
-                'updated_at': None
+                "id": str(row.MediaAssets.id),
+                "status": row.MediaAssets.status,
+                "post_id": str(row.MediaAssets.post_id),
+                "kind": row.MediaAssets.kind,
+                "storage_key": row.MediaAssets.storage_key,
+                "file_size": row.MediaAssets.bytes,
+                "reject_comments": row.MediaAssets.reject_comments,
+                "duration": float(row.MediaAssets.duration_sec)
+                if row.MediaAssets.duration_sec
+                else None,
+                "duration_sec": float(row.MediaAssets.duration_sec)
+                if row.MediaAssets.duration_sec
+                else None,
+                "orientation": row.MediaAssets.orientation,
+                "sample_type": row.MediaAssets.sample_type,
+                "sample_start_time": float(row.MediaAssets.sample_start_time)
+                if row.MediaAssets.sample_start_time
+                else None,
+                "sample_end_time": float(row.MediaAssets.sample_end_time)
+                if row.MediaAssets.sample_end_time
+                else None,
+                "created_at": row.MediaAssets.created_at.isoformat()
+                if row.MediaAssets.created_at
+                else None,
+                "updated_at": None,
             }
-            
+
             # 重複を避けるため、既に存在するかチェック
-            if not any(ma['id'] == media_asset['id'] for ma in media_assets):
+            if not any(ma["id"] == media_asset["id"] for ma in media_assets):
                 media_assets.append(media_asset)
 
         if row.rendition_output_key:
-            rendition_job = {
-                'output_key': row.rendition_output_key
-            }
-            
+            rendition_job = {"output_key": row.rendition_output_key}
+
             # 重複を避けるため、既に存在するかチェック
-            if not any(rj['output_key'] == rendition_job['output_key'] for rj in rendition_jobs):
+            if not any(
+                rj["output_key"] == rendition_job["output_key"] for rj in rendition_jobs
+            ):
                 rendition_jobs.append(rendition_job)
 
     # 価格情報を取得（単品販売）
-    single_price_data = db.query(Prices.price).filter(
-        Prices.post_id == post_uuid,
-        Prices.is_active == True
-    ).first()
+    single_price_data = (
+        db.query(Prices.price)
+        .filter(Prices.post_id == post_uuid, Prices.is_active == True)
+        .first()
+    )
 
     # プラン情報を取得
     plan_data = (
-        db.query(
-            Plans.id,
-            Plans.name,
-            Plans.price
-        )
+        db.query(Plans.id, Plans.name, Plans.price)
         .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(
             PostPlans.post_id == post_uuid,
@@ -1483,58 +1749,63 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     )
 
     # プラン情報をリスト形式に整形
-    plans_list = [
-        {
-            'plan_id': str(plan.id),
-            'plan_name': plan.name,
-            'price': plan.price
-        }
-        for plan in plan_data
-    ] if plan_data else None
+    plans_list = (
+        [
+            {"plan_id": str(plan.id), "plan_name": plan.name, "price": plan.price}
+            for plan in plan_data
+        ]
+        if plan_data
+        else None
+    )
 
     # 指定された内容を返却
     return {
         # 投稿情報
-        'id': str(post.id),
-        'description': post.description,
-        'status': post.status,
-        'created_at': post.created_at.isoformat() if post.created_at else None,
-        'authenticated_flg': post.authenticated_flg,
+        "id": str(post.id),
+        "description": post.description,
+        "status": post.status,
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+        "authenticated_flg": post.authenticated_flg,
         # ユーザー情報
-        'user_id': str(user.id),
-        'profile_name': user.profile_name,
+        "user_id": str(user.id),
+        "profile_name": user.profile_name,
         # プロフィール情報
-        'username': profile.username,
-        'profile_avatar_url': f"{CDN_BASE_URL}/{profile.avatar_url}" if profile.avatar_url else None,
-        'post_type': post.post_type,
+        "username": profile.username,
+        "profile_avatar_url": f"{CDN_BASE_URL}/{profile.avatar_url}"
+        if profile.avatar_url
+        else None,
+        "post_type": post.post_type,
         # メディアアセット情報
-        'media_assets': {
-            ma['id']: {
-                'kind': ma['kind'],
-                'storage_key': ma['storage_key'],
-                'status': ma['status'],
-                'reject_comments': ma['reject_comments'],
-                'duration_sec': ma.get('duration_sec'),
-                'orientation': ma.get('orientation'),
-                'sample_type': ma.get('sample_type'),
-                'sample_start_time': ma.get('sample_start_time'),
-                'sample_end_time': ma.get('sample_end_time'),
+        "media_assets": {
+            ma["id"]: {
+                "kind": ma["kind"],
+                "storage_key": ma["storage_key"],
+                "status": ma["status"],
+                "reject_comments": ma["reject_comments"],
+                "duration_sec": ma.get("duration_sec"),
+                "orientation": ma.get("orientation"),
+                "sample_type": ma.get("sample_type"),
+                "sample_start_time": ma.get("sample_start_time"),
+                "sample_end_time": ma.get("sample_end_time"),
             }
-            for ma in media_assets if ma['storage_key']
+            for ma in media_assets
+            if ma["storage_key"]
         },  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
         # 価格情報
-        'single_price': single_price_data[0] if single_price_data else None,
-        'plans': plans_list
+        "single_price": single_price_data[0] if single_price_data else None,
+        "plans": plans_list,
     }
 
 
 # ========== ランキング用 各ジャンル==========
-def get_ranking_posts_detail_categories_all_time(db: Session, category: str, page: int = 1, limit: int = 500):
+def get_ranking_posts_detail_categories_all_time(
+    db: Session, category: str, page: int = 1, limit: int = 500
+):
     """
     全期間でいいね数が多い投稿を取得
     """
     offset = (page - 1) * limit
-    
+
     now = func.now()
     active_post_cond = and_(
         Posts.status == PostStatus.APPROVED,
@@ -1547,7 +1818,6 @@ def get_ranking_posts_detail_categories_all_time(db: Session, category: str, pag
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -1556,7 +1826,7 @@ def get_ranking_posts_detail_categories_all_time(db: Session, category: str, pag
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"), 
+            VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
         )
         .select_from(Categories)
@@ -1572,7 +1842,11 @@ def get_ranking_posts_detail_categories_all_time(db: Session, category: str, pag
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
         .outerjoin(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(
             MediaAssets,
             and_(
@@ -1611,7 +1885,10 @@ def get_ranking_posts_detail_categories_all_time(db: Session, category: str, pag
 
     return result
 
-def get_ranking_posts_detail_categories_daily(db: Session, category: str, page: int = 1, limit: int = 500):
+
+def get_ranking_posts_detail_categories_daily(
+    db: Session, category: str, page: int = 1, limit: int = 500
+):
     """
     各ジャンルでいいね数が多い投稿を取得 Daily
     """
@@ -1630,7 +1907,6 @@ def get_ranking_posts_detail_categories_daily(db: Session, category: str, page: 
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -1639,7 +1915,7 @@ def get_ranking_posts_detail_categories_daily(db: Session, category: str, page: 
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"), 
+            VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
         )
         .select_from(Categories)
@@ -1655,7 +1931,11 @@ def get_ranking_posts_detail_categories_daily(db: Session, category: str, page: 
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
         .outerjoin(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(
             MediaAssets,
             and_(
@@ -1695,7 +1975,10 @@ def get_ranking_posts_detail_categories_daily(db: Session, category: str, page: 
 
     return result
 
-def get_ranking_posts_detail_categories_weekly(db: Session, category: str, page: int = 1, limit: int = 500):
+
+def get_ranking_posts_detail_categories_weekly(
+    db: Session, category: str, page: int = 1, limit: int = 500
+):
     """
     各ジャンルでいいね数が多い投稿を取得 Weekly
     """
@@ -1714,7 +1997,6 @@ def get_ranking_posts_detail_categories_weekly(db: Session, category: str, page:
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -1723,7 +2005,7 @@ def get_ranking_posts_detail_categories_weekly(db: Session, category: str, page:
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"), 
+            VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
         )
         .select_from(Categories)
@@ -1739,7 +2021,11 @@ def get_ranking_posts_detail_categories_weekly(db: Session, category: str, page:
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
         .outerjoin(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(
             MediaAssets,
             and_(
@@ -1779,7 +2065,10 @@ def get_ranking_posts_detail_categories_weekly(db: Session, category: str, page:
 
     return result
 
-def get_ranking_posts_detail_categories_monthly(db: Session, category: str, page: int = 1, limit: int = 500):
+
+def get_ranking_posts_detail_categories_monthly(
+    db: Session, category: str, page: int = 1, limit: int = 500
+):
     """
     各ジャンルでいいね数が多い投稿を取得 Monthy
     """
@@ -1798,7 +2087,6 @@ def get_ranking_posts_detail_categories_monthly(db: Session, category: str, page
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -1807,7 +2095,7 @@ def get_ranking_posts_detail_categories_monthly(db: Session, category: str, page
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"), 
+            VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
         )
         .select_from(Categories)
@@ -1823,7 +2111,11 @@ def get_ranking_posts_detail_categories_monthly(db: Session, category: str, page
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
         .outerjoin(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(
             MediaAssets,
             and_(
@@ -1836,7 +2128,11 @@ def get_ranking_posts_detail_categories_monthly(db: Session, category: str, page
             Likes.post_id == Posts.id,
             Likes.created_at >= one_month_ago,
         )
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .group_by(
             Categories.id,
             Categories.name,
@@ -1863,6 +2159,7 @@ def get_ranking_posts_detail_categories_monthly(db: Session, category: str, page
     )
 
     return result
+
 
 # ========== ランキング用 各ジャンル==========
 def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
@@ -1908,10 +2205,8 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -1922,12 +2217,8 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
             MediaAssets.storage_key.label("thumbnail_key"),
             VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
-
             func.row_number()
-            .over(
-                partition_by=Categories.id,
-                order_by=func.count(Likes.post_id).desc()
-            )
+            .over(partition_by=Categories.id, order_by=func.count(Likes.post_id).desc())
             .label("rn"),
         )
         .select_from(Categories)
@@ -1961,7 +2252,11 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
                 # Likes.created_at >= func.date_trunc("day", func.now()),
             ),
         )
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .group_by(
             Categories.id,
             Categories.name,
@@ -1989,6 +2284,7 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
     )
 
     return result
+
 
 def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
     """
@@ -2036,10 +2332,8 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -2050,12 +2344,8 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
             MediaAssets.storage_key.label("thumbnail_key"),
             VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
-
             func.row_number()
-            .over(
-                partition_by=Categories.id,
-                order_by=func.count(Likes.post_id).desc()
-            )
+            .over(partition_by=Categories.id, order_by=func.count(Likes.post_id).desc())
             .label("rn"),
         )
         .select_from(Categories)
@@ -2089,7 +2379,11 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
                 Likes.created_at >= one_day_ago,
             ),
         )
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .group_by(
             Categories.id,
             Categories.name,
@@ -2118,6 +2412,7 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
 
     return result
 
+
 def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
     """
     各カテゴリーでいいね数が多い投稿を取得 Weekly
@@ -2145,7 +2440,7 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
                 Posts.id == PostCategories.post_id,
                 Posts.status == PostStatus.APPROVED,
                 Posts.deleted_at.is_(None),
-                active_post_cond
+                active_post_cond,
             ),
         )
         .outerjoin(
@@ -2164,10 +2459,8 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -2176,14 +2469,10 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"), 
+            VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
-
             func.row_number()
-            .over(
-                partition_by=Categories.id,
-                order_by=func.count(Likes.post_id).desc()
-            )
+            .over(partition_by=Categories.id, order_by=func.count(Likes.post_id).desc())
             .label("rn"),
         )
         .select_from(Categories)
@@ -2217,7 +2506,11 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
                 Likes.created_at >= one_week_ago,
             ),
         )
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .group_by(
             Categories.id,
             Categories.name,
@@ -2245,6 +2538,7 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
     )
 
     return result
+
 
 def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
     """
@@ -2292,10 +2586,8 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-
             Genres.id.label("genre_id"),
             Genres.name.label("genre_name"),
-
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
             Posts.post_type.label("post_type"),
@@ -2304,14 +2596,10 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"), 
+            VideoAssets.duration_sec.label("duration_sec"),
             func.count(Likes.post_id).label("likes_count"),
-
             func.row_number()
-            .over(
-                partition_by=Categories.id,
-                order_by=func.count(Likes.post_id).desc()
-            )
+            .over(partition_by=Categories.id, order_by=func.count(Likes.post_id).desc())
             .label("rn"),
         )
         .select_from(Categories)
@@ -2345,7 +2633,11 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
                 Likes.created_at >= one_month_ago,
             ),
         )
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .group_by(
             Categories.id,
             Categories.name,
@@ -2374,7 +2666,10 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
 
     return result
 
-def get_ranking_posts_detail_overall_all_time(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_posts_detail_overall_all_time(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     全期間でいいね数が多い投稿を取得
     """
@@ -2389,29 +2684,47 @@ def get_ranking_posts_detail_overall_all_time(db: Session, page: int = 1, limit:
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec'),
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .outerjoin(Users, Posts.creator_user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
         .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
         .filter(active_post_cond)
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-def get_ranking_posts_detail_overall_monthly(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_posts_detail_overall_monthly(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     月間でいいね数が多い投稿を取得
     """
@@ -2427,30 +2740,48 @@ def get_ranking_posts_detail_overall_monthly(db: Session, page: int = 1, limit: 
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec'),
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)
         .filter(active_post_cond)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.created_at >= one_month_ago)  # 過去30日以内のいいね
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-def get_ranking_posts_detail_overall_weekly(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_posts_detail_overall_weekly(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     週間でいいね数が多い投稿を取得
     """
@@ -2466,30 +2797,48 @@ def get_ranking_posts_detail_overall_weekly(db: Session, page: int = 1, limit: i
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec'),
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .outerjoin(Users, Posts.creator_user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)
         .filter(Posts.deleted_at.is_(None))
         .filter(active_post_cond)
         .filter(Posts.created_at >= one_week_ago)  # 過去7日以内のいいね
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-def get_ranking_posts_detail_overall_daily(db: Session, page: int = 1, limit: int = 500):
+
+def get_ranking_posts_detail_overall_daily(
+    db: Session, page: int = 1, limit: int = 500
+):
     """
     日間でいいね数が多い投稿を取得
     """
@@ -2505,38 +2854,54 @@ def get_ranking_posts_detail_overall_daily(db: Session, page: int = 1, limit: in
     return (
         db.query(
             Posts,
-            func.count(Likes.post_id).label('likes_count'),
+            func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key.label('thumbnail_key'),
-            VideoAssets.duration_sec.label('duration_sec'),
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
         .outerjoin(Users, Posts.creator_user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(MediaAssets, (Posts.id == MediaAssets.post_id) & (MediaAssets.kind == MediaAssetKind.THUMBNAIL))
-        .outerjoin(VideoAssets, (Posts.id == VideoAssets.post_id) & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO))
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .filter(Posts.status == PostStatus.APPROVED)
         .filter(Posts.deleted_at.is_(None))
         .filter(active_post_cond)
         .filter(Posts.created_at >= one_day_ago)  # 過去1日以内のいいね
-        .group_by(Posts.id, Users.profile_name, Profiles.username, Profiles.avatar_url, MediaAssets.storage_key, VideoAssets.duration_sec)
-        .order_by(desc('likes_count'))
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
+
 def add_notification_for_post(
-    db: Session, 
-    post: Posts = None, 
+    db: Session,
+    post: Posts = None,
     post_id: str = None,
-    user_id: UUID = None, 
+    user_id: UUID = None,
     liked_user_id: UUID = None,
-    type: str = "approved"
+    type: str = "approved",
 ) -> None:
-    """ 投稿に対する通知を追加
+    """投稿に対する通知を追加
 
     Args:
         db: データベースセッション
@@ -2547,8 +2912,15 @@ def add_notification_for_post(
     try:
         if type == "approved":
             try:
-                profiles = db.query(Profiles).filter(Profiles.user_id == post.creator_user_id).first()
-                message = POST_APPROVED_MD.replace("-name-", profiles.username).replace("--post-url--", f"{os.environ.get('FRONTEND_URL')}/post/detail?post_id={post.id}")
+                profiles = (
+                    db.query(Profiles)
+                    .filter(Profiles.user_id == post.creator_user_id)
+                    .first()
+                )
+                message = POST_APPROVED_MD.replace("-name-", profiles.username).replace(
+                    "--post-url--",
+                    f"{os.environ.get('FRONTEND_URL')}/post/detail?post_id={post.id}",
+                )
                 notification = Notifications(
                     user_id=post.creator_user_id,
                     type=NotificationType.USERS,
@@ -2574,8 +2946,15 @@ def add_notification_for_post(
         elif type == "rejected":
             try:
                 post = db.query(Posts).filter(Posts.id == post_id).first()
-                profiles = db.query(Profiles).filter(Profiles.user_id == post.creator_user_id).first()
-                message = POST_REJECTED_MD.replace("-name-", profiles.username).replace("--post-url--", f"{os.environ.get('FRONTEND_URL')}/account/post/{post.id}")
+                profiles = (
+                    db.query(Profiles)
+                    .filter(Profiles.user_id == post.creator_user_id)
+                    .first()
+                )
+                message = POST_REJECTED_MD.replace("-name-", profiles.username).replace(
+                    "--post-url--",
+                    f"{os.environ.get('FRONTEND_URL')}/account/post/{post.id}",
+                )
                 notification = Notifications(
                     user_id=post.creator_user_id,
                     type=NotificationType.USERS,
@@ -2599,7 +2978,9 @@ def add_notification_for_post(
                 logger.error(f"Add notification for post rejected error: {e}")
                 pass
         elif type == "like":
-            liked_user_profile = db.query(Profiles).filter(Profiles.user_id == liked_user_id).first()
+            liked_user_profile = (
+                db.query(Profiles).filter(Profiles.user_id == liked_user_id).first()
+            )
             if not liked_user_profile:
                 raise Exception("Liked user profile not found")
             try:
@@ -2626,6 +3007,7 @@ def add_notification_for_post(
         logger.error(f"Add notification for post error: {e}")
         pass
 
+
 # ========== OGP画像取得 ==========
 def get_post_ogp_image_url(db: Session, post_id: str) -> str | None:
     """
@@ -2639,25 +3021,27 @@ def get_post_ogp_image_url(db: Session, post_id: str) -> str | None:
         raise Exception("Post not found")
 
     # kind=1のメディアアセットを取得
-    media_asset = db.query(MediaAssets).filter(
-        and_(
-            MediaAssets.post_id == post_id,
-            MediaAssets.kind == MediaAssetKind.OGP,
+    media_asset = (
+        db.query(MediaAssets)
+        .filter(
+            and_(
+                MediaAssets.post_id == post_id,
+                MediaAssets.kind == MediaAssetKind.OGP,
+            )
         )
-    ).first()
-    
+        .first()
+    )
 
     if not media_asset:
         return None
 
     return f"{CDN_BASE_URL}/{media_asset.storage_key}"
 
+
 def add_mail_notification_for_post(
-    db: Session, 
-    post_id: UUID = None, 
-    type: str = "approved"
+    db: Session, post_id: UUID = None, type: str = "approved"
 ) -> None:
-    """ 投稿に対するメール通知を追加
+    """投稿に対するメール通知を追加
 
     Args:
         db: データベースセッション
@@ -2688,15 +3072,29 @@ def add_mail_notification_for_post(
         if not user:
             raise Exception("Can not query user settings")
         if type == "approved":
-            if ((user.settings is None) or (user.settings.get("postApprove", True) == True) or (user.settings.get("postApprove", True) is None)):
+            if (
+                (user.settings is None)
+                or (user.settings.get("postApprove", True) == True)
+                or (user.settings.get("postApprove", True) is None)
+            ):
                 send_post_approval_email(user.Users.email, user.username, user.Posts.id)
         elif type == "rejected":
-            if ((user.settings is None) or (user.settings.get("postApprove", True) == True) or (user.settings.get("postApprove", True) is None)):
-                send_post_rejection_email(user.Users.email, user.username, user.Posts.reject_comments, user.Posts.id)
+            if (
+                (user.settings is None)
+                or (user.settings.get("postApprove", True) == True)
+                or (user.settings.get("postApprove", True) is None)
+            ):
+                send_post_rejection_email(
+                    user.Users.email,
+                    user.username,
+                    user.Posts.reject_comments,
+                    user.Posts.id,
+                )
     except Exception as e:
         logger.exception(f"{e}")
         logger.error(f"Add mail notification for post error: {e}")
         pass
+
 
 def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
     """
@@ -2723,7 +3121,7 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
             Users.id.label("creator_user_id"),
             Users.profile_name,
             Profiles.username,
-            Profiles.avatar_url
+            Profiles.avatar_url,
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
@@ -2740,10 +3138,14 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
     ogp_image_url = None
 
     # 1. generation_mediaからOGP画像を取得
-    generation_media = db.query(GenerationMedia).filter(
-        GenerationMedia.post_id == post_id,
-        GenerationMedia.kind == GenerationMediaKind.POST_IMAGE
-    ).first()
+    generation_media = (
+        db.query(GenerationMedia)
+        .filter(
+            GenerationMedia.post_id == post_id,
+            GenerationMedia.kind == GenerationMediaKind.POST_IMAGE,
+        )
+        .first()
+    )
 
     if generation_media:
         ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
@@ -2769,8 +3171,7 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
             "user_id": str(result.creator_user_id),
             "profile_name": result.profile_name or "クリエイター",
             "username": result.username or "",
-            "avatar_url": avatar_url
+            "avatar_url": avatar_url,
         },
-        "created_at": result.created_at
+        "created_at": result.created_at,
     }
-
