@@ -29,6 +29,9 @@ class BankRequestHistories(Base):
     branch_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True, comment="支店コード（検索時）")
     account_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, comment="口座番号（確認時）")
 
+    # リクエスト結果
+    response_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="APIレスポンスデータ")
+
 
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

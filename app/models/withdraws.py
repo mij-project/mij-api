@@ -26,6 +26,7 @@ class Withdraws(Base):
 
     # 出金申請金額
     withdraw_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="出金申請金額（円）")
+    transfer_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="実際振込金額（円）")
 
     # ステータス管理
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, index=True, comment="1=pending, 2=processing, 3=completed, 4=failed, 5=cancelled")
