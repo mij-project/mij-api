@@ -997,7 +997,11 @@ def update_post(db: Session, post_data: dict):
         return None
 
     for key, value in post_data.items():
-        if hasattr(post, key) and value is not None:
+        # idは更新対象外（主キーなので）
+        if key == "id":
+            continue
+        # 属性が存在する場合は値を設定（Noneも含む）
+        if hasattr(post, key):
             setattr(post, key, value)
 
     post.updated_at = datetime.now(timezone.utc)
