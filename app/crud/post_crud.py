@@ -2,7 +2,7 @@ from operator import or_
 import os
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import distinct, func, desc, exists, and_
+from sqlalchemy import distinct, func, desc, exists, and_, BigInteger
 from app.models import UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
