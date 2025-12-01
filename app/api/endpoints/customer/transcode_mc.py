@@ -367,7 +367,7 @@ def update_sub_media_asset(db: Session, post_id: str) -> Optional[Any]:
     """
     kind_list = [MediaAssetKind.THUMBNAIL, MediaAssetKind.OGP]
     media_assets = update_sub_media_assets_status(db, post_id, kind_list, MediaAssetStatus.APPROVED)
-    return True
+    return media_assets
 
 def _update_post_status_for_convert(db: Session, post_id: str, status: int) -> Optional[Any]:
     """
