@@ -38,8 +38,22 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
 
     # 加入中のプランの詳細情報を取得
     for subscription in subscribed_subscriptions:
+        # order_idからプランIDを取得（order_type == 1の場合のみ）
+        if subscription.order_type != 1:
+            continue
+        
+        try:
+            plan_id = UUID(subscription.order_id)
+        except (ValueError, TypeError):
+            continue
+        
+        # プラン情報を取得
+        plan = db.query(Plans).filter(Plans.id == plan_id).first()
+        if not plan:
+            continue
+        
         # プランから価格情報を取得（Pricesテーブルではなくplansテーブルから）
-        plan_price = subscription.plan.price
+        plan_price = plan.price
 
         # クリエイター情報を取得
         creator_profile = (
@@ -50,8 +64,8 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             )
             .join(Users, Profiles.user_id == Users.id)
             .filter(
-                Users.id == subscription.plan.creator_user_id,
-                Profiles.user_id == subscription.plan.creator_user_id,
+                Users.id == plan.creator_user_id,
+                Profiles.user_id == plan.creator_user_id,
                 Users.deleted_at.is_(None)
             )
             .first()
@@ -64,7 +78,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             )
             .join(Posts, PostPlans.post_id == Posts.id)
             .filter(
-                PostPlans.plan_id == subscription.plan_id,
+                PostPlans.plan_id == plan_id,
                 Posts.deleted_at.is_(None),
                 Posts.status == PostStatus.APPROVED
             ).scalar()
@@ -76,7 +90,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             .join(Posts, MediaAssets.post_id == Posts.id)
             .join(PostPlans, Posts.id == PostPlans.post_id)
             .filter(
-                PostPlans.plan_id == subscription.plan_id,
+                PostPlans.plan_id == plan_id,
                 MediaAssets.kind == MediaAssetKind.THUMBNAIL,
                 Posts.deleted_at.is_(None),
                 Posts.status == PostStatus.APPROVED
@@ -89,18 +103,18 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
         thumbnail_keys = [thumb.storage_key for thumb in thumbnails]
 
         subscribed_total_price += plan_price
-        subscribed_plan_names.append(subscription.plan.name)
+        subscribed_plan_names.append(plan.name)
 
         # 詳細情報を追加
         subscribed_plan_details.append({
             "subscription_id": str(subscription.id),
-            "plan_id": str(subscription.plan.id),
-            "plan_name": subscription.plan.name,
-            "plan_description": subscription.plan.description,
+            "plan_id": str(plan.id),
+            "plan_name": plan.name,
+            "plan_description": plan.description,
             "price": plan_price,
             "subscription_created_at": subscription.created_at,
-            "current_period_start": subscription.current_period_start,
-            "current_period_end": subscription.current_period_end,
+            "current_period_start": subscription.access_start if hasattr(subscription, 'access_start') else None,
+            "current_period_end": subscription.access_end if hasattr(subscription, 'access_end') else None,
             "creator_avatar_url": creator_profile.avatar_url if creator_profile and creator_profile.avatar_url else None,
             "creator_username": creator_profile.username if creator_profile else None,
             "creator_profile_name": creator_profile.profile_name if creator_profile else None,
@@ -172,7 +186,8 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
             subscriber_count = (
                 db.query(func.count(Subscriptions.id))
                 .filter(
-                    Subscriptions.plan_id == plan.id,
+                    Subscriptions.order_id == str(plan.id),
+                    Subscriptions.order_type == 1,  # 1=plan_id
                     Subscriptions.status == 1,
                     Subscriptions.canceled_at.is_(None)
                 )
@@ -247,7 +262,8 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         db.query(Subscriptions)
         .filter(
             Subscriptions.user_id == current_user_id,
-            Subscriptions.plan_id == plan_id,
+            Subscriptions.order_id == str(plan_id),
+            Subscriptions.order_type == 1,  # 1=plan_id
             Subscriptions.status == 1,
             Subscriptions.canceled_at.is_(None)
         )
@@ -408,7 +424,8 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
     total = (
         db.query(func.count(Subscriptions.id))
         .filter(
-            Subscriptions.plan_id == plan_id,
+            Subscriptions.order_id == str(plan_id),
+            Subscriptions.order_type == 1,  # 1=plan_id
             Subscriptions.status == 1,
             Subscriptions.canceled_at.is_(None)
         )
@@ -428,7 +445,8 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
         .join(Subscriptions, Users.id == Subscriptions.user_id)
         .join(Profiles, Users.id == Profiles.user_id)
         .filter(
-            Subscriptions.plan_id == plan_id,
+            Subscriptions.order_id == str(plan_id),
+            Subscriptions.order_type == 1,  # 1=plan_id
             Subscriptions.status == 1,
             Subscriptions.canceled_at.is_(None)
         )
