@@ -411,7 +411,7 @@ def add_mail_notification_for_profile_image_submission(
     プロフィール画像申請に対するメール通知を追加
     """
     try:
-        user = (
+        result = (
             db.query(
                 Users,
                 Profiles,
@@ -430,14 +430,34 @@ def add_mail_notification_for_profile_image_submission(
             .filter(ProfileImageSubmissions.id == submission_id)
             .first()
         )
-        if not user:
+        if not result:
             raise Exception("Can not query user settings")
+        
+        # タプルをアンパック
+        user, profile, submission, settings = result
+        
+        # メール通知の設定をチェック
+        # settingsがNoneの場合、またはprofileApproveがTrue/Noneの場合は送信
+        should_send = True
+        if settings is not None and isinstance(settings, dict):
+            profile_approve_setting = settings.get("profileApprove", True)
+            if profile_approve_setting is False:
+                should_send = False
+        
+        if not should_send:
+            return
+            
         if type == "approved":
-            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
-                send_profile_image_approval_email(user.email, user.Profiles.username)
+            send_profile_image_approval_email(
+                user.email,
+                profile.username if profile else user.profile_name
+            )
         elif type == "rejected":
-            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
-                send_profile_image_rejection_email(user.email, user.Profiles.username, user.ProfileImageSubmissions.rejection_reason)
+            send_profile_image_rejection_email(
+                user.email,
+                profile.username if profile else user.profile_name,
+                submission.rejection_reason
+            )
 
     except Exception as e:
         logger.error(f"プロフィール画像申請に対するメール通知を追加エラー: {e}")

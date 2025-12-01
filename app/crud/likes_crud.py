@@ -125,14 +125,24 @@ def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
     """
     try:
         post = db.query(Posts).filter(Posts.id == post_id).first()
+        liked_user = db.query(Users).filter(Users.id == user_id).first()
         liked_user_profile = db.query(Profiles).filter(Profiles.user_id == user_id).first()
+        
+        if not liked_user:
+            logger.error(f"Liked user not found: {user_id}")
+            return
+        
+        # usersテーブルのprofile_nameを取得（なければemailを使用）
+        display_name = liked_user.profile_name if liked_user.profile_name else (liked_user.email or "ユーザー")
+        avatar_url = f"{os.environ.get('CDN_BASE_URL')}/{liked_user_profile.avatar_url}" if (liked_user_profile and liked_user_profile.avatar_url) else f"{os.environ.get('FRONTEND_URL')}/assets/no-image.svg"
+        
         notification = Notifications(
             user_id=post.creator_user_id,
             type=NotificationType.USERS,
             payload={
-                "title": f"{liked_user_profile.username} があなたの投稿をいいねしました",
-                "subtitle": f"{liked_user_profile.username} があなたの投稿をいいねしました",
-                "avatar": f"{os.environ.get('CDN_BASE_URL')}/{liked_user_profile.avatar_url}",
+                "title": f"{display_name} があなたの投稿をいいねしました",
+                "subtitle": f"{display_name} があなたの投稿をいいねしました",
+                "avatar": avatar_url,
                 "redirect_url": f"/post/detail?post_id={post.id}"
             },
             is_read=False,
