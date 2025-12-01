@@ -5,6 +5,7 @@ from app.constants.enums import PostType
 from app.db.base import get_db
 from app.crud.post_crud import get_posts_by_category_slug
 from app.schemas.post import PaginatedPostCategoryResponse, PostCategoryResponse
+from app.models.categories import Categories
 from os import getenv
 from app.core.logger import Logger
 
@@ -22,6 +23,11 @@ async def get_category_by_slug(
     db: Session = Depends(get_db),
 ):
     try:
+        # カテゴリ情報を取得（投稿がない場合でもカテゴリ名を返すため）
+        category = db.query(Categories).filter(Categories.slug == slug).first()
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+
         posts, total = get_posts_by_category_slug(db, slug, page, per_page)
         next_page, previous_page, has_next, has_previous = __process_pagination(
             posts, page, per_page
@@ -46,6 +52,7 @@ async def get_category_by_slug(
                     duration=get_video_duration(post.duration_sec)
                     if post.post_type == PostType.VIDEO and post.duration_sec
                     else ("画像" if post.post_type == PostType.IMAGE else ""),
+                    category_name=category.name,
                 )
             )
         return PaginatedPostCategoryResponse(
@@ -55,7 +62,10 @@ async def get_category_by_slug(
             per_page=per_page,
             has_next=has_next,
             has_previous=has_previous,
+            category_name=category.name,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("カテゴリー取得に失敗しました", e)
         raise HTTPException(status_code=500, detail=str(e))

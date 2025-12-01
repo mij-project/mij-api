@@ -95,6 +95,23 @@ def get_like_status(
     likes_count = likes_crud.get_likes_count(db, post_id)
     return {"liked": is_liked, "likes_count": likes_count}
 
+@router.post("/like/status/bulk", response_model=dict)
+def get_likes_status_bulk(
+    post_ids: List[UUID],
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """複数投稿のいいね状態を一括取得"""
+    result = {}
+    for post_id in post_ids:
+        is_liked = likes_crud.is_liked(db, current_user.id, post_id)
+        likes_count = likes_crud.get_likes_count(db, post_id)
+        result[str(post_id)] = {
+            "liked": is_liked,
+            "likes_count": likes_count
+        }
+    return result
+
 @router.get("/liked-posts", response_model=List[dict])
 def get_liked_posts(
     skip: int = Query(0, ge=0),
@@ -244,6 +261,21 @@ def get_bookmark_status(
     """ブックマーク状態を確認"""
     is_bookmarked = bookmarks_crud.is_bookmarked(db, current_user.id, post_id)
     return {"bookmarked": is_bookmarked}
+
+@router.post("/bookmark/status/bulk", response_model=dict)
+def get_bookmarks_status_bulk(
+    post_ids: List[UUID],
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """複数投稿のブックマーク状態を一括取得"""
+    result = {}
+    for post_id in post_ids:
+        is_bookmarked = bookmarks_crud.is_bookmarked(db, current_user.id, post_id)
+        result[str(post_id)] = {
+            "bookmarked": is_bookmarked
+        }
+    return result
 
 @router.get("/bookmarks", response_model=List[dict])
 def get_bookmarks(

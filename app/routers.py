@@ -6,7 +6,7 @@ from app.api.endpoints.customer import (
     identity, media_assets, videos, users, auth,
     creater, gender, plans, categories, post,
     transcode_mc, top, category, ranking, social,
-    purchases, preregistrations, account, auth_email_verify,
+    preregistrations, account, auth_email_verify,
     conversations, order, sms_verifications, banners, video_temp, notifications as customer_notifications,
     search, creator_type, password_reset, user_settings, generation_media
 )
@@ -59,7 +59,6 @@ api_router.include_router(transcode_mc.router, prefix="/transcodes", tags=["Tran
 api_router.include_router(category.router, prefix="/category", tags=["Category"])
 api_router.include_router(ranking.router, prefix="/ranking", tags=["Ranking"])
 api_router.include_router(social.router, prefix="/social", tags=["Social"])
-api_router.include_router(purchases.router, prefix="/purchases", tags=["Purchases"])
 api_router.include_router(preregistrations.router, prefix="/preregistrations", tags=["Preregistrations"])
 api_router.include_router(auth_email_verify.router, prefix="/auth/email", tags=["Auth Email"])
 api_router.include_router(conversations.router, prefix="/conversations", tags=["Conversations"])

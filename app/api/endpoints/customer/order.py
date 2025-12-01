@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic.types import T
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.deps.auth import get_current_user
@@ -7,8 +8,6 @@ from app.constants.enums import ItemType
 from uuid import UUID
 from app.crud.price_crud import get_price_by_id
 from app.crud.plan_crud import get_plan_by_id
-from app.crud.orders import insert_order
-from app.crud.order_items import insert_order_item
 from app.constants.enums import OrderStatus
 import os
 from app.core.logger import Logger
@@ -26,41 +25,7 @@ def create_order(
     注文を作成
     """
     try:
-        # TODO: ユーザーIDを取得
-        user_id = "276081e3-6647-48b2-a257-170c9c4a6b0e"
-        # 金額を取得
-        result, amount = _get_item_info(db, order_request.item_type, order_request.price_id, order_request.plan_id)
-        
-        # 注文を作成
-        order_create = {
-            "user_id": user_id,
-            "total_amount": amount,
-            "currency": "JPY",
-            "status": OrderStatus.PENDING,
-        }
-        order = insert_order(db, order_create)
-        
-        # アイテムを作成
-        order_item_create = {
-            "order_id": order.id,
-            "item_type": order_request.item_type,
-            "post_id": result.post_id if order_request.item_type == ItemType.POST else None,
-            "plan_id": result.id if order_request.item_type == ItemType.PLAN else None,
-            "amount": amount,
-            "creator_user_id": user_id,
-        }
-        order_item = insert_order_item(db, order_item_create)
-
-
-        db.commit()
-        db.refresh(order)
-        db.refresh(order_item)
-
-        return {
-            "order_id": order.id,
-            "order_item_id": order_item.id,
-            "amount": amount,
-        }
+       return True
     except Exception as e:
         db.rollback()
         logger.error("注作成エラーが発生しました", e)

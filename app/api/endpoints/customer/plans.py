@@ -69,7 +69,6 @@ def create_user_plan(
         # 投稿数と加入者数を取得
         from app.models.plans import PostPlans
         from app.models.posts import Posts
-        from app.models.subscriptions import Subscriptions
         from app.constants.enums import PostStatus
         from sqlalchemy import func
 
@@ -84,15 +83,6 @@ def create_user_plan(
             .scalar() or 0
         )
 
-        subscriber_count = (
-            db.query(func.count(Subscriptions.id))
-            .filter(
-                Subscriptions.plan_id == plan.id,
-                Subscriptions.status == 1,
-                Subscriptions.canceled_at.is_(None)
-            )
-            .scalar() or 0
-        )
 
         # 返却用に整形
         plan_response = PlanResponse(
@@ -104,7 +94,7 @@ def create_user_plan(
             display_order=plan.display_order,
             welcome_message=plan.welcome_message,
             post_count=post_count,
-            subscriber_count=subscriber_count
+            subscriber_count=0
         )
 
         return plan_response
@@ -304,7 +294,6 @@ def update_user_plan(
         # 投稿数と加入者数を取得
         from app.models.plans import PostPlans
         from app.models.posts import Posts
-        from app.models.subscriptions import Subscriptions
         from app.constants.enums import PostStatus
         from sqlalchemy import func
         
@@ -319,16 +308,6 @@ def update_user_plan(
             .scalar() or 0
         )
         
-        subscriber_count = (
-            db.query(func.count(Subscriptions.id))
-            .filter(
-                Subscriptions.plan_id == updated_plan.id,
-                Subscriptions.status == 1,
-                Subscriptions.canceled_at.is_(None)
-            )
-            .scalar() or 0
-        )
-        
         return PlanResponse(
             id=updated_plan.id,
             name=updated_plan.name,
@@ -338,7 +317,7 @@ def update_user_plan(
             display_order=updated_plan.display_order,
             welcome_message=updated_plan.welcome_message,
             post_count=post_count,
-            subscriber_count=subscriber_count
+            subscriber_count=0
         )
     except HTTPException:
         raise
