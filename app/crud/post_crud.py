@@ -25,9 +25,10 @@ from app.models.profiles import Profiles
 from app.models.media_assets import MediaAssets
 from app.models.plans import Plans, PostPlans
 from app.models.prices import Prices
-from app.crud.entitlements_crud import check_entitlement
-from app.models.purchases import Purchases
-from app.models.orders import OrderItems
+from app.models.media_renditions import MediaRenditions
+from app.models.payments import Payments
+from app.api.commons.utils import get_video_duration
+from app.constants.enums import PlanStatus
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.constants.enums import PostType
 from app.schemas.user_settings import UserSettingsType
@@ -58,6 +59,7 @@ POST_APPROVED_MD = """## mijfans 投稿の審査が完了しました
 
 [投稿を確認する](--post-url--)
 
+すぐに公開しましょう。  
 ご不明な点がございましたら、サポートまでお問い合わせください。
 """
 
@@ -269,9 +271,9 @@ def _build_post_status_query(
     return (
         db.query(
             Posts,
-            func.count(func.distinct(Likes.user_id)).label("likes_count"),
-            func.count(func.distinct(Comments.id)).label("comments_count"),
-            func.count(func.distinct(OrderItems.id)).label("purchase_count"),
+            func.count(func.distinct(Likes.user_id)).label('likes_count'),
+            func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.cast(0, BigInteger).label('purchase_count'),  # 仮の値: 決済処理未実装のため0を返す
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
@@ -294,7 +296,6 @@ def _build_post_status_query(
         )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
-        .outerjoin(OrderItems, Posts.id == OrderItems.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
@@ -393,15 +394,7 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
     ThumbnailAssets = aliased(MediaAssets)
 
     # ユーザーがこのプランを購入しているか確認
-    purchase = (
-        db.query(Purchases)
-        .filter(
-            Purchases.user_id == user_id,
-            Purchases.plan_id == plan_id,
-            Purchases.deleted_at.is_(None),
-        )
-        .first()
-    )
+    purchase = False
 
     if not purchase:
         return []
@@ -595,20 +588,6 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     ユーザーが購入した投稿を取得
     """
     # サブクエリで投稿ごとの最新購入日時を取得（投稿IDのみでグループ化）
-    latest_purchases = (
-        db.query(
-            Posts.id.label("post_id"),
-            func.max(Purchases.created_at).label("latest_purchase_at"),
-        )
-        .select_from(Purchases)
-        .join(Plans, Purchases.plan_id == Plans.id)
-        .join(PostPlans, Plans.id == PostPlans.plan_id)
-        .join(Posts, PostPlans.post_id == Posts.id)
-        .filter(Purchases.user_id == user_id)
-        .filter(Purchases.deleted_at.is_(None))
-        .group_by(Posts.id)
-        .subquery()
-    )
 
     return (
         db.query(
@@ -618,12 +597,10 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec,
-            func.count(func.distinct(Likes.user_id)).label("likes_count"),
-            func.count(func.distinct(Comments.id)).label("comments_count"),
-            latest_purchases.c.latest_purchase_at.label("purchased_at"),
+            func.count(func.distinct(Likes.user_id)).label('likes_count'),
+            func.count(func.distinct(Comments.id)).label('comments_count'),
         )
         .select_from(Posts)
-        .join(latest_purchases, Posts.id == latest_purchases.c.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(
@@ -642,9 +619,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
-            latest_purchases.c.latest_purchase_at,
         )
-        .order_by(desc(latest_purchases.c.latest_purchase_at))
         .all()
     )
 
@@ -1056,28 +1031,6 @@ def update_post_status(
 
 
 # ========== 内部関数 ==========
-def _is_purchased(db: Session, user_id: UUID | None, post_id: UUID) -> bool:
-    """
-    ユーザーが投稿を購入しているかどうかを判定
-
-    Args:
-        db (Session): データベースセッション
-        user_id (UUID | None): ユーザーID（Noneの場合は未購入扱い）
-        post_id (UUID): 投稿ID
-
-    Returns:
-        bool: 購入済みの場合True、未購入の場合False
-    """
-    if user_id is None:
-        return False
-    return db.query(
-        exists().where(
-            Purchases.user_id == user_id,
-            Purchases.post_id == post_id,
-            Purchases.deleted_at.is_(None),  # 削除されていない購入のみ
-        )
-    ).scalar()
-
 
 def _get_post_and_creator_info(db: Session, post_id: str) -> tuple:
     """投稿とクリエイター情報を取得"""
@@ -1143,7 +1096,7 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
 def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     """メディア情報を取得・処理"""
     media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
-    is_entitlement = check_entitlement(db, user_id, post_id) if user_id else False
+    is_entitlement = False
 
     set_media_kind = (
         MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
@@ -1282,9 +1235,9 @@ def get_post_detail_for_creator(
     result = (
         db.query(
             Posts,
-            func.count(func.distinct(Likes.user_id)).label("likes_count"),
-            func.count(func.distinct(Comments.id)).label("comments_count"),
-            func.count(func.distinct(OrderItems.id)).label("purchase_count"),
+            func.count(func.distinct(Likes.user_id)).label('likes_count'),
+            func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.cast(0, BigInteger).label('purchase_count'),  # 仮の値: 決済処理未実装のため0を返す
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
@@ -1307,7 +1260,6 @@ def get_post_detail_for_creator(
         )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
-        .outerjoin(OrderItems, Posts.id == OrderItems.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Posts.id == post_id)
         .filter(Posts.creator_user_id == creator_user_id)
@@ -1704,7 +1656,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     """
     try:
         # UUIDに変換
-        post_uuid = post_id
+        post_uuid = UUID(post_id)
     except ValueError:
         return None
 

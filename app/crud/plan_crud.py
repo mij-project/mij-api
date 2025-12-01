@@ -28,19 +28,10 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
     """
 
     # サブスクリプション中のプラン（type=2）を取得
-    subscribed_subscriptions = (
-        db.query(Subscriptions)
-        .join(Plans, Subscriptions.plan_id == Plans.id)
-        .filter(
-            Subscriptions.user_id == user_id,
-            Plans.deleted_at.is_(None),  # 削除されていないプラン
-            Subscriptions.status == 1,  # アクティブなサブスクリプション
-            Subscriptions.canceled_at.is_(None)  # キャンセルされていないサブスクリプション
-        )
-        .all()
-    )
+    # TODO: 仮の値として空のリストを設定
+    subscribed_subscriptions = []
 
-    subscribed_plan_count = len(subscribed_subscriptions)
+    subscribed_plan_count = 0
     subscribed_total_price = 0
     subscribed_plan_names = []
     subscribed_plan_details = []
