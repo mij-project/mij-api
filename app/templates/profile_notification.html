@@ -16,13 +16,13 @@
         <p style="color:#166534;margin:0;">おめでとうございます！プロフィール画像が承認されました。</p>
       </div>
       <p style="color:#374151;line-height:1.6;">
-        <a href="{{ post_url }}" style="color:#2563eb;text-decoration:none;">{{ post_url }}</a>
+        <a href="{{ profile_url }}" style="color:#2563eb;text-decoration:none;">プロフィールを確認する</a><br>
         ご不明な点がございましたら、サポートまでお問い合わせください。
       </p>
       {% else %}
       <div style="background-color:#fee2e2;border-left:4px solid #dc2626;padding:15px;margin:20px 0;border-radius:4px;">
         <p style="color:#991b1b;font-weight:bold;margin:0 0 10px 0;">✕ 審査結果: 拒否</p>
-        <p style="color:#991b1b;margin:0;">誠に申し訳ございませんが、今回の投稿が承認されませんでした。</p>
+        <p style="color:#991b1b;margin:0;">誠に申し訳ございませんが、プロフィール画像の承認されませんでした。</p>
       </div>
       {% if notes %}
       <div style="background-color:#f3f4f6;padding:15px;margin:20px 0;border-radius:4px;">
@@ -30,8 +30,9 @@
         <p style="color:#4b5563;margin:0;">{{ notes }}</p>
       </div>
       {% endif %}
-      <br>
-      <a href="{{ post_url }}" style="color:#2563eb;text-decoration:none;">{{ post_url }}</a>
+      <p style="color:#374151;line-height:1.6;">
+        <a href="{{ profile_url }}" style="display:inline-block;background-color:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:500;margin:10px 0;">プロフィール画像を再申請する</a>
+      </p>
       <p style="color:#374151;line-height:1.6;">
         再度確認、再度申請をお願いいたします。<br>
         ご不明な点がございましたら、サポートまでお問い合わせください。
