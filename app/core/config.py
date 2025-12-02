@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     CREDIX_API_BASE_URL: str = "https://secure.credix-web.co.jp"
     CREDIX_CLIENTIP: str
     CREDIX_ZKEY: str
-    CREDIX_SESSION_ENDPOINT: str = "/cgi-bin/credit/repeater.cgi"
-    CREDIX_ORDER_ENDPOINT: str = "/cgi-bin/credit/session.cgi"
+    CREDIX_SESSION_ENDPOINT: str = "/cgi-bin/credit/session.cgi"
+    CREDIX_ORDER_ENDPOINT: str = "/cgi-bin/credit/order.cgi"
 
     model_config = SettingsConfigDict(
         env_file=[".env.development", ".env", ".env.local"],

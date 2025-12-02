@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% if contents_type == "plan" %}
+      <title>{{ buyer_name }}さんが{{ contents_name }}に加入しました。</title>
+    {% else %}
+      <title>{{ buyer_name }}さんが{{ contents_name }}を購入しました。</title>
+    {% endif %}
+  </head>
+  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:20px;background-color:#f9fafb;margin:0;">
+    <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+      <!-- ヘッダー -->
+      {% if contents_type == "plan" %}
+      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんが{{ contents_name }}プランに加入しました</h2>
+      {% else %}
+      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんが{{ contents_name }}を購入しました</h2>
+      {% endif %}
+
+      <p style="color:#374151;line-height:1.6;margin-bottom:20px;">
+        {{ seller_name }}様<br>
+        いつも mijfans をご利用いただきありがとうございます。
+      </p>
+
+      <!-- 購入完了通知 -->
+      <div style="background-color:#dcfce7;border-left:4px solid #16a34a;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#166534;font-weight:bold;margin:0;">✓ 新しい購入がありました</p>
+      </div>
+
+      <!-- 購入詳細 -->
+      <div style="background-color:#f9fafb;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #e5e7eb;">
+        <h3 style="color:#111827;margin-top:0;margin-bottom:15px;font-size:18px;">購入詳細</h3>
+
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;width:120px;">購入者名:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">{{ buyer_name }}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">コンテンツ名:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">{{ contents_name }}</td>
+          </tr>
+          {% if contents_type == "plan" %}
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">種別:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">プラン加入</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">種別:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">コンテンツ購入</td>
+          </tr>
+          {% endif %}
+        </table>
+      </div>
+
+      <!-- アクションリンク -->
+      <div style="margin:25px 0;text-align:center;">
+        <p style="color:#374151;line-height:1.6;margin-bottom:15px;">購入されたコンテンツは下記のURLからご確認いただけます。</p>
+        <a href="{{ content_url }}" style="display:inline-block;background-color:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;margin-bottom:10px;">
+          コンテンツを確認する
+        </a>
+        <br>
+        <a href="{{ dashboard_url }}" style="display:inline-block;background-color:#10b981;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;margin-top:10px;">
+          売り上げを確認する
+        </a>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <!-- お問い合わせ -->
+      <div style="background-color:#f9fafb;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #e5e7eb;">
+        <h3 style="color:#111827;margin-top:0;margin-bottom:15px;font-size:18px;">お問い合わせ</h3>
+        <p style="color:#374151;line-height:1.6;margin:0;">
+          ご質問等がございましたら、お問い合わせよりお知らせください。<br>
+          内容を確認し、1営業日以内にご返答させて頂きます。<br>
+          ※ このメールは送信専用メールです。ご返信いただいてもお応えいたしかねますのでご了承ください。<br>
+          メールの配信解除を希望される方は、メール通知設定より配信解除の手続きを行ってください。<br>
+          ※ 重要なお知らせは通知設定に関わらずお送りしております。
+        </p>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <!-- フッター -->
+      <div style="margin-top:30px;">
+        <p style="color:#374151;font-size:14px;line-height:1.6;margin-bottom:10px;">
+          <strong>公式Twitter(最新情報):</strong><br>
+          <a href="https://x.com/mijfan_official" style="color:#2563eb;text-decoration:none;">https://x.com/mijfan_official</a>
+        </p>
+
+        <p style="color:#6b7280;font-size:14px;line-height:1.6;margin-top:20px;">
+          このメールは送信専用のメールアドレスから送信されているため、返信できません。<br>
+          恐れ入りますが、お問い合わせは以下のアドレスよりお願いします。<br>
+          <a href="mailto:support@mijfans.jp" style="color:#2563eb;text-decoration:none;">support@mijfans.jp</a>
+        </p>
+
+        <p style="color:#374151;font-size:14px;line-height:1.6;margin-top:20px;font-weight:bold;">
+          今後ともmijfansをよろしくお願いいたします。
+        </p>
+      </div>
+
+      <!-- コピーライト -->
+      <p style="color:#9ca3af;font-size:12px;margin-top:30px;text-align:center;">
+        © 2025 mijfans. All rights reserved.
+      </p>
+    </div>
+  </body>
+</html>

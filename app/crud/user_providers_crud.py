@@ -11,7 +11,7 @@ from app.core.logger import Logger
 logger = Logger.get_logger()
 
 
-async def get_user_provider(
+def get_user_provider(
     db: Session,
     user_id: UUID,
     provider_id: UUID
@@ -29,7 +29,7 @@ async def get_user_provider(
     return result
 
 
-async def create_user_provider(
+def create_user_provider(
     db: Session,
     user_id: UUID,
     provider_id: UUID,
@@ -44,21 +44,27 @@ async def create_user_provider(
         last_used_at=datetime.utcnow()
     )
     db.add(user_provider)
-    await db.commit()
-    await db.refresh(user_provider)
+    db.commit()
+    db.refresh(user_provider)
     return user_provider
 
 
-async def update_last_used_at(
+def update_last_used_at(
     db: Session,
     user_provider_id: UUID
 ) -> UserProviders:
     """最終利用日時更新"""
-    result = await db.execute(
-        select(UserProviders).where(UserProviders.id == user_provider_id)
-    )
-    user_provider = result.scalar_one()
-    user_provider.last_used_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(user_provider)
+    user_provider = db.query(UserProviders).filter(UserProviders.id == user_provider_id).first()
+    if user_provider:
+        user_provider.last_used_at = datetime.utcnow()
+        db.commit()
+        db.refresh(user_provider)
     return user_provider
+
+def get_user_provider_by_sendid(
+    db: Session,
+    sendid: str
+) -> UserProviders | None:
+    """sendidからユーザープロバイダー情報取得"""
+    result = db.query(UserProviders).filter(UserProviders.sendid == sendid).first()
+    return result

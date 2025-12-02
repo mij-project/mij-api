@@ -104,3 +104,35 @@ def _for_notification_list(db: Session, user_id: str, status: str, message: str,
             }
         })
     return notification_list
+
+
+def add_notification_for_payment_succuces(
+    db: Session,
+    notification: dict,
+) -> None:
+    """
+    決済成功時の通知を追加
+    """
+    try:
+        notification = Notifications(**notification)
+        db.add(notification)
+        db.commit()
+    except Exception as e:
+        logger.error(f"Add notification for payment succuces error: {e}")
+        pass
+
+
+def add_notification_for_selling_info(
+    db: Session,
+    notification: dict,
+) -> None:
+    """
+    販売情報の通知を追加
+    """
+    try:
+        notification = Notifications(**notification)
+        db.add(notification)
+        db.commit()
+    except Exception as e:
+        logger.error(f"Add notification for selling info error: {e}")
+        pass

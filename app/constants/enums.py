@@ -249,3 +249,24 @@ class GenerationMediaKind:
 class PaymentTransactionType:
     SINGLE = 1 # 単品購入
     SUBSCRIPTION = 2 # プラン購読
+
+
+class PaymentTransactionStatus:
+    PENDING = 1 # 未承認
+    COMPLETED = 2 # 承認済み
+    FAILED = 3 # 拒否
+
+class PaymentStatus:
+    PENDING = 1 # 未承認
+    SUCCEEDED = 2 # 成功
+    FAILED = 3 # 失敗
+
+class SubscriptionType:
+    PLAN = 1 # プラン
+    SINGLE = 2 # 単品
+
+class SubscriptionStatus:
+    ACTIVE = 1 # 有効
+    CANCELED = 2 # 期末まで視聴可
+    EXPIRED = 3 # キャンセル
+    REFUNDED = 4 # 返金済み

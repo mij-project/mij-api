@@ -107,7 +107,8 @@ def x_login(request: Request, company_code: str = None):
         if "oauth_token" not in tokens or "oauth_token_secret" not in tokens:
             raise HTTPException(400, f"invalid payload: {res.text}")
 
-        # セッション退避
+        # セッション退避（既存のセッションデータをクリア）
+        request.session.clear()
         request.session["oauth_token"] = tokens["oauth_token"]
         request.session["oauth_token_secret"] = tokens["oauth_token_secret"]
 
@@ -169,24 +170,25 @@ def x_callback(
         if "oauth_token" not in access or "oauth_token_secret" not in access:
             raise HTTPException(400, f"invalid access payload: {res.text}")
 
-        # ユーザー情報（v2）
+        # ユーザー情報（v1.1 - OAuth 1.0aでメールアドレス取得）
         x_user = OAuth1Session(X_API_KEY, X_API_SECRET, access["oauth_token"], access["oauth_token_secret"])
-        me_res = x_user.get(f"{USERS_BASE}/2/users/me?user.fields=profile_image_url,verified")
+        me_res = x_user.get(f"{USERS_BASE}/1.1/account/verify_credentials.json?include_email=true")
         if me_res.status_code != 200:
-            raise HTTPException(400, f"users/me error: {me_res.status_code} {me_res.text}")
-        me = me_res.json().get("data", {})
+            raise HTTPException(400, f"verify_credentials error: {me_res.status_code} {me_res.text}")
+        me = me_res.json()
 
-        x_user_id = me.get("id")
-        x_username = me.get("username")
+        x_username = me.get("screen_name")
         if x_username and not x_username.startswith("@"):
             x_username = f"@{x_username}"
         x_name = me.get("name")
+        x_email = me.get("email")
 
-        # メールアドレスの構築（Xは公開メールがないため仮のメールを生成）
-        x_email = f"{x_user_id}@x.twitter.com"
+        if not x_email:
+            x_email = f"{x_username}@not-found.com"
 
         # ユーザー存在チェック
         user_exists = check_email_exists(db, x_email)
+
 
         # 新規ユーザーフラグ
         is_new_user = False
@@ -201,7 +203,13 @@ def x_callback(
             # セッションから企業コードを取得し、company_usersにレコードを追加
             company_code = request.session.get("company_code")
             if company_code:
-                _insert_company_user(db, company_code, user.id)
+                try:
+                    _insert_company_user(db, company_code, user.id)
+                except HTTPException as e:
+                    logger.warning(f"企業コード '{company_code}' が見つかりませんでした: {e.detail}")
+                finally:
+                    # セッションから企業コードを削除
+                    request.session.pop("company_code", None)
 
             if preregistration:
                 _insert_user_event(db, user.id, EventCode.PRE_REGISTRATION)

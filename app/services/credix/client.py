@@ -87,7 +87,7 @@ class CredixClient:
         if sendpoint:
             params["sendpoint"] = sendpoint
 
-        logger.info(f"CREDIX session request: {url}")
+        logger.info(f"CREDIX session request🔥🔥🔥: {url}")
         logger.info(f"CREDIX params: money={money}, sendid={sendid}, search_type={search_type}")
 
         # API呼び出し
@@ -100,102 +100,39 @@ class CredixClient:
                 response_bytes = response.content
 
                 # ★ bytes のまま parse_qs に渡す & encoding="shift_jis" を指定
-                result = parse_qs(response_bytes, encoding="shift_jis", errors="replace")
+                result_raw = parse_qs(response_bytes, encoding="shift_jis", errors="replace")
 
-                logger.info(
-                    "CREDIX session raw: %s",
-                    response_bytes.decode("shift_jis", errors="replace")
-                )
-                logger.info(f"CREDIX session response (parsed): {result}")
+                # バイト列のキーと値を文字列にデコード
+                result = {}
+                for key, value_list in result_raw.items():
+                    # キーをデコード（バイト列の場合）
+                    if isinstance(key, bytes):
+                        decoded_key = key.decode("shift_jis", errors="replace")
+                    else:
+                        decoded_key = key
+                    
+                    # 値のリストをデコード
+                    decoded_values = []
+                    for value in value_list:
+                        if isinstance(value, bytes):
+                            decoded_values.append(value.decode("shift_jis", errors="replace"))
+                        else:
+                            decoded_values.append(value)
+                    
+                    result[decoded_key] = decoded_values
 
-                error_message = result.get("error_message", [None])[0]
-                if "error_message" in result:
-                    error_message = result["error_message"][0]
-                    logger.info(f"CREDIX error message: {error_message}")
+                # 変数に正しく格納
+                result_value = result.get("result", [""])[0] if result.get("result") else ""
+                sid = result.get("sid", [""])[0] if result.get("sid") else ""
+                error_message = result.get("error_message", [None])[0] if result.get("error_message") else None
 
-                return {
-                    "result": result.get("result", [""])[0],
-                    "sid": result.get("sid", [""])[0],
-                    "error_message": error_message,
-                }
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"CREDIX API HTTP error: {e}")
-            raise
-        except httpx.TimeoutException:
-            logger.error("CREDIX API timeout")
-            raise
-        except Exception as e:
-            logger.error(f"CREDIX API error: {e}")
-            raise
-
-
-    async def first_payment(
-        self, 
-        sendid: str, 
-        money: int, 
-        telno: str | None = None, 
-        email: str | None = None, 
-        sendpoint: int = 2, 
-        success_str: Optional[str] = None,
-        failure_str: Optional[str] = None,
-        success_url: Optional[str] = None,
-        failure_url: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """初回決済
-
-        Args:
-            sendid: カードID
-            money: 決済金額
-            telno: 電話番号
-            email: メールアドレス
-            sendpoint: フリーパラメータ
-            success_str: 決済完了メッセージ
-            failure_str: 決済失敗メッセージ
-            success_url: 決済完了後のリダイレクトURL
-            failure_url: 決済失敗後のリダイレクトURL
-        """
-        url = f"{self.base_url}{settings.CREDIX_ORDER_ENDPOINT}"
-        params = {
-            "clientip": self.client_ip,
-            "zkey": self.zkey,
-            "money": money,
-            "sendid": sendid,
-            "sendpoint": sendpoint,
-            "success_str": success_str,
-            "failure_str": failure_str,
-            "success_url": success_url,
-            "failure_url": failure_url,
-        }
-
-        logger.info(f"CREDIX first payment request: {url}")
-        logger.info(f"CREDIX first payment params: money={money}, sendid={sendid}, sendpoint={sendpoint}")
-
-        # API呼び出し
-        try:
-            async with httpx.AsyncClient(timeout=40.0) as client:
-                response = await client.post(url, data=params)
-                response.raise_for_status()
-
-                # レスポンスの bytes を取得
-                response_bytes = response.content
-
-                # ★ bytes のまま parse_qs に渡す & encoding="shift_jis" を指定
-                result = parse_qs(response_bytes, encoding="shift_jis", errors="replace")
-
-                logger.info(
-                    "CREDIX session raw: %s",
-                    response_bytes.decode("shift_jis", errors="replace")
-                )
-                logger.info(f"CREDIX first payment response (parsed): {result}")
-
-                error_message = result.get("error_message", [None])[0]
-                if "error_message" in result:
-                    error_message = result["error_message"][0]
-                    logger.info(f"CREDIX error message: {error_message}")
+                logger.info(f"CREDIX result🔥🔥🔥: {result_value}")
+                logger.info(f"CREDIX sid🔥🔥🔥: {sid}")
+                logger.info(f"CREDIX error message🔥🔥🔥: {error_message}")
 
                 return {
-                    "result": result.get("result", [""])[0],
+                    "result": result_value,
+                    "sid": sid,
                     "error_message": error_message,
                 }
 

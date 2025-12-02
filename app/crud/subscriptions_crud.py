@@ -2,14 +2,14 @@
 Subscriptions CRUD操作
 """
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from app.models.subscriptions import Subscriptions
 from datetime import datetime
 from typing import Optional
 
 
-async def create_subscription(
-    db: AsyncSession,
+def create_subscription(
+    db: Session,
     access_type: int,  # 1=plan_subscription, 2=one_time_purchase
     user_id: UUID,
     creator_id: UUID,
@@ -39,6 +39,6 @@ async def create_subscription(
         failed_payment_count=0
     )
     db.add(subscription)
-    await db.commit()
-    await db.refresh(subscription)
+    db.commit()
+    db.refresh(subscription)
     return subscription

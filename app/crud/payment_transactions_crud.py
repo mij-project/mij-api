@@ -8,7 +8,7 @@ from app.models.payment_transactions import PaymentTransactions
 from datetime import datetime
 
 
-async def create_payment_transaction(
+def create_payment_transaction(
     db: Session,
     user_id: UUID,  
     provider_id: UUID,
@@ -31,7 +31,7 @@ async def create_payment_transaction(
     return transaction
 
 
-async def get_transaction_by_session_id(
+def get_transaction_by_session_id(
     db: Session,
     session_id: str
 ) -> PaymentTransactions | None:
@@ -40,24 +40,25 @@ async def get_transaction_by_session_id(
     return result
 
 
-async def get_transaction_by_id(
+def get_transaction_by_id(
     db: Session,
-    transaction_id: UUID
+    transaction_id: str | UUID
 ) -> PaymentTransactions | None:
     """トランザクションID取得"""
     result = db.query(PaymentTransactions).filter(PaymentTransactions.id == transaction_id).first()
     return result
 
 
-async def update_transaction_status(
+def update_transaction_status(
     db: Session,
     transaction_id: UUID,
     status: int,  # 1=pending, 2=completed, 3=failed
 ) -> PaymentTransactions:
     """トランザクションステータス更新"""
     transaction = db.query(PaymentTransactions).filter(PaymentTransactions.id == transaction_id).first()
-    transaction.status = status
-    transaction.updated_at = datetime()
-    db.commit()
-    db.refresh(transaction)
+    if transaction:
+        transaction.status = status
+        transaction.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(transaction)
     return transaction

@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>決済失敗通知</title>
+  </head>
+  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:20px;background-color:#f9fafb;margin:0;">
+    <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+      <!-- ヘッダー -->
+      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">決済失敗通知</h2>
+    </div>
+    <p style="color:#374151;line-height:1.6;margin-bottom:20px;">
+      いつもmijfansをご利用いただき誠にありがとうございます。<br>
+      決済の処理に失敗しました。
+    </p>
+
+    <!-- 決済完了通知 -->
+    <div style="background-color:#dcfce7;border-left:4px solid #ee300a;padding:15px;margin:20px 0;border-radius:4px;">
+    <p style="color:#ee300a;font-weight:bold;margin:0;">✕ 決済が失敗しました</p>
+    </div>
+
+    <!-- 決済詳細 -->
+    <div style="background-color:#f9fafb;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #e5e7eb;">
+      <h3 style="color:#111827;margin-top:0;margin-bottom:15px;font-size:18px;">決済詳細</h3>
+    </div>
+    <table style="width:100%;border-collapse:collapse;">
+		<tr>
+			<td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">注文番号:</td>
+			<td style="padding:8px 0;color:#111827;font-size:14px;font-family:monospace;">{{ transaction_id }}</td>
+		</tr>
+		<tr>
+			<td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">決済失敗日時:</td>
+			<td style="padding:8px 0;color:#111827;font-size:14px;">{{ failure_date }}</td>
+		</tr>
+    </table>
+
+		<!-- ユーザー情報 -->
+		<div style="background-color:#f9fafb;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #e5e7eb;">
+			<h3 style="color:#111827;margin-top:0;margin-bottom:15px;font-size:18px;">購入者情報</h3>
+
+			<table style="width:100%;border-collapse:collapse;">
+				<tr>
+					<td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;width:120px;">ユーザーID:</td>
+					<td style="padding:8px 0;color:#111827;font-size:14px;">{{ sendid }}</td>
+				</tr>
+				<tr>
+					<td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">ユーザー名:</td>
+					<td style="padding:8px 0;color:#111827;font-size:14px;">{{ user_name }}</td>
+				</tr>
+				<tr>
+					<td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">メール:</td>
+					<td style="padding:8px 0;color:#111827;font-size:14px;">{{ user_email }}</td>
+				</tr>
+			</table>
+		</div>
+
+		 <!-- フッター -->
+		 <div style="margin-top:30px;">
+			<p style="color:#374151;font-size:14px;line-height:1.6;margin-bottom:10px;">
+				<strong>公式Twitter(最新情報):</strong><br>
+				<a href="https://x.com/mijfan_official" style="color:#2563eb;text-decoration:none;">https://x.com/mijfan_official</a>
+			</p>
+
+			<p style="color:#6b7280;font-size:14px;line-height:1.6;margin-top:20px;">
+				このメールは送信専用のメールアドレスから送信されているため、返信できません。<br>
+				恐れ入りますが、お問い合わせは以下のアドレスよりお願いします。<br>
+				<a href="mailto:support@mijfans.jp" style="color:#2563eb;text-decoration:none;">support@mijfans.jp</a>
+			</p>
+
+			<p style="color:#374151;font-size:14px;line-height:1.6;margin-top:20px;font-weight:bold;">
+				今後ともmijfansをよろしくお願いいたします。
+			</p>
+		</div>
+
+		<!-- コピーライト -->
+		<p style="color:#9ca3af;font-size:12px;margin-top:30px;text-align:center;">
+			© 2025 mijfans. All rights reserved.
+		</p>
+  </body>
+</html>

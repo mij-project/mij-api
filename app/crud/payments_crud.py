@@ -2,13 +2,13 @@
 Payments CRUD操作
 """
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from app.models.payments import Payments
 from datetime import datetime
 
 
-async def create_payment(
-    db: AsyncSession,
+def create_payment(
+    db: Session,
     transaction_id: UUID,
     payment_type: int,  # 1=subscription, 2=one_time_purchase
     order_id: str,
@@ -37,6 +37,6 @@ async def create_payment(
         paid_at=datetime.utcnow()
     )
     db.add(payment)
-    await db.commit()
-    await db.refresh(payment)
+    db.commit()
+    db.refresh(payment)
     return payment
