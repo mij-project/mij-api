@@ -33,6 +33,9 @@ from app.api.endpoints.hook.media_convert import router as media_convert_hook
 from app.api.endpoints.hook.conversations import router as conversations_hook
 from app.api.endpoints.hook.payment import router as payment_hook
 
+# Payment routes
+from app.api.endpoints.payments import credix
+
 api_router = APIRouter()
 
 # Hook routes
@@ -71,6 +74,8 @@ api_router.include_router(search.router, prefix="", tags=["Search"])
 api_router.include_router(creator_type.router, prefix="/creator-type", tags=["Creator Type"])
 api_router.include_router(user_settings.router, prefix="/user-settings", tags=["User Settings"])
 api_router.include_router(generation_media.router, prefix="/generation-media", tags=["Generation Media"])
+# Payment routes
+api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])
 # Admin routes
 api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin Auth"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])

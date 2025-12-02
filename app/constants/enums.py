@@ -245,3 +245,7 @@ class EventStatus:
 class GenerationMediaKind:
     PROFILE_IMAGE = 1 # プロフィール画像
     POST_IMAGE = 2 # 投稿画像
+
+class PaymentTransactionType:
+    SINGLE = 1 # 単品購入
+    SUBSCRIPTION = 2 # プラン購読

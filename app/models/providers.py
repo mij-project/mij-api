@@ -25,11 +25,6 @@ class Providers(Base):
     code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, comment="プロバイダーコード（例: credix, stripe）")
     name: Mapped[str] = mapped_column(String(255), nullable=False, comment="表示名（例: Credix, Stripe）")
 
-    # Credix固有設定
-    credix_ip_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, comment="Credix IPコード（clientip）")
-    credix_zkey: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Credix認証キー（zkey）")
-    credix_webhook_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Credix Webhook受信URL")
-
     # プロバイダー別設定（JSON形式で柔軟に対応）
     settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="プロバイダー固有設定（JSON）")
 

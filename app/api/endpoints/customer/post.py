@@ -444,7 +444,10 @@ def _format_categories_info(categories: list):
 def _format_sale_info(price: dict, plans: list):
     """販売情報を整形する"""
     return {
-        "price": price.price if price else None,
+        "price": {
+            "id": str(price.id),
+            "price": price.price if price else None,
+        },
         "plans": [
             {
                 "id": str(plan.id),
