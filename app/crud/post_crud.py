@@ -1654,11 +1654,6 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     """
     投稿IDをキーにして投稿情報、ユーザー情報、メディア情報を取得
     """
-    try:
-        # UUIDに変換
-        post_uuid = UUID(post_id)
-    except ValueError:
-        return None
 
     # 投稿情報と関連データを取得
     result = (
@@ -1673,7 +1668,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(MediaAssets, Posts.id == MediaAssets.post_id)
         .outerjoin(MediaRenditionJobs, MediaAssets.id == MediaRenditionJobs.asset_id)
-        .filter(Posts.id == post_uuid)
+        .filter(Posts.id == post_id)
         .filter(Posts.deleted_at.is_(None))
         .all()
     )
@@ -1737,7 +1732,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     # 価格情報を取得（単品販売）
     single_price_data = (
         db.query(Prices.price)
-        .filter(Prices.post_id == post_uuid, Prices.is_active == True)
+        .filter(Prices.post_id == post_id, Prices.is_active == True)
         .first()
     )
 
@@ -1746,7 +1741,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         db.query(Plans.id, Plans.name, Plans.price)
         .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(
-            PostPlans.post_id == post_uuid,
+            PostPlans.post_id == post_id,
             Plans.deleted_at.is_(None),
         )
         .all()
