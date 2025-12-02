@@ -375,6 +375,16 @@ def add_notification_for_profile_image_submission(
         profile = db.query(Profiles).filter(
             Profiles.user_id == submission.user_id
         ).first()
+
+        # redirect_urlを画像タイプに応じて設定
+        redirect_url = "/account/edit"
+        if type == "rejected":
+            # 却下時は該当する画像タブにリダイレクト
+            if submission.image_type == ProfileImage.AVATAR:
+                redirect_url = "/account/edit?tab=avatar"
+            elif submission.image_type == ProfileImage.COVER:
+                redirect_url = "/account/edit?tab=cover"
+
         if type == "approved":
             title = "プロフィール画像申請が承認されました"
             subtitle = "プロフィール画像申請が承認されました"
@@ -392,7 +402,7 @@ def add_notification_for_profile_image_submission(
                 "title": title,
                 "subtitle": subtitle,
                 "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
-                "redirect_url": f"/profile?username={profile.username}"
+                "redirect_url": redirect_url
             }
         )
         db.add(notification)
@@ -447,16 +457,27 @@ def add_mail_notification_for_profile_image_submission(
         if not should_send:
             return
             
+        # redirect_urlを画像タイプに応じて設定
+        redirect_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/profile?username={profile.username}"
+        if type == "rejected":
+            # 却下時は該当する画像タブにリダイレクト
+            if submission.image_type == ProfileImage.AVATAR:
+                redirect_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/edit?tab=avatar"
+            elif submission.image_type == ProfileImage.COVER:
+                redirect_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/edit?tab=cover"
+
         if type == "approved":
             send_profile_image_approval_email(
                 user.email,
-                profile.username if profile else user.profile_name
+                profile.username if profile else user.profile_name,
+                redirect_url
             )
         elif type == "rejected":
             send_profile_image_rejection_email(
                 user.email,
                 profile.username if profile else user.profile_name,
-                submission.rejection_reason
+                submission.rejection_reason,
+                redirect_url
             )
 
     except Exception as e:
