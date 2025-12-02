@@ -8,7 +8,7 @@ import tempfile
 from decimal import Decimal
 
 from app.crud.media_rendition_jobs_crud import update_media_rendition_job, get_media_rendition_job_by_id
-from app.crud.media_assets_crud import get_media_asset_by_id, update_media_asset
+from app.crud.media_assets_crud import get_media_asset_by_id, update_media_asset, check_all_media_assets_approved
 from app.crud.media_rendition_crud import create_media_rendition
 from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, update_post_status
 from app.constants.enums import MediaRenditionJobStatus, MediaRenditionKind, PostStatus, MediaAssetStatus
@@ -114,19 +114,36 @@ def _handle_preview_completion(db: Session, webhook_data: dict) -> None:
     rendition_job = get_media_rendition_job_by_id(db, webhook_data["rendition_job_id"])
     if not rendition_job:
         raise HTTPException(404, "Rendition job not found")
-    
+
+    # 失敗時の処理
+    if webhook_data["status"] == MediaRenditionJobStatus.FAILED:
+        # レンディションジョブのステータスを失敗に更新
+        update_data = {
+            "status": MediaRenditionJobStatus.FAILED,
+        }
+        update_media_rendition_job(db, webhook_data["rendition_job_id"], update_data)
+
+        # メディアアセットを取得して投稿IDを特定
+        if rendition_job.asset_id:
+            asset = get_media_asset_by_id(db, str(rendition_job.asset_id))
+            if asset:
+                # 投稿のステータスをCONVERT_FAILEDに更新
+                update_post_status(db, asset.post_id, PostStatus.CONVERT_FAILED, AuthenticatedFlag.NOT_AUTHENTICATED)
+        return
+
+    # 成功時の処理
     # マスターファイルを検索
     storage_key, size_bytes = _find_master_file(webhook_data["detail"], rendition_job.output_prefix)
-    
+
     if not storage_key:
         raise HTTPException(500, "Master file not found under output prefix")
-    
+
     # レンディションジョブを更新
     update_data = {
         "status": webhook_data["status"],
         "output_key": storage_key
     }
-    
+
     update_media_rendition_job(db, webhook_data["rendition_job_id"], update_data)
 
 
@@ -134,38 +151,57 @@ def _handle_final_hls_completion(db: Session, webhook_data: dict) -> None:
     """HLS完了の処理"""
     if not webhook_data["asset_id"]:
         raise HTTPException(400, "Asset ID is required for final-hls processing")
-    
+
     # アセットの取得
     asset = get_media_asset_by_id(db, webhook_data["asset_id"])
     if not asset:
         raise HTTPException(404, "Asset not found")
-    
+
     # レンディションジョブの取得
     rendition_job = get_media_rendition_job_by_id(db, webhook_data["rendition_job_id"])
     if not rendition_job:
         raise HTTPException(404, "Rendition job not found")
-    
+
+    # 失敗時の処理
+    if webhook_data["status"] == MediaRenditionJobStatus.FAILED:
+        # レンディションジョブのステータスを失敗に更新
+        update_data = {
+            "status": MediaRenditionJobStatus.FAILED,
+        }
+        update_media_rendition_job(db, webhook_data["rendition_job_id"], update_data)
+
+        # メディアアセットのステータスをREJECTEDに更新
+        media_asset_update_data = {
+            "status": MediaAssetStatus.REJECTED,
+        }
+        update_media_asset(db, asset.id, media_asset_update_data)
+
+        # 投稿のステータスをCONVERT_FAILEDに更新
+        update_post_status(db, asset.post_id, PostStatus.CONVERT_FAILED, AuthenticatedFlag.NOT_AUTHENTICATED)
+        return
+
+    # 成功時の処理
     # マスターファイルを検索
     storage_key, size_bytes = _find_master_file(webhook_data["detail"], rendition_job.output_prefix)
-    
+
     if not storage_key:
         raise HTTPException(500, "Master file not found under output prefix")
-    
+
     # ファイル拡張子からMIMEタイプとMediaRenditionKindを決定
     file_extension = _get_file_extension(storage_key)
     mime_type = MIME_TYPE_MAP.get(file_extension, "application/octet-stream")
     kind = _get_media_rendition_kind(file_extension)
-    
+
     # 動画の再生時間を取得
     duration_sec = _get_video_duration(webhook_data["detail"], storage_key)
-    
+
     # レンディションジョブを更新
     update_data = {
         "status": webhook_data["status"],
         "output_key": storage_key,
         "mime_type": mime_type,
         "kind": kind,
-    }    
+    }
     update_media_rendition_job(db, webhook_data["rendition_job_id"], update_data)
 
     # media_asset 更新
@@ -176,16 +212,21 @@ def _handle_final_hls_completion(db: Session, webhook_data: dict) -> None:
         "status": MediaAssetStatus.APPROVED,
     }
     update_media_asset(db, asset.id, media_asset_update_data)
-    
-    # 投稿のステータスを承認に更新
-    post = update_post_status(db, asset.post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
-    if not post:
-        raise HTTPException(404, "Post not found")
-    
-    # Email通知を追加
-    add_mail_notification_for_post(db, post_id=post.id, type="approved")
-    # 投稿に対する通知を追加
-    add_notification_for_post(db, post, post.creator_user_id, type="approved")
+
+    # 投稿に紐づく全てのメディアアセットがAPPROVED状態かチェック
+    all_media_approved = check_all_media_assets_approved(db, asset.post_id)
+
+    # 全てのメディアアセットがAPPROVED状態になった場合のみ通知を送る
+    if all_media_approved:
+        # 投稿のステータスを承認に更新
+        post = update_post_status(db, asset.post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
+        if not post:
+            raise HTTPException(404, "Post not found")
+
+        # Email通知を追加
+        add_mail_notification_for_post(db, post_id=post.id, type="approved")
+        # 投稿に対する通知を追加
+        add_notification_for_post(db, post, post.creator_user_id, type="approved")
 
 def _find_master_file(detail: dict, output_prefix: str) -> Tuple[Optional[str], Optional[int]]:
     """マスターファイルを検索する"""

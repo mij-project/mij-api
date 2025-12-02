@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from .creators import Creators
     from .posts import Posts
     from .plans import Plans
-    from .subscriptions import Subscriptions
-    from .orders import Orders
     from .creator_type import CreatorType
     from .gender import Gender
     from .email_verification_tokens import EmailVerificationTokens
@@ -27,6 +25,13 @@ if TYPE_CHECKING:
     from .companies import CompanyUsers
     from .password_reset_token import PasswordResetToken
     from .generation_media import GenerationMedia
+    from .subscriptions import Subscriptions
+    from .payment_transactions import PaymentTransactions
+    from .payments import Payments
+    from .user_providers import UserProviders
+    from .user_banks import UserBanks
+    from .withdraws import Withdraws
+    from .bank_request_histories import BankRequestHistories
 
 class Users(Base):
     __tablename__ = "users"
@@ -53,8 +58,6 @@ class Users(Base):
     creator: Mapped[Optional["Creators"]] = relationship("Creators", back_populates="user", uselist=False)
     posts: Mapped[List["Posts"]] = relationship("Posts", back_populates="creator")
     plans: Mapped[List["Plans"]] = relationship("Plans", back_populates="creator")
-    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="user")
-    orders: Mapped[List["Orders"]] = relationship("Orders", back_populates="user")
     creator_type: Mapped[List["CreatorType"]] = relationship("CreatorType", back_populates="user", cascade="all, delete-orphan", passive_deletes=True, lazy="selectin")
     genders: Mapped[List["Gender"]] = relationship("Gender", secondary="creator_type", viewonly=True, lazy="selectin")
     email_verification_tokens: Mapped[List["EmailVerificationTokens"]] = relationship("EmailVerificationTokens", back_populates="user")
@@ -66,3 +69,14 @@ class Users(Base):
     company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
     password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship("PasswordResetToken", back_populates="user")
     generation_media: Mapped[["GenerationMedia"]] = relationship("GenerationMedia", back_populates="user")
+
+    # 決済システム関連
+    subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="user", foreign_keys="Subscriptions.user_id")
+    creator_subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="creator", foreign_keys="Subscriptions.creator_id")
+    user_transactions: Mapped[List["PaymentTransactions"]] = relationship("PaymentTransactions", back_populates="user", foreign_keys="PaymentTransactions.user_id")
+    purchases: Mapped[List["Payments"]] = relationship("Payments", back_populates="buyer", foreign_keys="Payments.buyer_user_id")
+    sales: Mapped[List["Payments"]] = relationship("Payments", back_populates="seller", foreign_keys="Payments.seller_user_id")
+    user_providers: Mapped[List["UserProviders"]] = relationship("UserProviders", back_populates="user")
+    user_banks: Mapped[List["UserBanks"]] = relationship("UserBanks", back_populates="user")
+    withdraws: Mapped[List["Withdraws"]] = relationship("Withdraws", back_populates="user")
+    bank_request_histories: Mapped[List["BankRequestHistories"]] = relationship("BankRequestHistories", back_populates="user")

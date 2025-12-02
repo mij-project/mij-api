@@ -375,6 +375,16 @@ def add_notification_for_profile_image_submission(
         profile = db.query(Profiles).filter(
             Profiles.user_id == submission.user_id
         ).first()
+
+        # redirect_urlを画像タイプに応じて設定
+        redirect_url = "/account/edit"
+        if type == "rejected":
+            # 却下時は該当する画像タブにリダイレクト
+            if submission.image_type == ProfileImage.AVATAR:
+                redirect_url = "/account/edit?tab=avatar"
+            elif submission.image_type == ProfileImage.COVER:
+                redirect_url = "/account/edit?tab=cover"
+
         if type == "approved":
             title = "プロフィール画像申請が承認されました"
             subtitle = "プロフィール画像申請が承認されました"
@@ -392,7 +402,7 @@ def add_notification_for_profile_image_submission(
                 "title": title,
                 "subtitle": subtitle,
                 "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
-                "redirect_url": f"/profile?username={profile.username}"
+                "redirect_url": redirect_url
             }
         )
         db.add(notification)
@@ -411,7 +421,7 @@ def add_mail_notification_for_profile_image_submission(
     プロフィール画像申請に対するメール通知を追加
     """
     try:
-        user = (
+        result = (
             db.query(
                 Users,
                 Profiles,
@@ -430,14 +440,45 @@ def add_mail_notification_for_profile_image_submission(
             .filter(ProfileImageSubmissions.id == submission_id)
             .first()
         )
-        if not user:
+        if not result:
             raise Exception("Can not query user settings")
+        
+        # タプルをアンパック
+        user, profile, submission, settings = result
+        
+        # メール通知の設定をチェック
+        # settingsがNoneの場合、またはprofileApproveがTrue/Noneの場合は送信
+        should_send = True
+        if settings is not None and isinstance(settings, dict):
+            profile_approve_setting = settings.get("profileApprove", True)
+            if profile_approve_setting is False:
+                should_send = False
+        
+        if not should_send:
+            return
+            
+        # redirect_urlを画像タイプに応じて設定
+        redirect_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/profile?username={profile.username}"
+        if type == "rejected":
+            # 却下時は該当する画像タブにリダイレクト
+            if submission.image_type == ProfileImage.AVATAR:
+                redirect_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/edit?tab=avatar"
+            elif submission.image_type == ProfileImage.COVER:
+                redirect_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/edit?tab=cover"
+
         if type == "approved":
-            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
-                send_profile_image_approval_email(user.email, user.Profiles.username)
+            send_profile_image_approval_email(
+                user.email,
+                profile.username if profile else user.profile_name,
+                redirect_url
+            )
         elif type == "rejected":
-            if ((user.settings is None) or (user.settings.get("profileApprove", True) == True) or (user.settings.get("profileApprove", True) is None)):
-                send_profile_image_rejection_email(user.email, user.Profiles.username, user.ProfileImageSubmissions.rejection_reason)
+            send_profile_image_rejection_email(
+                user.email,
+                profile.username if profile else user.profile_name,
+                submission.rejection_reason,
+                redirect_url
+            )
 
     except Exception as e:
         logger.error(f"プロフィール画像申請に対するメール通知を追加エラー: {e}")
