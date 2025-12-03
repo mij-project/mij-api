@@ -1,5 +1,4 @@
 import os
-from time import time
 import boto3
 import subprocess
 from pathlib import Path
@@ -136,7 +135,6 @@ class BatchMainSampleVideo(Path):
                 exists = self.__s3_key_exists(bucket, destination)
                 if exists:
                     is_upload = False
-                time.sleep(0.5)
             return True
         except Exception as e:
             self.logger.error(e)
@@ -160,7 +158,6 @@ class BatchMainSampleVideo(Path):
                 exists = self.__s3_key_exists(bucket, destination)
                 if exists:
                     is_upload = False
-                time.sleep(0.5)
             return True
         except Exception as e:
             self.logger.error(e)
