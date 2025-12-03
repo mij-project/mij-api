@@ -117,7 +117,29 @@ async def create_banner(
         image_source = BannerImageSource.USER_PROFILE
 
     # 日時文字列をdatetimeに変換
-    
+    parsed_start_at = None
+    parsed_end_at = None
+
+    if start_at:
+        try:
+            # ISO 8601形式の日時文字列をパース（例: "2025-12-03T10:00"）
+            parsed_start_at = datetime.fromisoformat(start_at.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="start_atの日時フォーマットが不正です")
+
+    if end_at:
+        try:
+            parsed_end_at = datetime.fromisoformat(end_at.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="end_atの日時フォーマットが不正です")
+
+    # デフォルト値を設定（日時が指定されていない場合）
+    # start_atがNoneの場合は現在時刻、end_atがNoneの場合は30日後
+    if not parsed_start_at:
+        parsed_start_at = datetime.now()
+    if not parsed_end_at:
+        from datetime import timedelta
+        parsed_end_at = datetime.now() + timedelta(days=30)
 
     try:
         insert_form_data = {
@@ -129,8 +151,8 @@ async def create_banner(
             "creator_id": UUID(creator_id) if creator_id else None,
             "external_url": external_url or "",
             "status": status,
-            "start_at": start_at,
-            "end_at": end_at,
+            "start_at": parsed_start_at,
+            "end_at": parsed_end_at,
             "display_order": display_order,
             "priority": priority,
             "image_source": image_source

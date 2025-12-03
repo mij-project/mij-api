@@ -1,8 +1,8 @@
-from operator import or_
 import os
+from operator import or_
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import distinct, func, desc, exists, and_, BigInteger
+from sqlalchemy import distinct, func, desc, and_, BigInteger
 from app.models import UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
@@ -25,10 +25,6 @@ from app.models.profiles import Profiles
 from app.models.media_assets import MediaAssets
 from app.models.plans import Plans, PostPlans
 from app.models.prices import Prices
-from app.models.media_renditions import MediaRenditions
-from app.models.payments import Payments
-from app.api.commons.utils import get_video_duration
-from app.constants.enums import PlanStatus
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.constants.enums import PostType
 from app.schemas.user_settings import UserSettingsType
@@ -107,7 +103,11 @@ def get_posts_count_by_user_id(db: Session, user_id: UUID) -> dict:
         db.query(Posts)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status.in_([PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]))
+        .filter(
+            Posts.status.in_(
+                [PostStatus.PENDING, PostStatus.RESUBMIT, PostStatus.CONVERTING]
+            )
+        )
         .count()
     )
 
@@ -271,9 +271,11 @@ def _build_post_status_query(
     return (
         db.query(
             Posts,
-            func.count(func.distinct(Likes.user_id)).label('likes_count'),
-            func.count(func.distinct(Comments.id)).label('comments_count'),
-            func.cast(0, BigInteger).label('purchase_count'),  # 仮の値: 決済処理未実装のため0を返す
+            func.count(func.distinct(Likes.user_id)).label("likes_count"),
+            func.count(func.distinct(Comments.id)).label("comments_count"),
+            func.cast(0, BigInteger).label(
+                "purchase_count"
+            ),  # 仮の値: 決済処理未実装のため0を返す
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
@@ -597,8 +599,8 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec,
-            func.count(func.distinct(Likes.user_id)).label('likes_count'),
-            func.count(func.distinct(Comments.id)).label('comments_count'),
+            func.count(func.distinct(Likes.user_id)).label("likes_count"),
+            func.count(func.distinct(Comments.id)).label("comments_count"),
         )
         .select_from(Posts)
         .join(Users, Posts.creator_user_id == Users.id)
@@ -1032,6 +1034,7 @@ def update_post_status(
 
 # ========== 内部関数 ==========
 
+
 def _get_post_and_creator_info(db: Session, post_id: str) -> tuple:
     """投稿とクリエイター情報を取得"""
     post = (
@@ -1235,9 +1238,11 @@ def get_post_detail_for_creator(
     result = (
         db.query(
             Posts,
-            func.count(func.distinct(Likes.user_id)).label('likes_count'),
-            func.count(func.distinct(Comments.id)).label('comments_count'),
-            func.cast(0, BigInteger).label('purchase_count'),  # 仮の値: 決済処理未実装のため0を返す
+            func.count(func.distinct(Likes.user_id)).label("likes_count"),
+            func.count(func.distinct(Comments.id)).label("comments_count"),
+            func.cast(0, BigInteger).label(
+                "purchase_count"
+            ),  # 仮の値: 決済処理未実装のため0を返す
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
@@ -1654,11 +1659,6 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     """
     投稿IDをキーにして投稿情報、ユーザー情報、メディア情報を取得
     """
-    try:
-        # UUIDに変換
-        post_uuid = UUID(post_id)
-    except ValueError:
-        return None
 
     # 投稿情報と関連データを取得
     result = (
@@ -1673,7 +1673,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(MediaAssets, Posts.id == MediaAssets.post_id)
         .outerjoin(MediaRenditionJobs, MediaAssets.id == MediaRenditionJobs.asset_id)
-        .filter(Posts.id == post_uuid)
+        .filter(Posts.id == post_id)
         .filter(Posts.deleted_at.is_(None))
         .all()
     )
@@ -1737,7 +1737,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     # 価格情報を取得（単品販売）
     single_price_data = (
         db.query(Prices.price)
-        .filter(Prices.post_id == post_uuid, Prices.is_active == True)
+        .filter(Prices.post_id == post_id, Prices.is_active == True)
         .first()
     )
 
@@ -1746,7 +1746,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         db.query(Plans.id, Plans.name, Plans.price)
         .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(
-            PostPlans.post_id == post_uuid,
+            PostPlans.post_id == post_id,
             Plans.deleted_at.is_(None),
         )
         .all()
@@ -2188,8 +2188,6 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
             Posts,
             and_(
                 Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
                 active_post_cond,
             ),
         )
@@ -2234,11 +2232,7 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
         .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
         .outerjoin(
             Posts,
-            and_(
-                Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
-            ),
+            and_(Posts.id == PostCategories.post_id, active_post_cond),
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
         .outerjoin(Profiles, Profiles.user_id == Users.id)
@@ -2315,8 +2309,6 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
             Posts,
             and_(
                 Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
                 active_post_cond,
             ),
         )
@@ -2363,8 +2355,7 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
             Posts,
             and_(
                 Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
+                active_post_cond,
             ),
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
@@ -2442,8 +2433,6 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
             Posts,
             and_(
                 Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
                 active_post_cond,
             ),
         )
@@ -2490,8 +2479,7 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
             Posts,
             and_(
                 Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
+                active_post_cond,
             ),
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
@@ -2569,8 +2557,6 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
             Posts,
             and_(
                 Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
                 active_post_cond,
             ),
         )
@@ -2617,8 +2603,7 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
             Posts,
             and_(
                 Posts.id == PostCategories.post_id,
-                Posts.status == PostStatus.APPROVED,
-                Posts.deleted_at.is_(None),
+                active_post_cond,
             ),
         )
         .outerjoin(Users, Users.id == Posts.creator_user_id)
@@ -3075,10 +3060,10 @@ def add_mail_notification_for_post(
 
         if not result:
             raise Exception("Can not query user settings")
-        
+
         # タプルをアンパック
         user, profile, post, settings = result
-        
+
         # メール通知の設定をチェック
         # settingsがNoneの場合、またはpostApproveがTrue/Noneの場合は送信
         should_send = True
@@ -3086,22 +3071,22 @@ def add_mail_notification_for_post(
             post_approve_setting = settings.get("postApprove", True)
             if post_approve_setting is False:
                 should_send = False
-        
+
         if not should_send:
             return
-            
+
         if type == "approved":
             send_post_approval_email(
                 user.email,
                 profile.username if profile else user.profile_name,
-                str(post.id)
+                str(post.id),
             )
         elif type == "rejected":
             send_post_rejection_email(
                 user.email,
                 profile.username if profile else user.profile_name,
                 post.reject_comments,
-                str(post.id)
+                str(post.id),
             )
     except Exception as e:
         logger.exception(f"{e}")
