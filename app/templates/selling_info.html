@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    {% if contents_type == "plan" %}
+    {% if contents_type == 2 %}
       <title>{{ buyer_name }}さんが{{ contents_name }}に加入しました。</title>
     {% else %}
       <title>{{ buyer_name }}さんが{{ contents_name }}を購入しました。</title>
@@ -12,7 +12,7 @@
   <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:20px;background-color:#f9fafb;margin:0;">
     <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
       <!-- ヘッダー -->
-      {% if contents_type == "plan" %}
+      {% if contents_type == 2 %}
       <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんが{{ contents_name }}プランに加入しました</h2>
       {% else %}
       <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんが{{ contents_name }}を購入しました</h2>
@@ -25,7 +25,11 @@
 
       <!-- 購入完了通知 -->
       <div style="background-color:#dcfce7;border-left:4px solid #16a34a;padding:15px;margin:20px 0;border-radius:4px;">
-        <p style="color:#166534;font-weight:bold;margin:0;">✓ 新しい購入がありました</p>
+        {% if contents_type == 2 %}
+        <p style="color:#166534;font-weight:bold;margin:0;">✓ 新しいプラン加入がありました。</p>
+        {% else %}
+        <p style="color:#166534;font-weight:bold;margin:0;">✓ 新しいコンテンツ購入がありました</p>
+        {% endif %}
       </div>
 
       <!-- 購入詳細 -->

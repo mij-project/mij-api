@@ -29,8 +29,8 @@ class CredixClient:
         use_seccode: bool = True,
         send_email: bool = True,
         sendpoint: Optional[str] = None,
-        success_str: Optional[str] = None,
-        failure_str: Optional[str] = None,
+        # success_str: Optional[str] = None,
+        # failure_str: Optional[str] = None,
         success_url: Optional[str] = None,
         failure_url: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -68,8 +68,6 @@ class CredixClient:
             "search_type": search_type,
             "sendid": sendid,
             "redirect_type": 2,
-            "success_str": success_str,
-            "failure_str": failure_str,
             "success_url": success_url,
             "failure_url": failure_url,
         }
@@ -80,9 +78,6 @@ class CredixClient:
 
         if use_seccode:
             params["use_seccode"] = "yes"
-
-        if send_email:
-            params["send_email"] = "yes"
 
         if sendpoint:
             params["sendpoint"] = sendpoint

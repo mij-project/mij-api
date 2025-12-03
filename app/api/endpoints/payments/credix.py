@@ -63,12 +63,16 @@ async def create_credix_session(
 
 
         # 決済完了後のリダイレクトURL
+        if request.purchase_type == PurchaseType.SINGLE:
+            success_url = f"{FRONTEND_URL}/post/detail?post_id={request.order_id}"
+            failure_url = f"{FRONTEND_URL}/post/detail?post_id={request.order_id}"
+        else:
+            success_url = f"{FRONTEND_URL}/plan/{request.order_id}"
+            failure_url = f"{FRONTEND_URL}/plan/{request.order_id}"
+
+        # 決済完了メッセージ
         success_str = CredixMessage.SUCCESS_MESSAGE
-        success_url = f"{FRONTEND_URL}/post/detail?post_id={request.post_id}"
-        
-        # 決済失敗後のリダイレクトURL
-        failure_str = CredixMessage.FAILURE_MESSAGE
-        failure_url = f"{FRONTEND_URL}/post/detail?post_id={request.post_id}"
+        failure_str = CredixMessage.FAILURE_MESSAGE        
 
         if is_first_payment:
             sendid = generate_sendid(length=20)
@@ -91,7 +95,7 @@ async def create_credix_session(
         )
 
         # sendpointにtransaction_idを含める
-        sendpoint = f"tx_{transaction.id}"
+        sendpoint = transaction.id
 
         # CREDIX初回決済API呼び出し
         try:
@@ -101,8 +105,6 @@ async def create_credix_session(
                 telno=request.telno,
                 email=current_user.email if current_user else None,
                 sendpoint=sendpoint,
-                success_str=success_str,
-                failure_str=failure_str,
                 success_url=success_url,
                 failure_url=failure_url
             )

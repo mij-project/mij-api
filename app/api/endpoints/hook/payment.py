@@ -228,6 +228,8 @@ def _create_subscription_record(
     Returns:
         作成されたサブスクリプションレコード
     """
+
+    order_id = transaction.order_id
     # トランザクションタイプに応じてサブスクリプションタイプを決定
     # PaymentTransactionType.SUBSCRIPTION(2) -> SubscriptionType.PLAN(1)
     # PaymentTransactionType.SINGLE(1) -> SubscriptionType.SINGLE(2)
@@ -236,6 +238,13 @@ def _create_subscription_record(
         if transaction.type == PaymentTransactionType.SUBSCRIPTION
         else SubscriptionType.SINGLE
     )
+
+    # 単品の場合post_idをorder_idに設定
+    if access_type == SubscriptionType.SINGLE:
+        price = price_crud.get_price_by_id(db, order_id)
+        if not price:
+            raise ValueError(f"Price not found: {order_id}")
+        order_id = price.post_id
 
     access_start = datetime.utcnow()
     access_end = (
@@ -472,8 +481,14 @@ def _add_payment_notifications_for_seller(
 
     content_url, contents_name, seller_name, seller_user_id, seller_email, contents_type = _get_selling_info(db, transaction)
 
-    title = f"{buyer_name}さんが{contents_name}を購入しました"
-    subtitle = f"{buyer_name}さんが{contents_name}を購入しました"
+
+    if contents_type == PaymentTransactionType.SINGLE:
+        title = f"{buyer_name}さんが{contents_name}を購入しました"
+        subtitle = f"{buyer_name}さんが{contents_name}を購入しました"
+    else:
+        title = f"{buyer_name}さんが{contents_name}プランに加入しました"
+        subtitle = f"{buyer_name}さんが{contents_name}プランに加入しました"
+
 
     # アバターURLの取得（buyer_userのprofileが存在するか確認）
     avatar_url = "https://logo.mijfans.jp/bimi/logo.svg"
