@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header, Response,
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.core.security import create_access_token, decode_token
 from app.db.base import get_db
+from app.models.creators import Creators
 from app.schemas.auth import LoginIn, TokenOut, LoginCookieOut
 from app.models.user import Users
 from sqlalchemy.orm import Session
@@ -171,7 +172,8 @@ def x_callback(
 
         # ユーザー情報（v2）
         x_user = OAuth1Session(X_API_KEY, X_API_SECRET, access["oauth_token"], access["oauth_token_secret"])
-        me_res = x_user.get(f"{USERS_BASE}/2/users/me?user.fields=profile_image_url,verified")
+        me_res = x_user.get(f"{USERS_BASE}/2/users/me?user.fields=profile_image_url,verified,confirmed_email")
+        
         if me_res.status_code != 200:
             raise HTTPException(400, f"users/me error: {me_res.status_code} {me_res.text}")
         me = me_res.json().get("data", {})
@@ -264,6 +266,8 @@ def me(
                     status_code=status.HTTP_401_UNAUTHORIZED, 
                     detail="Session expired due to inactivity"
                 )
+        if user.role == AccountType.CREATOR:
+            creator = db.query(Creators).filter(Creators.user_id == user.id).first()
         
         # アクセス時刻を更新
         user.last_login_at = datetime.now(timezone.utc)
@@ -276,8 +280,11 @@ def me(
             "is_phone_verified": user.is_phone_verified,
             "is_identity_verified": user.is_identity_verified,
             "offical_flg": user.offical_flg,
+            "user_updated_at": creator.created_at if creator else user.updated_at,
         }
+
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
