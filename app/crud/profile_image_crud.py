@@ -14,16 +14,18 @@ import os
 
 from app.schemas.notification import NotificationType
 from app.schemas.user_settings import UserSettingsType
-from app.services.email.send_email import send_profile_image_approval_email, send_profile_image_rejection_email
+from app.services.email.send_email import (
+    send_profile_image_approval_email,
+    send_profile_image_rejection_email,
+)
 from app.core.logger import Logger
+
 logger = Logger.get_logger()
 CDN_URL = os.getenv("CDN_BASE_URL", "")
 
+
 def create_submission(
-    db: Session,
-    user_id: UUID,
-    image_type: int,
-    storage_key: str
+    db: Session, user_id: UUID, image_type: int, storage_key: str
 ) -> ProfileImageSubmissions:
     """
     新しい画像申請を作成
@@ -43,15 +45,15 @@ def create_submission(
         storage_key=storage_key,
         status=ProfileImageStatus.PENDING,
         created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+        updated_at=datetime.now(timezone.utc),
     )
     db.add(submission)
     db.flush()
     return submission
 
+
 def get_submission_by_id(
-    db: Session,
-    submission_id: UUID
+    db: Session, submission_id: UUID
 ) -> Optional[ProfileImageSubmissions]:
     """
     IDで申請を取得
@@ -63,14 +65,15 @@ def get_submission_by_id(
     Returns:
         Optional[ProfileImageSubmissions]: 申請
     """
-    return db.query(ProfileImageSubmissions).filter(
-        ProfileImageSubmissions.id == submission_id
-    ).first()
+    return (
+        db.query(ProfileImageSubmissions)
+        .filter(ProfileImageSubmissions.id == submission_id)
+        .first()
+    )
+
 
 def get_pending_submission_by_user_and_type(
-    db: Session,
-    user_id: UUID,
-    image_type: int
+    db: Session, user_id: UUID, image_type: int
 ) -> Optional[ProfileImageSubmissions]:
     """
     ユーザーと画像タイプで申請中の申請を取得
@@ -83,15 +86,20 @@ def get_pending_submission_by_user_and_type(
     Returns:
         Optional[ProfileImageSubmissions]: 申請中の申請
     """
-    return db.query(ProfileImageSubmissions).filter(
-        ProfileImageSubmissions.user_id == user_id,
-        ProfileImageSubmissions.image_type == image_type,
-        ProfileImageSubmissions.status == ProfileImageStatus.PENDING
-    ).order_by(desc(ProfileImageSubmissions.created_at)).first()
+    return (
+        db.query(ProfileImageSubmissions)
+        .filter(
+            ProfileImageSubmissions.user_id == user_id,
+            ProfileImageSubmissions.image_type == image_type,
+            ProfileImageSubmissions.status == ProfileImageStatus.PENDING,
+        )
+        .order_by(desc(ProfileImageSubmissions.created_at))
+        .first()
+    )
+
 
 def get_submission_detail_by_id(
-    db: Session,
-    submission_id: UUID
+    db: Session, submission_id: UUID
 ) -> Optional[Dict[str, Any]]:
     """
     IDで申請詳細を取得（JOINして詳細情報を含む）
@@ -109,7 +117,7 @@ def get_submission_detail_by_id(
             Users.email.label("user_email"),
             Users.profile_name,
             Profiles.username,
-            Admins.email.label("approver_email")
+            Admins.email.label("approver_email"),
         )
         .join(Users, ProfileImageSubmissions.user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
@@ -124,9 +132,9 @@ def get_submission_detail_by_id(
     submission = result.ProfileImageSubmissions
     image_type_labels = {ProfileImage.AVATAR: "アバター", ProfileImage.COVER: "カバー"}
     status_labels = {
-        ProfileImageStatus.PENDING: "申請中", 
-        ProfileImageStatus.APPROVED: "承認済み", 
-        ProfileImageStatus.REJECTED: "却下"
+        ProfileImageStatus.PENDING: "申請中",
+        ProfileImageStatus.APPROVED: "承認済み",
+        ProfileImageStatus.REJECTED: "却下",
     }
 
     return {
@@ -146,8 +154,9 @@ def get_submission_detail_by_id(
         "checked_at": submission.checked_at,
         "rejection_reason": submission.rejection_reason,
         "created_at": submission.created_at,
-        "updated_at": submission.updated_at
+        "updated_at": submission.updated_at,
     }
+
 
 def get_submissions_paginated(
     db: Session,
@@ -155,7 +164,7 @@ def get_submissions_paginated(
     limit: int = 20,
     status: Optional[str] = None,
     search: Optional[str] = None,
-    sort: str = "created_at_desc"
+    sort: str = "created_at_desc",
 ) -> Tuple[List[Dict[str, Any]], int]:
     """
     ページネーション付き申請一覧を取得
@@ -179,7 +188,7 @@ def get_submissions_paginated(
             Users.email.label("user_email"),
             Users.profile_name,
             Profiles.username,
-            Admins.email.label("approver_email")
+            Admins.email.label("approver_email"),
         )
         .join(Users, ProfileImageSubmissions.user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
@@ -189,18 +198,21 @@ def get_submissions_paginated(
     # ステータスフィルタ
     if status:
         status_map = {
-            "pending": ProfileImageStatus.PENDING, 
-            "approved": ProfileImageStatus.APPROVED, 
-            "rejected": ProfileImageStatus.REJECTED
+            "pending": ProfileImageStatus.PENDING,
+            "approved": ProfileImageStatus.APPROVED,
+            "rejected": ProfileImageStatus.REJECTED,
         }
-        query = query.filter(ProfileImageSubmissions.status == status_map.get(status, ProfileImageStatus.PENDING))
+        query = query.filter(
+            ProfileImageSubmissions.status
+            == status_map.get(status, ProfileImageStatus.PENDING)
+        )
 
     # 検索フィルタ
     if search:
         query = query.filter(
-            (Users.email.ilike(f"%{search}%")) |
-            (Profiles.username.ilike(f"%{search}%")) |
-            (Users.profile_name.ilike(f"%{search}%"))
+            (Users.email.ilike(f"%{search}%"))
+            | (Profiles.username.ilike(f"%{search}%"))
+            | (Users.profile_name.ilike(f"%{search}%"))
         )
 
     # ソート
@@ -219,46 +231,44 @@ def get_submissions_paginated(
     results = query.offset(skip).limit(limit).all()
 
     # データ変換
-    image_type_labels = {
-        ProfileImage.AVATAR: "アバター", 
-        ProfileImage.COVER: "カバー"
-    }
+    image_type_labels = {ProfileImage.AVATAR: "アバター", ProfileImage.COVER: "カバー"}
     status_labels = {
-        ProfileImageStatus.PENDING: "申請中", 
-        ProfileImageStatus.APPROVED: "承認済み", 
-        ProfileImageStatus.REJECTED: "却下"
+        ProfileImageStatus.PENDING: "申請中",
+        ProfileImageStatus.APPROVED: "承認済み",
+        ProfileImageStatus.REJECTED: "却下",
     }
 
     submissions = []
     for row in results:
         submission = row.ProfileImageSubmissions
-        submissions.append({
-            "id": submission.id,
-            "user_id": submission.user_id,
-            "user_email": row.user_email,
-            "username": row.username,
-            "profile_name": row.profile_name,
-            "image_type": submission.image_type,
-            "image_type_label": image_type_labels.get(submission.image_type, "不明"),
-            "storage_key": submission.storage_key,
-            "image_url": f"{CDN_URL}/{submission.storage_key}",
-            "status": submission.status,
-            "status_label": status_labels.get(submission.status, "不明"),
-            "approved_by": submission.approved_by,
-            "approver_email": row.approver_email,
-            "checked_at": submission.checked_at,
-            "rejection_reason": submission.rejection_reason,
-            "created_at": submission.created_at,
-            "updated_at": submission.updated_at
-        })
+        submissions.append(
+            {
+                "id": submission.id,
+                "user_id": submission.user_id,
+                "user_email": row.user_email,
+                "username": row.username,
+                "profile_name": row.profile_name,
+                "image_type": submission.image_type,
+                "image_type_label": image_type_labels.get(
+                    submission.image_type, "不明"
+                ),
+                "storage_key": submission.storage_key,
+                "image_url": f"{CDN_URL}/{submission.storage_key}",
+                "status": submission.status,
+                "status_label": status_labels.get(submission.status, "不明"),
+                "approved_by": submission.approved_by,
+                "approver_email": row.approver_email,
+                "checked_at": submission.checked_at,
+                "rejection_reason": submission.rejection_reason,
+                "created_at": submission.created_at,
+                "updated_at": submission.updated_at,
+            }
+        )
 
     return submissions, total
 
-def approve_submission(
-    db: Session,
-    submission_id: UUID,
-    admin_id: UUID
-) -> bool:
+
+def approve_submission(db: Session, submission_id: UUID, admin_id: UUID) -> bool:
     """
     申請を承認してプロフィールを更新
 
@@ -275,9 +285,7 @@ def approve_submission(
         return False
 
     # プロフィール更新
-    profile = db.query(Profiles).filter(
-        Profiles.user_id == submission.user_id
-    ).first()
+    profile = db.query(Profiles).filter(Profiles.user_id == submission.user_id).first()
 
     if not profile:
         return False
@@ -299,11 +307,9 @@ def approve_submission(
     db.flush()
     return True
 
+
 def reject_submission(
-    db: Session,
-    submission_id: UUID,
-    admin_id: UUID,
-    rejection_reason: str
+    db: Session, submission_id: UUID, admin_id: UUID, rejection_reason: str
 ) -> bool:
     """
     申請を却下
@@ -331,9 +337,9 @@ def reject_submission(
     db.flush()
     return True
 
+
 def get_user_submissions(
-    db: Session,
-    user_id: UUID
+    db: Session, user_id: UUID
 ) -> Dict[str, Optional[ProfileImageSubmissions]]:
     """
     ユーザーの最新申請状況を取得
@@ -345,20 +351,31 @@ def get_user_submissions(
     Returns:
         Dict[str, Optional[ProfileImageSubmissions]]: avatar_submission, cover_submission
     """
-    avatar_submission = db.query(ProfileImageSubmissions).filter(
-        ProfileImageSubmissions.user_id == user_id,
-        ProfileImageSubmissions.image_type == ProfileImage.AVATAR
-    ).order_by(desc(ProfileImageSubmissions.created_at)).first()
+    avatar_submission = (
+        db.query(ProfileImageSubmissions)
+        .filter(
+            ProfileImageSubmissions.user_id == user_id,
+            ProfileImageSubmissions.image_type == ProfileImage.AVATAR,
+        )
+        .order_by(desc(ProfileImageSubmissions.created_at))
+        .first()
+    )
 
-    cover_submission = db.query(ProfileImageSubmissions).filter(
-        ProfileImageSubmissions.user_id == user_id,
-        ProfileImageSubmissions.image_type == ProfileImage.COVER
-    ).order_by(desc(ProfileImageSubmissions.created_at)).first()
+    cover_submission = (
+        db.query(ProfileImageSubmissions)
+        .filter(
+            ProfileImageSubmissions.user_id == user_id,
+            ProfileImageSubmissions.image_type == ProfileImage.COVER,
+        )
+        .order_by(desc(ProfileImageSubmissions.created_at))
+        .first()
+    )
 
     return {
         "avatar_submission": avatar_submission,
-        "cover_submission": cover_submission
+        "cover_submission": cover_submission,
     }
+
 
 def add_notification_for_profile_image_submission(
     db: Session,
@@ -372,9 +389,9 @@ def add_notification_for_profile_image_submission(
         submission = get_submission_by_id(db, submission_id)
         if not submission:
             return
-        profile = db.query(Profiles).filter(
-            Profiles.user_id == submission.user_id
-        ).first()
+        profile = (
+            db.query(Profiles).filter(Profiles.user_id == submission.user_id).first()
+        )
 
         # redirect_urlを画像タイプに応じて設定
         redirect_url = "/account/edit"
@@ -384,6 +401,8 @@ def add_notification_for_profile_image_submission(
                 redirect_url = "/account/edit?tab=avatar"
             elif submission.image_type == ProfileImage.COVER:
                 redirect_url = "/account/edit?tab=cover"
+        elif type == "approved":
+            redirect_url = f"/profile?username={profile.username}"
 
         if type == "approved":
             title = "プロフィール画像申請が承認されました"
@@ -402,8 +421,8 @@ def add_notification_for_profile_image_submission(
                 "title": title,
                 "subtitle": subtitle,
                 "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
-                "redirect_url": redirect_url
-            }
+                "redirect_url": redirect_url,
+            },
         )
         db.add(notification)
         db.commit()
@@ -411,6 +430,7 @@ def add_notification_for_profile_image_submission(
         db.rollback()
         logger.error(f"プロフィール画像申請に対する通知を追加エラー: {e}")
         return
+
 
 def add_mail_notification_for_profile_image_submission(
     db: Session,
@@ -429,7 +449,10 @@ def add_mail_notification_for_profile_image_submission(
                 UserSettings.settings,
             )
             .join(Profiles, Users.id == Profiles.user_id)
-            .join(ProfileImageSubmissions, Profiles.user_id == ProfileImageSubmissions.user_id)
+            .join(
+                ProfileImageSubmissions,
+                Profiles.user_id == ProfileImageSubmissions.user_id,
+            )
             .outerjoin(
                 UserSettings,
                 and_(
@@ -442,10 +465,10 @@ def add_mail_notification_for_profile_image_submission(
         )
         if not result:
             raise Exception("Can not query user settings")
-        
+
         # タプルをアンパック
         user, profile, submission, settings = result
-        
+
         # メール通知の設定をチェック
         # settingsがNoneの場合、またはprofileApproveがTrue/Noneの場合は送信
         should_send = True
@@ -453,10 +476,10 @@ def add_mail_notification_for_profile_image_submission(
             profile_approve_setting = settings.get("profileApprove", True)
             if profile_approve_setting is False:
                 should_send = False
-        
+
         if not should_send:
             return
-            
+
         # redirect_urlを画像タイプに応じて設定
         redirect_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/profile?username={profile.username}"
         if type == "rejected":
@@ -470,14 +493,14 @@ def add_mail_notification_for_profile_image_submission(
             send_profile_image_approval_email(
                 user.email,
                 profile.username if profile else user.profile_name,
-                redirect_url
+                redirect_url,
             )
         elif type == "rejected":
             send_profile_image_rejection_email(
                 user.email,
                 profile.username if profile else user.profile_name,
                 submission.rejection_reason,
-                redirect_url
+                redirect_url,
             )
 
     except Exception as e:
