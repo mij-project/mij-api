@@ -55,7 +55,6 @@ from app.crud.post_crud import (
 from app.crud.post_categries import get_post_categories
 from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id
-from app.crud.purchases_crud import get_single_purchases_count_by_user_id, get_single_purchases_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
 from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile, exist_profile_by_username
 from app.crud import profile_image_crud
@@ -143,6 +142,7 @@ def get_account_info(
             unpublished_posts_count=posts_data["unpublished_posts_count"] if posts_data else 0,
             deleted_posts_count=posts_data["deleted_posts_count"] if posts_data else 0,
             approved_posts_count=posts_data["approved_posts_count"] if posts_data else 0,
+            reserved_posts_count=posts_data["reserved_posts_count"] if posts_data else 0,
         )
         
         # 売上
@@ -154,8 +154,8 @@ def get_account_info(
         # プラン情報
         plan_data = get_plan_by_user_id(db, current_user.id)
         # 単品購入データ
-        single_purchases_count = get_single_purchases_count_by_user_id(db, current_user.id)
-        single_purchases_data = get_single_purchases_by_user_id(db, current_user.id)
+        single_purchases_count = 0
+        single_purchases_data = []
 
         # subscribed_plan_detailsのURLを構築
         subscribed_plan_details = []
@@ -205,6 +205,7 @@ def get_account_info(
                 unpublished_posts_count=0,
                 deleted_posts_count=0,
                 approved_posts_count=0,
+                reserved_posts_count=0,
             ),
             sales_info=SalesInfo(
                 total_sales=0,
@@ -420,7 +421,8 @@ def get_post_status(
             rejected_posts=_convert_posts(posts_data["rejected_posts"]),
             unpublished_posts=_convert_posts(posts_data["unpublished_posts"]),
             deleted_posts=_convert_posts(posts_data["deleted_posts"]),
-            approved_posts=_convert_posts(posts_data["approved_posts"])
+            approved_posts=_convert_posts(posts_data["approved_posts"]),
+            reserved_posts=_convert_posts(posts_data["reserved_posts"])
         )
     except Exception as e:
         logger.error("投稿ステータス取得エラーが発生しました", e)
@@ -449,7 +451,7 @@ def get_account_post_detail(
 
         # プラン情報を取得
         post_plans = get_post_plans(db, post_id)
-        plan_list = [{'id': str(rec.plan_id), 'name': rec.plan.name} for rec in post_plans]
+        # plan_list = [{'id': str(rec.plan_id), 'name': rec.plan.name} for rec in post_plans]
 
         # メディア情報を取得
         post_data = get_post_by_id(db, post_id)

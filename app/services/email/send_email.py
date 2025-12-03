@@ -289,7 +289,7 @@ def send_post_rejection_email(to: str, display_name: str | None = None, notes: s
         tags={"category": "post_rejection"},
     )
 
-def send_profile_image_approval_email(to: str, display_name: str | None = None) -> None:
+def send_profile_image_approval_email(to: str, display_name: str | None = None, redirect_url: str | None = None) -> None:
     """プロフィール画像承認完了メール"""
     if not getattr(settings, "EMAIL_ENABLED", True):
         return
@@ -298,7 +298,7 @@ def send_profile_image_approval_email(to: str, display_name: str | None = None) 
         "name": display_name or "",
         "brand": "mijfans",
         "status": 1,  # 承認
-        "profile_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "profile_url": redirect_url or f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/edit",
         "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
     }
     send_templated_email(
@@ -309,7 +309,7 @@ def send_profile_image_approval_email(to: str, display_name: str | None = None) 
         tags={"category": "profile_image_approval"},
     )
 
-def send_profile_image_rejection_email(to: str, display_name: str | None = None, notes: str | None = None) -> None:
+def send_profile_image_rejection_email(to: str, display_name: str | None = None, notes: str | None = None, redirect_url: str | None = None) -> None:
     """プロフィール画像拒否通知メール"""
     if not getattr(settings, "EMAIL_ENABLED", True):
         return
@@ -319,7 +319,7 @@ def send_profile_image_rejection_email(to: str, display_name: str | None = None,
         "brand": "mijfans",
         "status": 0,  # 拒否
         "notes": notes or "申請内容を再度ご確認ください。",
-        "profile_url": os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "profile_url": redirect_url or f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/edit",
         "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
     }
     send_templated_email(

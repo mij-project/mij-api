@@ -68,13 +68,10 @@ def remake_email_verification_token(db: Session, user_id: uuid.UUID):
     Returns:
         str: メールアドレスの再送信結果（トークン）
     """
-    cooldown = 60
     result = db.execute(
         select(EmailVerificationTokens).where(EmailVerificationTokens.user_id==user_id, EmailVerificationTokens.consumed_at.is_(None)
     ).order_by(EmailVerificationTokens.last_sent_at.desc()))
     t = result.scalars().first()
-    if t and (datetime.now(timezone.utc) - t.last_sent_at.replace(tzinfo=timezone.utc)).total_seconds() < cooldown:
-        raise HTTPException(status_code=429, detail="少し待ってから再度お試しください。")
 
     raw, expires_at = issue_verification_token(db, user_id, ttl_hours=24)
     db.execute(

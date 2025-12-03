@@ -15,7 +15,6 @@ from app.crud.tags_crud import exit_tag, create_tag
 from app.crud.post_tags_crud import create_post_tag, delete_post_tags_by_post_id
 from app.crud.post_categories_crud import create_post_category, delete_post_categories_by_post_id
 from app.crud.post_crud import get_recent_posts
-from app.crud.entitlements_crud import check_entitlement
 from app.crud.generation_media_crud import get_generation_media_by_post_id, create_generation_media
 from app.models.tags import Tags
 from app.services.s3.image_screening import generate_ogp_image
