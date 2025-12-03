@@ -10,7 +10,7 @@ class CategoryResponse(BaseModel):
 class PostCreatorResponse(BaseModel):
     name: str
     username: str
-    avatar: Optional[str] = None
+    avatar_url: Optional[str] = None
     verified: bool
 
 class RankingPostResponse(BaseModel):

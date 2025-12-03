@@ -48,7 +48,7 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                 creator=PostCreatorResponse(
                     name=p.profile_name,
                     username=p.username,
-                    avatar=f"{BASE_URL}/{p.avatar_url}" if p.avatar_url else None,
+                    avatar_url=f"{BASE_URL}/{p.avatar_url}" if p.avatar_url else None,
                     verified=False
                 ),
             ) for idx, p in enumerate(ranking_posts)],
@@ -79,7 +79,7 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                 creator=PostCreatorResponse(
                     name=p.profile_name,
                     username=p.username,
-                    avatar=f"{BASE_URL}/{p.avatar_url}" if p.avatar_url else None,
+                    avatar_url=f"{BASE_URL}/{p.avatar_url}" if p.avatar_url else None,
                     verified=False
                 )
             ) for p in recent_posts]
