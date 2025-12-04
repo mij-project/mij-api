@@ -44,6 +44,7 @@ async def get_category_by_slug(
                     if post.thumbnail_key
                     else None,
                     likes_count=post.likes_count,
+                    official=post.offical_flg if hasattr(post, 'offical_flg') else False,
                     creator_name=post.profile_name,
                     username=post.username,
                     creator_avatar_url=f"{BASE_URL}/{post.avatar_url}"

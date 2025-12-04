@@ -12,6 +12,7 @@ class PostCreatorResponse(BaseModel):
     username: str
     avatar_url: Optional[str] = None
     verified: bool
+    official: bool
 
 class RankingPostResponse(BaseModel):
     id: str
@@ -33,6 +34,7 @@ class CreatorResponse(BaseModel):
     rank: Optional[int] = None
     follower_ids: Optional[List[str]] = None
     likes: Optional[int] = None
+    official: bool
     
 class RecentPostResponse(BaseModel):
     id: str
