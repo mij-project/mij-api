@@ -25,31 +25,31 @@ class CredixClient:
         money: int,
         telno: str | None = None,
         email: str | None = None,
-        search_type: int = 2,
+        search_type: int | None = None,
         use_seccode: bool = True,
         send_email: bool = True,
         sendpoint: Optional[str] = None,
-        # success_str: Optional[str] = None,
-        # failure_str: Optional[str] = None,
         success_url: Optional[str] = None,
         failure_url: Optional[str] = None,
+        is_repeater: bool = False,
     ) -> Dict[str, Any]:
         """
-        CREDIXセッション発行API呼び出し
+        CREDIXセッション発行API呼び出し（初回決済・リピーター決済共通）
 
         Args:
             sendid: カードID（初回決済の場合は新規生成、リピーター決済の場合は既存のもの）
             money: 決済金額
             telno: 電話番号
             email: メールアドレス
-            search_type: 会員検索条件（1=clientip+telno+sendid, 2=clientip+sendid）
+            search_type: 会員検索条件（1=clientip+telno+sendid, 2=clientip+sendid）※リピーター決済時のみ使用
             use_seccode: セキュリティコード入力要否
             send_email: メール送信フラグ
             sendpoint: フリーパラメータ
-            success_str: 決済完了メッセージ
-            failure_str: 決済失敗メッセージ
-            redirect_url: 決済完了後のリダイレクトURL
+            success_str: 決済完了メッセージ（Shift-JIS）
+            failure_str: 決済失敗メッセージ（Shift-JIS）
+            success_url: 決済完了後のリダイレクトURL
             failure_url: 決済失敗後のリダイレクトURL
+            is_repeater: リピーター決済かどうか
         Returns:
             セッション発行レスポンス
             {
@@ -58,32 +58,57 @@ class CredixClient:
                 "error_message": "エラーメッセージ"  # resultが"ng"の場合のみ
             }
         """
-        url = f"{self.base_url}{settings.CREDIX_SESSION_ENDPOINT}"
+        # リピーター決済と初回決済でエンドポイントを切り替え
+        if is_repeater:
+            url = f"{self.base_url}{settings.CREDIX_REPEATER_ENDPOINT}"
+            # リピーター決済の場合、search_typeが指定されていない場合はデフォルト値2を使用
+            if search_type is None:
+                search_type = 2
+        else:
+            url = f"{self.base_url}{settings.CREDIX_SESSION_ENDPOINT}"
 
         # パラメータ構築
         params = {
             "clientip": self.client_ip,
             "zkey": self.zkey,
             "money": money,
-            "search_type": search_type,
             "sendid": sendid,
-            "redirect_type": 2,
-            "success_url": success_url,
-            "failure_url": failure_url,
+            "redirect_type": 2,  # 成功時のみリダイレクト
         }
 
-        # オプションパラメータ
-        if search_type == 1:
-            params["telno"] = telno
+        # リピーター決済の場合はsearch_typeを追加
+        if is_repeater:
+            params["search_type"] = search_type
+            # search_type=1の場合は電話番号必須
+            if search_type == 1:
+                if not telno:
+                    raise ValueError("telno is required when search_type=1")
+                params["telno"] = telno
+            # search_type=2でもtelnoが指定されている場合は送信
+            elif telno:
+                params["telno"] = telno
 
-        if use_seccode:
-            params["use_seccode"] = "yes"
+        # リダイレクトURL
+        if success_url:
+            params["success_url"] = success_url
+        if failure_url:
+            params["failure_url"] = failure_url
 
+        # メールアドレス
+        if email:
+            params["email"] = email
+
+        # メール送信フラグ
+        if send_email:
+            params["send_email"] = "yes"
+
+
+        # フリーパラメータ
         if sendpoint:
             params["sendpoint"] = sendpoint
 
-        logger.info(f"CREDIX session request🔥🔥🔥: {url}")
-        logger.info(f"CREDIX params: money={money}, sendid={sendid}, search_type={search_type}")
+        logger.info(f"CREDIX session request: {url}")
+        logger.info(f"CREDIX params: money={money}, sendid={sendid}, is_repeater={is_repeater}, search_type={search_type}")
 
         # API呼び出し
         try:
@@ -94,7 +119,7 @@ class CredixClient:
                 # レスポンスの bytes を取得
                 response_bytes = response.content
 
-                # ★ bytes のまま parse_qs に渡す & encoding="shift_jis" を指定
+                # bytes のまま parse_qs に渡す & encoding="shift_jis" を指定
                 result_raw = parse_qs(response_bytes, encoding="shift_jis", errors="replace")
 
                 # バイト列のキーと値を文字列にデコード
@@ -105,7 +130,7 @@ class CredixClient:
                         decoded_key = key.decode("shift_jis", errors="replace")
                     else:
                         decoded_key = key
-                    
+
                     # 値のリストをデコード
                     decoded_values = []
                     for value in value_list:
@@ -113,7 +138,7 @@ class CredixClient:
                             decoded_values.append(value.decode("shift_jis", errors="replace"))
                         else:
                             decoded_values.append(value)
-                    
+
                     result[decoded_key] = decoded_values
 
                 # 変数に正しく格納
@@ -121,9 +146,10 @@ class CredixClient:
                 sid = result.get("sid", [""])[0] if result.get("sid") else ""
                 error_message = result.get("error_message", [None])[0] if result.get("error_message") else None
 
-                logger.info(f"CREDIX result🔥🔥🔥: {result_value}")
-                logger.info(f"CREDIX sid🔥🔥🔥: {sid}")
-                logger.info(f"CREDIX error message🔥🔥🔥: {error_message}")
+                logger.info(f"CREDIX result: {result_value}")
+                logger.info(f"CREDIX sid: {sid}")
+                if error_message:
+                    logger.error(f"CREDIX error message: {error_message}")
 
                 return {
                     "result": result_value,
@@ -142,10 +168,9 @@ class CredixClient:
             raise
 
 
-
     def get_payment_url(self) -> str:
         """
-        決済画面URLを取得
+        決済画面URLを取得（初回決済・リピーター決済共通）
 
         Returns:
             決済画面URL

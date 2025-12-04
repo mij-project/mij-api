@@ -54,7 +54,7 @@ from app.crud.post_crud import (
 )
 from app.crud.post_categries import get_post_categories
 from app.crud.sales_crud import get_total_sales
-from app.crud.plan_crud import get_plan_by_user_id
+from app.crud.plan_crud import get_plan_by_user_id, get_single_purchases_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
 from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile, exist_profile_by_username
 from app.crud import profile_image_crud
@@ -153,9 +153,27 @@ def get_account_info(
 
         # プラン情報
         plan_data = get_plan_by_user_id(db, current_user.id)
-        # 単品購入データ
-        single_purchases_count = 0
+
+        # 単品購入データを取得
+        single_purchases_raw = get_single_purchases_by_user_id(db, current_user.id)
+        single_purchases_count = len(single_purchases_raw)
+
+        # 単品購入データのURLを構築
         single_purchases_data = []
+        for purchase in single_purchases_raw:
+            single_purchases_data.append({
+                "purchase_id": purchase.purchase_id,
+                "post_id": purchase.post_id,
+                "plan_id": purchase.plan_id,
+                "post_title": purchase.post_title,
+                "post_description": purchase.post_description,
+                "creator_name": purchase.creator_name,
+                "creator_username": purchase.creator_username,
+                "creator_avatar_url": f"{BASE_URL}/{purchase.creator_avatar_url}" if purchase.creator_avatar_url else None,
+                "thumbnail_key": f"{BASE_URL}/{purchase.thumbnail_key}" if purchase.thumbnail_key else None,
+                "purchase_price": purchase.purchase_price,
+                "purchase_created_at": purchase.purchase_created_at
+            })
 
         # subscribed_plan_detailsのURLを構築
         subscribed_plan_details = []
@@ -172,8 +190,8 @@ def get_account_info(
             subscribed_plan_count=plan_data["subscribed_plan_count"] if plan_data else 0,
             subscribed_total_price=plan_data["subscribed_total_price"] if plan_data else 0,
             subscribed_plan_details=subscribed_plan_details,
-            single_purchases_count=single_purchases_count if single_purchases_count else 0,
-            single_purchases_data=single_purchases_data if single_purchases_data else [],
+            single_purchases_count=single_purchases_count,
+            single_purchases_data=single_purchases_data,
         )
 
         return AccountInfoResponse(
@@ -638,7 +656,7 @@ def get_bought(
         bought_posts_data = get_bought_posts_by_user_id(db, current_user.id)
 
         bought_posts = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, purchased_at in bought_posts_data:
+        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, purchased_at, plan_name in bought_posts_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -656,8 +674,9 @@ def get_bought(
                 likes_count=likes_count or 0,
                 comments_count=comments_count or 0,
                 duration=duration,
-                is_video=(post.post_type == 2),  # 2が動画
-                created_at=purchased_at
+                is_video=(post.post_type == PostType.VIDEO),  # PostType.VIDEO = 1
+                created_at=purchased_at,
+                plan_name=plan_name  # プラン名を追加
             )
             bought_posts.append(bought_post)
 

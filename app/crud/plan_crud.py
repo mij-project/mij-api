@@ -4,6 +4,7 @@ from app.models.subscriptions import Subscriptions
 from uuid import UUID
 from typing import List, Optional
 from app.schemas.plan import PlanCreateRequest, PlanResponse, SubscribedPlanResponse
+from app.schemas.purchases import SinglePurchaseResponse
 from app.constants.enums import PlanStatus, PlanLifecycleStatus
 from datetime import datetime, timezone
 from app.models.profiles import Profiles
@@ -15,7 +16,7 @@ from app.models.prices import Prices
 from app.constants.enums import MediaAssetKind
 from app.api.commons.utils import get_video_duration
 from app.models.user import Users
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, String
 import os
 from app.core.logger import Logger
 logger = Logger.get_logger()
@@ -27,28 +28,35 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
     ユーザーが加入中のプラン数と詳細を取得
     """
 
-    # サブスクリプション中のプラン（type=2）を取得
-    # TODO: 仮の値として空のリストを設定
-    subscribed_subscriptions = []
+    # サブスクリプション中のプランを取得（access_type=1）
+    subscribed_subscriptions = (
+        db.query(Subscriptions)
+        .filter(
+            Subscriptions.user_id == user_id,
+            Subscriptions.access_type == 1,  # プラン購読
+            Subscriptions.status == 1  # active
+        )
+        .all()
+    )
 
-    subscribed_plan_count = 0
+    subscribed_plan_count = len(subscribed_subscriptions)
     subscribed_total_price = 0
     subscribed_plan_names = []
     subscribed_plan_details = []
 
     # 加入中のプランの詳細情報を取得
     for subscription in subscribed_subscriptions:
-        # order_idからプランIDを取得（order_type == 1の場合のみ）
-        if subscription.order_type != 1:
-            continue
-        
+        # order_idからプランIDを取得
         try:
             plan_id = UUID(subscription.order_id)
         except (ValueError, TypeError):
             continue
-        
+
         # プラン情報を取得
-        plan = db.query(Plans).filter(Plans.id == plan_id).first()
+        plan = db.query(Plans).filter(
+            Plans.id == plan_id,
+            Plans.deleted_at.is_(None)
+        ).first()
         if not plan:
             continue
         
@@ -80,7 +88,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             .filter(
                 PostPlans.plan_id == plan_id,
                 Posts.deleted_at.is_(None),
-                Posts.status == PostStatus.APPROVED
+                Posts.status == 5  # APPROVED
             ).scalar()
         )
 
@@ -93,7 +101,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
                 PostPlans.plan_id == plan_id,
                 MediaAssets.kind == MediaAssetKind.THUMBNAIL,
                 Posts.deleted_at.is_(None),
-                Posts.status == PostStatus.APPROVED
+                Posts.status == 5  # APPROVED
             )
             .order_by(Posts.created_at.desc())
             .limit(4)
@@ -107,14 +115,12 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
 
         # 詳細情報を追加
         subscribed_plan_details.append({
-            "subscription_id": str(subscription.id),
+            "purchase_id": str(subscription.id),
             "plan_id": str(plan.id),
             "plan_name": plan.name,
             "plan_description": plan.description,
             "price": plan_price,
-            "subscription_created_at": subscription.created_at,
-            "current_period_start": subscription.access_start if hasattr(subscription, 'access_start') else None,
-            "current_period_end": subscription.access_end if hasattr(subscription, 'access_end') else None,
+            "purchase_created_at": subscription.created_at,
             "creator_avatar_url": creator_profile.avatar_url if creator_profile and creator_profile.avatar_url else None,
             "creator_username": creator_profile.username if creator_profile else None,
             "creator_profile_name": creator_profile.profile_name if creator_profile else None,
@@ -574,5 +580,62 @@ def get_creator_posts_for_plan(db: Session, creator_user_id: UUID, plan_id: Opti
             "created_at": post.created_at,
             "is_included": post.id in included_post_ids
         })
-    
+
     return posts
+
+def get_single_purchases_by_user_id(db: Session, user_id: UUID) -> List[SinglePurchaseResponse]:
+    """
+    ユーザーの単品購入一覧を取得
+    subscriptionsテーブルのaccess_type=2から取得
+    """
+    ThumbnailAssets = aliased(MediaAssets)
+
+    # 単品購入データを取得（access_type=2）
+    purchases_query = (
+        db.query(
+            Subscriptions.id.label("purchase_id"),
+            Posts.id.label("post_id"),
+            Prices.id.label("plan_id"),
+            Posts.description.label("post_title"),
+            Posts.description.label("post_description"),
+            Users.profile_name.label("creator_name"),
+            Profiles.username.label("creator_username"),
+            Profiles.avatar_url.label("creator_avatar_url"),
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            Prices.price.label("purchase_price"),
+            Subscriptions.created_at.label("purchase_created_at")
+        )
+        .join(Prices, Subscriptions.order_id == func.cast(Prices.id, String))
+        .join(Posts, Prices.post_id == Posts.id)
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            ThumbnailAssets,
+            and_(ThumbnailAssets.post_id == Posts.id, ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL)
+        )
+        .filter(
+            Subscriptions.user_id == user_id,
+            Subscriptions.access_type == 2,  # 単品購入
+            Posts.deleted_at.is_(None)
+        )
+        .order_by(Subscriptions.created_at.desc())
+        .all()
+    )
+
+    single_purchases = []
+    for purchase in purchases_query:
+        single_purchases.append(SinglePurchaseResponse(
+            purchase_id=purchase.purchase_id,
+            post_id=purchase.post_id,
+            plan_id=purchase.plan_id,
+            post_title=purchase.post_title or "",
+            post_description=purchase.post_description or "",
+            creator_name=purchase.creator_name,
+            creator_username=purchase.creator_username,
+            creator_avatar_url=purchase.creator_avatar_url,
+            thumbnail_key=purchase.thumbnail_key,
+            purchase_price=int(purchase.purchase_price) if purchase.purchase_price else 0,
+            purchase_created_at=purchase.purchase_created_at
+        ))
+
+    return single_purchases

@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     CREDIX_ZKEY: str
     CREDIX_SESSION_ENDPOINT: str = "/cgi-bin/credit/session.cgi"
     CREDIX_ORDER_ENDPOINT: str = "/cgi-bin/credit/order.cgi"
+    CREDIX_REPEATER_ENDPOINT: str = "/cgi-bin/credit/repeater.cgi"
 
     model_config = SettingsConfigDict(
         env_file=[".env.development", ".env", ".env.local"],

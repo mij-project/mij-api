@@ -394,9 +394,11 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
 
     if free_flg:
         set_file_name = "_1080w.webp"
+        set_media_kind = MediaAssetKind.MAIN_VIDEO
 
 
     media_info = []
+    thumbnail_key = None
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
@@ -441,19 +443,19 @@ def _format_categories_info(categories: list):
         for category in categories
     ]
 
-def _format_sale_info(price: dict, plans: list):
+def _format_sale_info(price: dict | None, plans: list | None):
     """販売情報を整形する"""
     return {
         "price": {
-            "id": str(price.id),
+            "id": str(price.id) if price else None,
             "price": price.price if price else None,
         },
         "plans": [
             {
-                "id": str(plan.id),
-                "name": plan.name,
-                "description": plan.description,
-                "price": plan.price
+                "id": str(plan.id) if plan else None,
+                "name": plan.name if plan else None,
+                "description": plan.description if plan else None,
+                "price": plan.price if plan else None,
             }
             for plan in plans
         ]

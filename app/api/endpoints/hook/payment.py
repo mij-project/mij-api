@@ -228,8 +228,6 @@ def _create_subscription_record(
     Returns:
         作成されたサブスクリプションレコード
     """
-
-    order_id = transaction.order_id
     # トランザクションタイプに応じてサブスクリプションタイプを決定
     # PaymentTransactionType.SUBSCRIPTION(2) -> SubscriptionType.PLAN(1)
     # PaymentTransactionType.SINGLE(1) -> SubscriptionType.SINGLE(2)
@@ -238,13 +236,6 @@ def _create_subscription_record(
         if transaction.type == PaymentTransactionType.SUBSCRIPTION
         else SubscriptionType.SINGLE
     )
-
-    # 単品の場合post_idをorder_idに設定
-    if access_type == SubscriptionType.SINGLE:
-        price = price_crud.get_price_by_id(db, order_id)
-        if not price:
-            raise ValueError(f"Price not found: {order_id}")
-        order_id = price.post_id
 
     access_start = datetime.utcnow()
     access_end = (
