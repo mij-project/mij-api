@@ -181,6 +181,7 @@ def get_top_creators(db: Session, limit: int = 5):
                 Users,
                 Users.profile_name,
                 Profiles.username,
+                Users.offical_flg,
                 Profiles.avatar_url,
                 func.count(Follows.creator_user_id).label('followers_count'),
                 func.array_agg(Follows.follower_user_id).label("follower_ids"),
@@ -203,6 +204,7 @@ def get_new_creators(db: Session, limit: int = 5):
     return (
         db.query(
             Users, 
+            Users.offical_flg,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url
@@ -573,6 +575,7 @@ def get_ranking_creators_categories_overall_all_time(db: Session, limit: int = 5
 
             Users.id.label("creator_user_id"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             Profiles.cover_url.label("cover_url"),
@@ -600,6 +603,7 @@ def get_ranking_creators_categories_overall_all_time(db: Session, limit: int = 5
             Categories.name,
             Users.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
@@ -631,6 +635,7 @@ def get_ranking_creators_categories_overall_all_time(db: Session, limit: int = 5
             creator_like_counts_subq.c.creator_user_id,
             creator_like_counts_subq.c.profile_name,
             creator_like_counts_subq.c.username,
+            creator_like_counts_subq.c.offical_flg,
             creator_like_counts_subq.c.avatar_url,
             creator_like_counts_subq.c.cover_url,
 
@@ -687,6 +692,7 @@ def get_ranking_creators_categories_overall_daily(db: Session, limit: int = 500)
 
             Users.id.label("creator_user_id"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             Profiles.cover_url.label("cover_url"),
@@ -715,6 +721,7 @@ def get_ranking_creators_categories_overall_daily(db: Session, limit: int = 500)
             Categories.name,
             Users.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
@@ -746,6 +753,7 @@ def get_ranking_creators_categories_overall_daily(db: Session, limit: int = 500)
             creator_like_counts_subq.c.creator_user_id,
             creator_like_counts_subq.c.profile_name,
             creator_like_counts_subq.c.username,
+            creator_like_counts_subq.c.offical_flg,
             creator_like_counts_subq.c.avatar_url,
             creator_like_counts_subq.c.cover_url,
 
@@ -801,6 +809,7 @@ def get_ranking_creators_categories_overall_weekly(db: Session, limit: int = 500
 
             Users.id.label("creator_user_id"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             Profiles.cover_url.label("cover_url"),
@@ -829,6 +838,7 @@ def get_ranking_creators_categories_overall_weekly(db: Session, limit: int = 500
             Categories.name,
             Users.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
@@ -860,6 +870,7 @@ def get_ranking_creators_categories_overall_weekly(db: Session, limit: int = 500
             creator_like_counts_subq.c.creator_user_id,
             creator_like_counts_subq.c.profile_name,
             creator_like_counts_subq.c.username,
+            creator_like_counts_subq.c.offical_flg,
             creator_like_counts_subq.c.avatar_url,
             creator_like_counts_subq.c.cover_url,
 
@@ -915,6 +926,7 @@ def get_ranking_creators_categories_overall_monthly(db: Session, limit: int = 50
 
             Users.id.label("creator_user_id"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             Profiles.cover_url.label("cover_url"),
@@ -943,6 +955,7 @@ def get_ranking_creators_categories_overall_monthly(db: Session, limit: int = 50
             Categories.name,
             Users.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
@@ -974,6 +987,7 @@ def get_ranking_creators_categories_overall_monthly(db: Session, limit: int = 50
             creator_like_counts_subq.c.creator_user_id,
             creator_like_counts_subq.c.profile_name,
             creator_like_counts_subq.c.username,
+            creator_like_counts_subq.c.offical_flg,
             creator_like_counts_subq.c.avatar_url,
             creator_like_counts_subq.c.cover_url,
 

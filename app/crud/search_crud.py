@@ -51,6 +51,7 @@ def search_creators(
         db.query(
             Users.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.bio,
@@ -66,6 +67,7 @@ def search_creators(
         .group_by(
             Users.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.bio,
@@ -151,6 +153,7 @@ def search_creators(
             [
                 "id",
                 "profile_name",
+                "offical_flg",
                 "username",
                 "avatar_url",
                 "bio",
@@ -167,6 +170,7 @@ def search_creators(
                 CreatorWithPosts(
                     id=r.id,
                     profile_name=r.profile_name,
+                    offical_flg=r.offical_flg,
                     username=r.username,
                     avatar_url=r.avatar_url,
                     bio=r.bio,
@@ -243,6 +247,7 @@ def search_posts(
             Posts.created_at,
             video_asset_subq.c.duration_sec.label("video_duration"),
             Users.id.label("creator_id"),
+            Users.offical_flg,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
@@ -270,6 +275,7 @@ def search_posts(
         .group_by(
             Posts.id,
             Users.id,
+            Users.offical_flg,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
