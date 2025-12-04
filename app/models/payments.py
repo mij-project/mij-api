@@ -56,6 +56,9 @@ class Payments(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
 
+    # その時のプラットフォーム手数料
+    platform_fee: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="その時のプラットフォーム手数料")
+
     # Relationships
     transaction: Mapped["PaymentTransactions"] = relationship("PaymentTransactions", foreign_keys=[transaction_id], back_populates="payment")
     provider: Mapped["Providers"] = relationship("Providers", back_populates="payments")

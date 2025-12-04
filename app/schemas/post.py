@@ -27,6 +27,7 @@ class PostCategoryResponse(BaseModel):
 	description: str
 	thumbnail_url: Optional[str] = None
 	likes_count: int
+	official: bool
 	creator_name: str
 	username: str
 	creator_avatar_url: Optional[str] = None

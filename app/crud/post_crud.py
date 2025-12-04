@@ -197,6 +197,7 @@ def get_posts_by_category_slug(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -236,6 +237,7 @@ def get_posts_by_category_slug(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -505,6 +507,7 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         db.query(
             Posts,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
@@ -532,6 +535,7 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
@@ -551,6 +555,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         db.query(
             Posts,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
@@ -577,6 +582,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
@@ -647,6 +653,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         db.query(
             Posts,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
@@ -672,6 +679,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
@@ -702,6 +710,7 @@ def get_ranking_posts(db: Session, limit: int = 5):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
@@ -728,6 +737,7 @@ def get_ranking_posts(db: Session, limit: int = 5):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
@@ -754,6 +764,7 @@ def get_recent_posts(db: Session, limit: int = 5):
         db.query(
             Posts,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
@@ -782,6 +793,7 @@ def get_recent_posts(db: Session, limit: int = 5):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
@@ -813,6 +825,7 @@ def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -837,6 +850,7 @@ def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -867,6 +881,7 @@ def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -892,6 +907,7 @@ def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -921,6 +937,7 @@ def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -946,6 +963,7 @@ def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -974,6 +992,7 @@ def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -999,6 +1018,7 @@ def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -1888,6 +1908,7 @@ def get_ranking_posts_detail_categories_all_time(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -1929,6 +1950,7 @@ def get_ranking_posts_detail_categories_all_time(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -1977,6 +1999,7 @@ def get_ranking_posts_detail_categories_daily(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2010,8 +2033,10 @@ def get_ranking_posts_detail_categories_daily(
         )
         .outerjoin(
             Likes,
-            Likes.post_id == Posts.id,
-            Likes.created_at >= one_day_ago,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_day_ago,
+            ),
         )
         .group_by(
             Categories.id,
@@ -2019,6 +2044,7 @@ def get_ranking_posts_detail_categories_daily(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2067,6 +2093,7 @@ def get_ranking_posts_detail_categories_weekly(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2100,8 +2127,10 @@ def get_ranking_posts_detail_categories_weekly(
         )
         .outerjoin(
             Likes,
-            Likes.post_id == Posts.id,
-            Likes.created_at >= one_week_ago,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_week_ago,
+            ),
         )
         .group_by(
             Categories.id,
@@ -2109,6 +2138,7 @@ def get_ranking_posts_detail_categories_weekly(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2157,6 +2187,7 @@ def get_ranking_posts_detail_categories_monthly(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2190,13 +2221,10 @@ def get_ranking_posts_detail_categories_monthly(
         )
         .outerjoin(
             Likes,
-            Likes.post_id == Posts.id,
-            Likes.created_at >= one_month_ago,
-        )
-        .outerjoin(
-            VideoAssets,
-            (Posts.id == VideoAssets.post_id)
-            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_month_ago,
+            ),
         )
         .group_by(
             Categories.id,
@@ -2205,6 +2233,7 @@ def get_ranking_posts_detail_categories_monthly(
             Posts.post_type.label("post_type"),
             Posts.creator_user_id.label("creator_user_id"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2272,6 +2301,7 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
             Genres.name.label("genre_name"),
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
+            Users.offical_flg.label("offical_flg"),
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
@@ -2324,6 +2354,7 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2393,6 +2424,7 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
             Genres.name.label("genre_name"),
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
+            Users.offical_flg.label("offical_flg"),
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
@@ -2448,6 +2480,7 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2520,6 +2553,7 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2572,6 +2606,7 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2641,6 +2676,7 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
             Genres.name.label("genre_name"),
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
+            Users.offical_flg.label("offical_flg"),
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
@@ -2696,6 +2732,7 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2736,6 +2773,7 @@ def get_ranking_posts_detail_overall_all_time(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2760,6 +2798,7 @@ def get_ranking_posts_detail_overall_all_time(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2792,6 +2831,7 @@ def get_ranking_posts_detail_overall_monthly(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2817,6 +2857,7 @@ def get_ranking_posts_detail_overall_monthly(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2849,6 +2890,7 @@ def get_ranking_posts_detail_overall_weekly(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2874,6 +2916,7 @@ def get_ranking_posts_detail_overall_weekly(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2906,6 +2949,7 @@ def get_ranking_posts_detail_overall_daily(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2931,6 +2975,7 @@ def get_ranking_posts_detail_overall_daily(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,

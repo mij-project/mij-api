@@ -123,6 +123,7 @@ class PostCardResponse(BaseModel):
     creator_avatar: Optional[str] = None
     creator_name: str
     creator_username: str
+    official: bool
     likes_count: int
     comments_count: int
     duration: Optional[str] = None

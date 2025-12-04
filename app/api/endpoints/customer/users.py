@@ -143,7 +143,9 @@ def get_user_profile_by_username_endpoint(
 
         # モデルオブジェクトをスキーマオブジェクトに変換
         profile_posts = []
+        post_count = 0
         for post_data in profile_data["posts"]:
+            post_count += 1
             if hasattr(post_data, "Posts"):
                 post = post_data.Posts
                 likes_count = post_data.likes_count
@@ -165,7 +167,11 @@ def get_user_profile_by_username_endpoint(
             if duration_sec is not None:
                 video_duration_int = int(round(float(duration_sec)))
 
-            if post.scheduled_at and post.scheduled_at.replace(tzinfo=timezone.utc) > now:
+            if (
+                post.scheduled_at
+                and post.scheduled_at.replace(tzinfo=timezone.utc) > now
+            ):
+                post_count -= 1
                 is_reserved = True
             else:
                 is_reserved = False
@@ -183,7 +189,7 @@ def get_user_profile_by_username_endpoint(
                     video_duration=video_duration_int,
                     price=price,
                     currency=currency,
-                    is_reserved=is_reserved
+                    is_reserved=is_reserved,
                 )
             )
 
@@ -227,7 +233,10 @@ def get_user_profile_by_username_endpoint(
             video_duration_int = None
             if duration_sec is not None:
                 video_duration_int = int(round(float(duration_sec)))
-            if post.scheduled_at and post.scheduled_at.replace(tzinfo=timezone.utc) > now:
+            if (
+                post.scheduled_at
+                and post.scheduled_at.replace(tzinfo=timezone.utc) > now
+            ):
                 is_reserved = True
             else:
                 is_reserved = False
@@ -270,7 +279,7 @@ def get_user_profile_by_username_endpoint(
             else None,
             bio=profile.bio if profile else None,
             links=profile.links if profile else None,
-            post_count=len(profile_data["posts"]),
+            post_count=post_count,
             follower_count=profile_data["follower_count"],
             posts=profile_posts,
             plans=profile_plans,
