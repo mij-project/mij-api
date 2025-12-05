@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from sqlalchemy.orm import Session
 from uuid import UUID
 from app.constants.enums import AccountType, PaymentStatus, PaymentType, WithdrawStatus
@@ -6,7 +7,18 @@ from app.core.logger import Logger
 from sqlalchemy import func, or_, select, case, cast, and_
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from app.models import Creators, Payments, Profiles, Users, Withdraws, Prices, Plans
+from app.models import (
+    Banks,
+    Creators,
+    Payments,
+    Profiles,
+    UserBanks,
+    Users,
+    Withdraws,
+    Prices,
+    Plans,
+)
+from app.schemas.withdraw import WithdrawalApplicationRequest
 
 logger = Logger.get_logger()
 
@@ -16,23 +28,23 @@ def get_sales_summary_by_creator(db: Session, user_id: UUID) -> dict:
     ユーザーの売上概要を取得
     """
     try:
-        platform_fee = __get_platform_fee_by_creator(db, user_id)
-
+        fee_per_payment = func.ceil(
+            Payments.payment_price * Payments.platform_fee / 100.0
+        )
+        net_per_payment = Payments.payment_price - fee_per_payment
         payments_stmt = select(
-            func.coalesce(func.sum(Payments.payment_price), 0).label(
-                "cumulative_sales"
-            ),
+            func.coalesce(
+                func.sum(net_per_payment),
+                0,
+            ).label("cumulative_sales_after_platform_fee")
         ).where(
             Payments.seller_user_id == user_id,
-            Payments.status == PaymentStatus.SUCCEEDED,  # succeeded
+            Payments.status.in_([PaymentStatus.SUCCEEDED]),
         )
-
         payments_result = db.execute(payments_stmt)
         payments_row = payments_result.one()
-        cumulative_sales = int(payments_row.cumulative_sales or 0)
-        # 手数料を引く
-        cumulative_sales_after_platform_fee = cumulative_sales - round(
-            cumulative_sales * platform_fee / 100
+        cumulative_sales_after_platform_fee = int(
+            payments_row.cumulative_sales_after_platform_fee or 0
         )
 
         withdraws_stmt = select(
@@ -41,33 +53,30 @@ def get_sales_summary_by_creator(db: Session, user_id: UUID) -> dict:
             ),
         ).where(
             Withdraws.user_id == user_id,
-            Withdraws.status == WithdrawStatus.COMPLETED,  # completed
+            Withdraws.status.in_(
+                [
+                    WithdrawStatus.COMPLETED,
+                    WithdrawStatus.PROCESSING,
+                    WithdrawStatus.PENDING,
+                ]
+            ),  # completed
         )
 
         withdraws_result = db.execute(withdraws_stmt)
         withdraws_row = withdraws_result.one()
         total_withdraw = int(withdraws_row.total_withdraw or 0)
-
         withdrawable_amount = max(
             cumulative_sales_after_platform_fee - total_withdraw, 0
         )
 
         return {
-            "cumulative_sales": cumulative_sales_after_platform_fee,
+            "cumulative_sales": withdrawable_amount,
             "withdrawable_amount": withdrawable_amount,
         }
 
     except Exception as e:
         logger.error(f"Salesエラーが発生しました: {e}")
         return None
-
-
-def __get_platform_fee_by_creator(db: Session, user_id: UUID) -> int:
-    """
-    手数料を計算
-    """
-    creator = db.query(Creators).filter(Creators.user_id == user_id).first()
-    return creator.platform_fee_percent or 10
 
 
 def get_sales_period_by_creator(
@@ -77,88 +86,102 @@ def get_sales_period_by_creator(
     end_date: datetime,
     previous_start_date: datetime,
     previous_end_date: datetime,
-) -> dict:
+) -> Optional[dict]:
     """
-    売上期間を取得
+    売上期間を取得（クリエイターごと）
+    - period_sales: 期間中の合計売上（プラットフォーム手数料差引後）
+    - single_item_sales: 期間中の単品売上（手数料差引後）
+    - plan_sales: 期間中のサブスク売上（手数料差引後）
+    - previous_period_sales: 前期間の合計売上（手数料差引後）
     """
-    try:
-        platform_fee = __get_platform_fee_by_creator(db, user_id)
 
-        base_filter = (
+    try:
+        # 時刻をDBの型（naive）に合わせる
+        start_naive = start_date.replace(tzinfo=None)
+        end_naive = end_date.replace(tzinfo=None)
+        prev_start_naive = previous_start_date.replace(tzinfo=None)
+        prev_end_naive = previous_end_date.replace(tzinfo=None)
+
+        # 1. 定義: 1レコードあたりの手数料 & ネット売上
+        # fee_per_payment = ceil(payment_price * platform_fee / 100)
+        fee_per_payment = func.ceil(
+            Payments.payment_price * Payments.platform_fee / 100.0,
+        )
+        net_per_payment = Payments.payment_price - fee_per_payment
+
+        # 2. 今期間の売上（net）
+        base_filter_current = (
             (Payments.seller_user_id == user_id)
             & (Payments.status == PaymentStatus.SUCCEEDED)
-            & (Payments.paid_at >= start_date.replace(tzinfo=None))
-            & (Payments.paid_at <= end_date.replace(tzinfo=None))
+            & (Payments.paid_at >= start_naive)
+            & (Payments.paid_at <= end_naive)
         )
 
         payments_stmt = select(
-            func.coalesce(func.sum(Payments.payment_price), 0).label(
-                "cumulative_sales"
-            ),
+            # 期間中の合計売上（手数料差引後）
+            func.coalesce(
+                func.sum(net_per_payment),
+                0,
+            ).label("period_sales"),
+            # 単品売上（手数料差引後）
             func.coalesce(
                 func.sum(
                     case(
                         (
                             Payments.payment_type == PaymentType.SINGLE,
-                            Payments.payment_price,
+                            net_per_payment,
                         ),
                         else_=0,
                     )
                 ),
                 0,
-            ).label("single_sales"),
+            ).label("single_item_sales"),
+            # サブスク売上（手数料差引後）
             func.coalesce(
                 func.sum(
                     case(
                         (
                             Payments.payment_type == PaymentType.PLAN,
-                            Payments.payment_price,
+                            net_per_payment,
                         ),
                         else_=0,
                     )
                 ),
                 0,
             ).label("plan_sales"),
-        ).where(base_filter)
+        ).where(base_filter_current)
 
         payments_row = db.execute(payments_stmt).one()
 
-        cumulative_sales = int(payments_row.cumulative_sales or 0)
-        single_sales = int(payments_row.single_sales or 0)
+        period_sales = int(payments_row.period_sales or 0)
+        single_item_sales = int(payments_row.single_item_sales or 0)
         plan_sales = int(payments_row.plan_sales or 0)
-        cumulative_sales_after_platform_fee = cumulative_sales - round(
-            cumulative_sales * platform_fee / 100
-        )
-        single_sales_after_platform_fee = single_sales - round(
-            single_sales * platform_fee / 100
-        )
-        plan_sales_after_platform_fee = plan_sales - round(
-            plan_sales * platform_fee / 100
+
+        # 3. 前期間の売上（net）
+        base_filter_previous = (
+            (Payments.seller_user_id == user_id)
+            & (Payments.status == PaymentStatus.SUCCEEDED)
+            & (Payments.paid_at >= prev_start_naive)
+            & (Payments.paid_at <= prev_end_naive)
         )
 
-        previous_payments_stmt = select(
-            func.coalesce(func.sum(Payments.payment_price), 0).label(
-                "cumulative_sales"
-            ),
-        ).where(
-            Payments.seller_user_id == user_id,
-            Payments.status == PaymentStatus.SUCCEEDED,
-            Payments.created_at >= previous_start_date.replace(tzinfo=None),
-            Payments.created_at <= previous_end_date.replace(tzinfo=None),
-        )
-        previous_payments_row = db.execute(previous_payments_stmt).one()
-        previous_cumulative_sales = int(previous_payments_row.cumulative_sales or 0)
-        previous_cumulative_sales_after_platform_fee = (
-            previous_cumulative_sales
-            - round(previous_cumulative_sales * platform_fee / 100)
-        )
+        previous_stmt = select(
+            func.coalesce(
+                func.sum(net_per_payment),
+                0,
+            ).label("previous_period_sales"),
+        ).where(base_filter_previous)
+
+        previous_row = db.execute(previous_stmt).one()
+        previous_period_sales = int(previous_row.previous_period_sales or 0)
 
         return {
-            "period_sales": cumulative_sales_after_platform_fee,
-            "single_item_sales": single_sales_after_platform_fee,
-            "plan_sales": plan_sales_after_platform_fee,
-            "previous_period_sales": previous_cumulative_sales_after_platform_fee,
+            "period_sales": period_sales,
+            "single_item_sales": single_item_sales,
+            "plan_sales": plan_sales,
+            "previous_period_sales": previous_period_sales,
         }
+
     except Exception as e:
         logger.exception(f"Sales period error: {e}")
         return None
@@ -259,32 +282,42 @@ def get_creators_sales_by_period(
 ) -> dict:
     """
     クリエイターの売上を取得
+    - total_sales, period_sales, this_month_period_sales は
+      各決済ごとのプラットフォーム手数料控除後の金額で集計
     """
     try:
         start_naive = start_date.replace(tzinfo=None)
         end_naive = end_date.replace(tzinfo=None)
         start_of_month, end_of_month = __get_in_month_period()
+
         total_creators = (
             db.query(Users).filter(Users.role == AccountType.CREATOR).count()
         )
-        # ---- subquery GMV (lifetime) ----
+
+        # ----- 1. per-payment: fee & net amount -----
+        # fee_per_payment = ceil(payment_price * platform_fee / 100)
+        fee_per_payment = func.ceil(
+            Payments.payment_price * Payments.platform_fee / 100.0
+        )
+        # net_per_payment = payment_price - fee
+        net_per_payment = Payments.payment_price - fee_per_payment
+
+        # ---- subquery: lifetime net sales (total_sales) ----
         total_sales_subq = (
             select(
                 Payments.seller_user_id.label("seller_id"),
-                func.coalesce(func.sum(Payments.payment_price), 0).label("total_sales"),
+                func.coalesce(func.sum(net_per_payment), 0).label("total_sales"),
             )
             .where(Payments.status == PaymentStatus.SUCCEEDED)
             .group_by(Payments.seller_user_id)
             .subquery()
         )
 
-        # ---- subquery GMV + count in period ----
+        # ---- subquery: net sales + count in selected period ----
         period_sales_subq = (
             select(
                 Payments.seller_user_id.label("seller_id"),
-                func.coalesce(func.sum(Payments.payment_price), 0).label(
-                    "period_sales"
-                ),
+                func.coalesce(func.sum(net_per_payment), 0).label("period_sales"),
                 func.count(Payments.id).label("transaction_count"),
             )
             .where(
@@ -296,11 +329,11 @@ def get_creators_sales_by_period(
             .subquery()
         )
 
-        # ---- subquery GMV + count in period ----
+        # ---- subquery: net sales + count in this month ----
         this_month_period_sales_subq = (
             select(
                 Payments.seller_user_id.label("seller_id"),
-                func.coalesce(func.sum(Payments.payment_price), 0).label(
+                func.coalesce(func.sum(net_per_payment), 0).label(
                     "this_month_period_sales"
                 ),
                 func.count(Payments.id).label("this_month_transaction_count"),
@@ -314,7 +347,7 @@ def get_creators_sales_by_period(
             .subquery()
         )
 
-        # --- subquery withdraw amount in period ---
+        # --- subquery: withdraw amount in period ---
         withdrawals_subq = (
             select(
                 Withdraws.user_id.label("creator_id"),
@@ -331,7 +364,7 @@ def get_creators_sales_by_period(
             .subquery()
         )
 
-        # --- subquery withdraw count in period ---
+        # --- subquery: withdraw count (completed/processing/pending) in period ---
         withdrawals_count_subq = (
             select(
                 Withdraws.user_id.label("creator_id"),
@@ -352,7 +385,7 @@ def get_creators_sales_by_period(
             .subquery()
         )
 
-        # base select
+        # ----- base select -----
         stmt = (
             select(
                 Users.id.label("creator_id"),
@@ -400,6 +433,7 @@ def get_creators_sales_by_period(
                 )
 
         stmt = stmt.where(*conditions)
+
         # ---- sort ----
         if sort == "sales_desc":
             order_expr = func.coalesce(total_sales_subq.c.total_sales, 0).desc()
@@ -407,10 +441,11 @@ def get_creators_sales_by_period(
             order_expr = func.coalesce(total_sales_subq.c.total_sales, 0).asc()
         elif sort == "name_asc":
             order_expr = Profiles.username.asc().nullslast()
-        else:  # NEWEST
+        else:  # newest
             order_expr = Users.created_at.desc()
 
         stmt = stmt.order_by(order_expr)
+
         total_found = (
             db.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
         )
@@ -426,14 +461,16 @@ def get_creators_sales_by_period(
                 "id": row.creator_id,
                 "username": row.username,
                 "platform_fee_rate": row.platform_fee_rate,
-                "total_sales": row.total_sales,
-                "period_sales": row.period_sales,
-                "this_month_period_sales": row.this_month_period_sales,
-                "withdrawal_count": row.withdrawal_count,
-                "withdrawn_total": row.withdrawn_total,
+                # すでにプラットフォーム手数料差引後
+                "total_sales": int(row.total_sales or 0),
+                "period_sales": int(row.period_sales or 0),
+                "this_month_period_sales": int(row.this_month_period_sales or 0),
+                "withdrawal_count": int(row.withdrawal_count or 0),
+                "withdrawn_total": int(row.withdrawn_total or 0),
             }
-            creator["un_transfer_total"] = (
-                creator["total_sales"] - creator["withdrawn_total"]
+            # 未振込残高 = net total_sales - 出金済み/申請中? (ここは仕様次第)
+            creator["un_transfer_total"] = max(
+                creator["total_sales"] - creator["withdrawn_total"], 0
             )
             creator["platform_fee_rate"] = (
                 creator["platform_fee_rate"]
@@ -447,7 +484,7 @@ def get_creators_sales_by_period(
             "total_creators": total_creators,
             "total_pages": (total_found + limit - 1) // limit,
         }
-        
+
     except Exception as e:
         logger.exception(f"Creators sales by period error: {e}")
         return None
@@ -455,8 +492,261 @@ def get_creators_sales_by_period(
 
 def __get_in_month_period():
     now = datetime.now(timezone.utc)
-    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    end_of_month = start_of_month + timedelta(days=30)
+    start_of_month = now.replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    ) - timedelta(hours=9)
+    end_of_month = start_of_month + timedelta(days=30) - timedelta(hours=9)
     start_of_month = start_of_month.replace(tzinfo=None)
     end_of_month = end_of_month.replace(tzinfo=None)
     return start_of_month, end_of_month
+
+
+def get_latest_withdrawal_application_by_user_id(
+    db: Session, user_id: UUID
+) -> Withdraws:
+    """
+    最新の出金申請を取得
+    """
+    try:
+        return (
+            db.query(Withdraws)
+            .filter(Withdraws.user_id == user_id)
+            .order_by(Withdraws.created_at.desc())
+            .first()
+        )
+    except Exception as e:
+        logger.exception(f"Latest withdrawal application by user id error: {e}")
+        return None
+
+
+def create_withdrawal_application_by_user_id(
+    db: Session,
+    user_id: UUID,
+    withdrawal_application_request: WithdrawalApplicationRequest,
+) -> bool:
+    """
+    ユーザーの出金申請を作成
+    """
+    try:
+        withdrawal_application = Withdraws(
+            user_id=user_id,
+            withdraw_amount=withdrawal_application_request.withdraw_amount,
+            transfer_amount=withdrawal_application_request.transfer_amount,
+            user_bank_id=withdrawal_application_request.user_bank_id,
+            status=WithdrawStatus.PENDING,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(withdrawal_application)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.exception(f"Create withdrawal application by user id error: {e}")
+        return False
+
+
+def get_withdrawal_application_histories_by_user_id(
+    db: Session, user_id: UUID, page: int = 1, limit: int = 20
+) -> dict:
+    """
+    ユーザーの出金申請履歴を取得
+    """
+    try:
+        offset = (page - 1) * limit
+        total_count = db.query(Withdraws).filter(Withdraws.user_id == user_id).count()
+        withdrawal_applications_query = (
+            db.query(Withdraws)
+            .filter(Withdraws.user_id == user_id)
+            .order_by(Withdraws.updated_at.desc(), Withdraws.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return {
+            "withdrawal_applications": withdrawal_applications_query,
+            "total_count": total_count,
+        }
+    except Exception as e:
+        logger.exception(f"Withdrawal application histories by user id error: {e}")
+        return None
+
+
+def get_creators_withdraw_summary_by_period_for_admin(
+    db: Session,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> dict:
+    """
+    クリエイターの出金概要を取得
+    """
+    try:
+        # in month transferred summary
+        start_of_month, end_of_month = __get_in_month_period()
+        in_month_stmt = select(
+            func.coalesce(func.sum(Withdraws.transfer_amount), 0).label(
+                "in_month_transferred_total"
+            ),
+            func.coalesce(func.count(Withdraws.id), 0).label(
+                "in_month_transferred_count"
+            ),
+        ).where(
+            Withdraws.status.in_([WithdrawStatus.COMPLETED]),
+            Withdraws.created_at >= start_of_month,
+            Withdraws.created_at <= end_of_month,
+        )
+        in_month_transferred = db.execute(in_month_stmt).one()
+        in_month_transferred_count = in_month_transferred.in_month_transferred_count
+        in_month_transferred_total = in_month_transferred.in_month_transferred_total
+
+        # total transferred summary
+        summary_transferred_count_stmt = select(
+            func.coalesce(func.count(Withdraws.id), 0).label(
+                "summary_transferred_count"
+            )
+        ).where(
+            Withdraws.status.in_([WithdrawStatus.COMPLETED]),
+        )
+        summary_transferred_count_row = db.execute(summary_transferred_count_stmt).one()
+        summary_transferred_count = (
+            summary_transferred_count_row.summary_transferred_count or 0
+        )
+
+        # total transferred summary in period
+        total_stmt = select(
+            func.coalesce(func.sum(Withdraws.transfer_amount), 0).label(
+                "total_transferred_total"
+            ),
+            func.coalesce(func.count(Withdraws.id), 0).label("total_transferred_count"),
+        ).where(
+            Withdraws.status.in_([WithdrawStatus.COMPLETED]),
+        )
+
+        if start_date and end_date:
+            total_stmt = total_stmt.where(
+                Withdraws.created_at >= start_date,
+                Withdraws.created_at <= end_date,
+            )
+
+        total_row = db.execute(total_stmt).one()
+        total_transferred_total = total_row.total_transferred_total
+        total_transferred_count = total_row.total_transferred_count
+
+        # Count withdrawals need to be processed
+        pending_stmt = select(
+            func.coalesce(func.count(Withdraws.id), 0).label(
+                "withdrawals_need_to_be_processed_count"
+            ),
+            func.coalesce(func.sum(Withdraws.transfer_amount), 0).label(
+                "withdrawals_need_to_be_processed_total"
+            ),
+        ).where(
+            Withdraws.status.in_([WithdrawStatus.PENDING, WithdrawStatus.PROCESSING]),
+        )
+
+        pending_row = db.execute(pending_stmt).one()
+        withdrawals_need_to_be_processed_count = (
+            pending_row.withdrawals_need_to_be_processed_count
+        )
+        withdrawals_need_to_be_processed_total = (
+            pending_row.withdrawals_need_to_be_processed_total
+        )
+
+        return {
+            "in_month_transferred_total": in_month_transferred_total,
+            "in_month_transferred_count": in_month_transferred_count,
+            "summary_transferred_count": summary_transferred_count,
+            "total_transferred_total": total_transferred_total,
+            "total_transferred_count": total_transferred_count,
+            "pending_count": withdrawals_need_to_be_processed_count,
+            "pending_total": withdrawals_need_to_be_processed_total,
+        }
+    except Exception as e:
+        logger.exception(f"Creators withdraw summary by period error: {e}")
+        return None
+
+
+def get_creators_withdrawals_by_period_for_admin(
+    db: Session,
+    start_date: datetime,
+    end_date: datetime,
+    page: int = 1,
+    limit: int = 20,
+    filter: int = 0,
+) -> dict:
+    """
+    クリエイターの出金を取得
+    """
+    try:
+        offset = (page - 1) * limit
+        base_stmt = (
+            db.query(
+                Withdraws,
+                Profiles.username.label("creator_username"),
+                UserBanks.account_number.label("account_number"),
+                UserBanks.account_holder_name.label("account_holder_name"),
+                UserBanks.account_type.label("account_type"),
+                Banks.bank_code.label("bank_code"),
+                Banks.bank_name.label("bank_name"),
+                Banks.branch_name.label("branch_name"),
+                Banks.branch_code.label("branch_code"),
+            )
+            .join(Profiles, Profiles.user_id == Withdraws.user_id)
+            .join(UserBanks, UserBanks.id == Withdraws.user_bank_id)
+            .join(Banks, UserBanks.bank_id == Banks.id)
+        )
+        if start_date and end_date:
+            base_stmt = base_stmt.filter(
+                Withdraws.created_at >= start_date,
+                Withdraws.created_at <= end_date,
+            )
+        if filter != 0:
+            base_stmt = base_stmt.filter(Withdraws.status == filter)
+
+        total_count = base_stmt.count()
+        total_pages = (total_count + limit - 1) // limit
+        base_stmt = base_stmt.order_by(Withdraws.requested_at.desc())
+        withdrawals = base_stmt.offset(offset).limit(limit).all()
+
+        return {
+            "withdrawals": withdrawals,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "page": page,
+            "limit": limit,
+        }
+
+    except Exception as e:
+        logger.exception(f"Creators withdrawals by period error: {e}")
+        return None
+
+
+def update_withdrawal_application_status_by_admin(
+    db: Session,
+    application_id: str,
+    status: int,
+    admin_id: str,
+) -> bool:
+    """
+    管理者による出金申請ステータスを更新
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        withdrawal_application = (
+            db.query(Withdraws).filter(Withdraws.id == application_id).first()
+        )
+        if not withdrawal_application:
+            return False
+        if status == WithdrawStatus.COMPLETED:
+            withdrawal_application.completed_at = now
+            withdrawal_application.approved_by = admin_id
+
+        withdrawal_application.processed_at = now
+        withdrawal_application.approved_at = now
+        withdrawal_application.updated_at = now
+        withdrawal_application.status = status
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Update withdrawal application status by admin error: {e}")
+        return False

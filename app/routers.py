@@ -50,6 +50,8 @@ from app.api.endpoints.admin import (
     company as admin_company,
     notifications as admin_notifications,
     creators as admin_creators,
+    reports as admin_reports,
+    subscriptions_info as admin_subscriptions_info,
 )
 
 # Debug routes
@@ -165,6 +167,14 @@ api_router.include_router(
     admin_creators.router,
     prefix="/admin/creators",
     tags=["Admin Creators Revelant"],
+)
+api_router.include_router(
+    admin_reports.router, prefix="/admin/reports", tags=["Admin Reports"]
+)
+api_router.include_router(
+    admin_subscriptions_info.router,
+    prefix="/admin/subscriptions",
+    tags=["Admin Subscriptions Info"],
 )
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])

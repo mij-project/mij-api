@@ -259,6 +259,7 @@ class WithdrawStatus:
     COMPLETED = 3 # 完了
     FAILED = 4 # 失敗
     CANCELLED = 5 # キャンセル
+    #1=pending, 2=processing, 3=completed, 4=failed, 5=cancelled
 
 class PaymentType:
     PLAN = 1 # サブスクリプション
