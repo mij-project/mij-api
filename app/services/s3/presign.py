@@ -32,7 +32,7 @@ def presign_put(
     resource: Resource,
     key: str,
     content_type: str,
-    expires_in: int = 300
+    expires_in: int = 3600 # 1 hour
 ) -> dict:
     """
     Presign upload
