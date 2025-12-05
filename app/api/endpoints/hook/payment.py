@@ -27,6 +27,7 @@ from app.constants.enums import (
     PaymentStatus,
     SubscriptionType,
     SubscriptionStatus,
+    TransactionType,
 )
 from app.services.email.send_email import send_payment_succuces_email, send_payment_faild_email, send_selling_info_email
 from app.models.payment_transactions import PaymentTransactions
@@ -55,6 +56,9 @@ def _log_webhook_received(
     sendpoint: Optional[str],
     result: Optional[str],
     money: Optional[int],
+    cardbrand: Optional[str],
+    cardnumber: Optional[str],
+    yuko: Optional[str],
 ) -> None:
     """Webhook受信ログを出力"""
     logger.info("=== CREDIX Webhook受信 ===")
@@ -65,7 +69,9 @@ def _log_webhook_received(
     logger.info(f"sendpoint: {sendpoint}")
     logger.info(f"result: {result}")
     logger.info(f"money: {money}")
-
+    logger.info(f"cardbrand: {cardbrand}")
+    logger.info(f"cardnumber: {cardnumber}")
+    logger.info(f"yuko: {yuko}")
 
 def _get_order_info(
     db: Session,
@@ -91,16 +97,16 @@ def _get_order_info(
     )
 
     if payment_type == PaymentTransactionType.SINGLE:
-        price, post = price_crud.get_price_and_post_by_id(db, transaction.order_id)
-        if not price or not post:
+        price, post, creator = price_crud.get_price_and_post_by_id(db, transaction.order_id)
+        if not price or not post or not creator:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
-        return price.price, post.creator_user_id
+        return price.price, post.creator_user_id, creator.platform_fee_percent
 
     else:  # SUBSCRIPTION
-        plan = plan_crud.get_plan_by_id(db, transaction.order_id)
-        if not plan:
+        plan, creator = plan_crud.get_plan_and_creator_by_id(db, transaction.order_id)
+        if not plan or not creator:
             raise ValueError(f"Plan not found: {transaction.order_id}")
-        return plan.price, plan.creator_user_id
+        return plan.price, plan.creator_user_id, creator.platform_fee_percent
 
 
 def _get_payment_info(
@@ -180,6 +186,7 @@ def _create_payment_record(
     payment_price: int,
     seller_user_id: UUID,
     payment_amount: int,
+    platform_fee: int,
 ) -> Payments:
     """
     決済レコードを作成
@@ -190,7 +197,7 @@ def _create_payment_record(
         payment_price: 商品価格
         seller_user_id: 売主ユーザーID
         payment_amount: 決済金額
-        
+        platform_fee: プラットフォーム手数料
     Returns:
         作成された決済レコード
     """
@@ -207,6 +214,7 @@ def _create_payment_record(
         payment_amount=payment_amount,
         payment_price=payment_price,
         status=PaymentStatus.SUCCEEDED,
+        platform_fee=platform_fee,
     )
 
 
@@ -265,6 +273,9 @@ def _update_or_create_user_provider(
     db: Session,
     transaction: PaymentTransactions,
     send_id: Optional[str],
+    cardbrand: Optional[str],
+    cardnumber: Optional[str],
+    yuko: Optional[str],
 ) -> None:
     """
     ユーザープロバイダー情報を更新または作成
@@ -284,6 +295,9 @@ def _update_or_create_user_provider(
             user_id=transaction.user_id,
             provider_id=transaction.provider_id,
             sendid=send_id,
+            cardbrand=cardbrand,
+            cardnumber=cardnumber,
+            yuko=yuko,
         )
         logger.info(
             f"Created user_provider: user_id={transaction.user_id}, sendid={send_id}"
@@ -301,6 +315,9 @@ def _handle_successful_payment(
     payment_amount: int,
     send_id: Optional[str],
     email: Optional[str],
+    cardbrand: Optional[str],
+    cardnumber: Optional[str],
+    yuko: Optional[str],
 ) -> None:
     """
     決済成功時の処理
@@ -310,6 +327,9 @@ def _handle_successful_payment(
         transaction: 決済トランザクション
         payment_amount: 決済金額
         send_id: CREDIXのsendid
+        cardbrand: カードブランド
+        cardnumber: カード番号
+        yuko: 有効期限
     """
     logger.info(f"決済成功: transaction_id={transaction.id}")
 
@@ -322,7 +342,7 @@ def _handle_successful_payment(
 
     # 注文情報を取得
     try:
-        payment_price, seller_user_id = _get_order_info(db, transaction)
+        payment_price, seller_user_id, platform_fee = _get_order_info(db, transaction)
     except ValueError as e:
         logger.error(str(e))
         raise
@@ -333,6 +353,7 @@ def _handle_successful_payment(
         transaction=transaction,
         payment_price=payment_price,
         seller_user_id=seller_user_id,
+        platform_fee=platform_fee,
         payment_amount=payment_amount,
     )
 
@@ -345,7 +366,7 @@ def _handle_successful_payment(
     )
 
     # ユーザープロバイダー情報を更新または作成
-    _update_or_create_user_provider(db, transaction, send_id)
+    _update_or_create_user_provider(db, transaction, send_id, cardbrand, cardnumber, yuko)
 
     logger.info(f"Payment created: {payment.id}")
     logger.info(f"Subscription created: {subscription.id}")
@@ -529,6 +550,9 @@ async def payment_webhook(
     email: Optional[str] = Query(None),
     sendid: Optional[str] = Query(None),
     sendpoint: Optional[str] = Query(None),
+    cardbrand: Optional[str] = Query(None),
+    cardnumber: Optional[str] = Query(None),
+    yuko: Optional[str] = Query(None),
     result: Optional[str] = Query(None),
     money: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -548,14 +572,16 @@ async def payment_webhook(
         money: 決済金額
     """
     try:
-        _log_webhook_received(clientip, telno, email, sendid, sendpoint, result, money)
+        _log_webhook_received(clientip, telno, email, sendid, sendpoint, result, money, cardbrand, cardnumber, yuko)
 
         # sendpointからtransaction_idを抽出
         if not sendpoint:
             logger.error("sendpoint is required")
             return PlainTextResponse(content=CREDIX_SUCCESS_RESPONSE, status_code=200)
 
-        transaction_id = sendpoint
+
+        transaction_origin = sendpoint.split("_")[0]
+        transaction_id = sendpoint.split("_")[1]
 
         # トランザクション取得
         transaction = payment_transactions_crud.get_transaction_by_id(
@@ -569,8 +595,14 @@ async def payment_webhook(
         is_success = result == "ok"
         payment_amount = money if money else 0
 
+
         if is_success:
-            _handle_successful_payment(db, transaction, payment_amount, sendid, email)
+            # フロントエンドからのリクエストの場合は決済処理を行う
+            if transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT:
+                _handle_successful_payment(db, transaction, payment_amount, sendid, email, cardbrand, cardnumber, yuko)
+            else:
+                # TODO: バッチからのリクエストの場合は決済処理を行う
+                return
         else:
             _handle_failed_payment(db, transaction)
 

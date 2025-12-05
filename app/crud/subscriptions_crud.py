@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 from app.models.subscriptions import Subscriptions
 from datetime import datetime
 from typing import Optional
+from fastapi import HTTPException
 from sqlalchemy import or_
 
 from app.models.prices import Prices
 from app.models.plans import Plans, PostPlans
 from datetime import datetime, timezone
+from app.constants.enums import SubscriptionStatus, SubscriptionType, PaymentTransactionType
 
 
 def create_subscription(
@@ -97,3 +99,53 @@ def check_viewing_rights(db: Session, post_id: str, user_id: str | None) -> bool
     )
 
     return subscription is not None
+
+
+def cancel_subscription(db: Session, plan_id: str, user_id: UUID):
+    """
+    サブスクリプションをキャンセル
+    
+    Note: order_typeの値について
+    - payment.pyの_create_subscription_recordでは order_type=transaction.type を使用
+    - PaymentTransactionType.SUBSCRIPTION = 2 がプラン購読
+    - したがって、プラン購読の場合は order_type=2 となる
+    """
+    subscription = (
+        db.query(Subscriptions)
+        .filter(
+            Subscriptions.order_id == plan_id,
+            Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,  # 2 = プラン購読
+            Subscriptions.user_id == user_id,
+            Subscriptions.status == SubscriptionStatus.ACTIVE,
+            Subscriptions.canceled_at.is_(None)  # まだキャンセルされていない
+        )
+        .first()
+    )
+    if not subscription:
+        # デバッグ用: 該当するサブスクリプションが存在するか確認
+        all_subscriptions = (
+            db.query(Subscriptions)
+            .filter(
+                Subscriptions.order_id == plan_id,
+                Subscriptions.user_id == user_id
+            )
+            .all()
+        )
+        if not all_subscriptions:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Subscription not found for plan_id={plan_id}, user_id={user_id}"
+            )
+        else:
+            # サブスクリプションは存在するが、条件に一致しない
+            details = [f"order_type={s.order_type}, status={s.status}, canceled_at={s.canceled_at}" 
+                      for s in all_subscriptions]
+            raise HTTPException(
+                status_code=404,
+                detail=f"Active subscription not found. Found subscriptions: {details}"
+            )
+    subscription.status = SubscriptionStatus.CANCELED
+    subscription.canceled_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(subscription)
+    return subscription

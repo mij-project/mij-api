@@ -23,7 +23,6 @@ class CredixClient:
         self,
         sendid: str,
         money: int,
-        telno: str | None = None,
         email: str | None = None,
         search_type: int | None = None,
         use_seccode: bool = True,
@@ -39,7 +38,6 @@ class CredixClient:
         Args:
             sendid: カードID（初回決済の場合は新規生成、リピーター決済の場合は既存のもの）
             money: 決済金額
-            telno: 電話番号
             email: メールアドレス
             search_type: 会員検索条件（1=clientip+telno+sendid, 2=clientip+sendid）※リピーター決済時のみ使用
             use_seccode: セキュリティコード入力要否
@@ -74,19 +72,8 @@ class CredixClient:
             "money": money,
             "sendid": sendid,
             "redirect_type": 2,  # 成功時のみリダイレクト
+            "search_type": 2
         }
-
-        # リピーター決済の場合はsearch_typeを追加
-        if is_repeater:
-            params["search_type"] = search_type
-            # search_type=1の場合は電話番号必須
-            if search_type == 1:
-                if not telno:
-                    raise ValueError("telno is required when search_type=1")
-                params["telno"] = telno
-            # search_type=2でもtelnoが指定されている場合は送信
-            elif telno:
-                params["telno"] = telno
 
         # リダイレクトURL
         if success_url:

@@ -25,6 +25,10 @@ class UserProviders(Base):
     # CredixカードID
     sendid: Mapped[Optional[str]] = mapped_column(String(25), nullable=True, index=True, comment="CredixカードID（リピーター決済用）")
 
+    cardbrand: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, comment="カードブランド")
+    cardnumber: Mapped[Optional[str]] = mapped_column(String(4), nullable=True, comment="カード番号")
+    yuko: Mapped[Optional[str]] = mapped_column(String(4), nullable=True, comment="有効期限")
+
     # カード情報の有効性
     is_valid: Mapped[bool] = mapped_column(nullable=False, default=True, comment="カード情報が有効か")
 

@@ -3,11 +3,10 @@ User Providers CRUD操作
 """
 from uuid import UUID
 from sqlalchemy.orm import Session
-from sqlalchemy import select
 from app.models.user_providers import UserProviders
 from datetime import datetime
 from app.core.logger import Logger
-
+from typing import Optional
 logger = Logger.get_logger()
 
 
@@ -33,7 +32,10 @@ def create_user_provider(
     db: Session,
     user_id: UUID,
     provider_id: UUID,
-    sendid: str
+    sendid: str,
+    cardbrand: Optional[str],
+    cardnumber: Optional[str],
+    yuko: Optional[str],
 ) -> UserProviders:
     """ユーザープロバイダー情報作成"""
     user_provider = UserProviders(
@@ -41,7 +43,10 @@ def create_user_provider(
         provider_id=provider_id,
         sendid=sendid,
         is_valid=True,
-        last_used_at=datetime.utcnow()
+        last_used_at=datetime.utcnow(),
+        cardbrand=cardbrand,
+        cardnumber=cardnumber,
+        yuko=yuko,
     )
     db.add(user_provider)
     db.commit()
@@ -67,4 +72,17 @@ def get_user_provider_by_sendid(
 ) -> UserProviders | None:
     """sendidからユーザープロバイダー情報取得"""
     result = db.query(UserProviders).filter(UserProviders.sendid == sendid).first()
+    return result
+
+def get_user_providers_by_user_id(
+    db: Session,
+    user_id: UUID
+) -> list[UserProviders]:
+    """
+    ユーザーIDから全てのプロバイダー情報を取得
+    """
+    result = db.query(UserProviders).filter(
+        UserProviders.user_id == user_id,
+        UserProviders.is_valid == True
+    ).order_by(UserProviders.last_used_at.desc()).all()
     return result

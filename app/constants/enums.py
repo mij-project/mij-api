@@ -269,4 +269,7 @@ class SubscriptionStatus:
     ACTIVE = 1 # 有効
     CANCELED = 2 # 期末まで視聴可
     EXPIRED = 3 # キャンセル
-    REFUNDED = 4 # 返金済み
+
+class TransactionType:
+    PAYMENT_ORIGIN_BATCH = "B" # バッチからのリクエスト 
+    PAYMENT_ORIGIN_FRONT = "F" # フロントエンドからのリクエスト

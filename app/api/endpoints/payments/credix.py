@@ -21,7 +21,7 @@ from app.models.providers import Providers
 from app.models.plans import Plans
 from app.models.prices import Prices
 from app.constants.number import PaymentPlanPlatformFeePercent
-from app.constants.enums import PaymentTransactionType
+from app.constants.enums import PaymentTransactionType, TransactionType
 from app.constants.messages import CredixMessage    
 from app.core.logger import Logger
 import os
@@ -92,14 +92,13 @@ async def create_credix_session(
         )
 
         # sendpointにtransaction_idを含める
-        sendpoint = str(transaction.id)
+        sendpoint = TransactionType.PAYMENT_ORIGIN_FRONT + "_" + str(transaction.id)
 
         # CREDIXセッション発行API呼び出し（初回決済・リピーター決済共通）
         try:
             session_data = await credix_client.create_session(
                 sendid=sendid,
                 money=money,
-                telno=request.telno,
                 email=current_user.email if current_user else None,
                 sendpoint=sendpoint,
                 success_url=success_url,

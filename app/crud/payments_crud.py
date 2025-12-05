@@ -20,6 +20,7 @@ def create_payment(
     payment_amount: int,
     payment_price: int,
     status: int = 2,  # 2=succeeded
+    platform_fee: int = 0, # プラットフォーム手数料
 ) -> Payments:
     """決済履歴作成"""
     payment = Payments(
@@ -34,7 +35,8 @@ def create_payment(
         payment_amount=payment_amount,
         payment_price=payment_price,
         status=status,
-        paid_at=datetime.utcnow()
+        paid_at=datetime.utcnow(),
+        platform_fee=platform_fee,
     )
     db.add(payment)
     db.commit()

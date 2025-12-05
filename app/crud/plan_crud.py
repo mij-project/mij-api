@@ -8,6 +8,7 @@ from app.schemas.purchases import SinglePurchaseResponse
 from app.constants.enums import PlanStatus, PlanLifecycleStatus
 from datetime import datetime, timezone
 from app.models.profiles import Profiles
+from app.models.creators import Creators
 from app.models.plans import PostPlans
 from app.models.posts import Posts
 from app.models.media_assets import MediaAssets
@@ -219,6 +220,17 @@ def get_plan_by_id(db: Session, plan_id: UUID) -> Plans:
     プランをIDで取得
     """
     return db.query(Plans).filter(Plans.id == plan_id).first()
+
+def get_plan_and_creator_by_id(db: Session, plan_id: UUID) -> tuple[Plans, Creators]:
+    """
+    プランとクリエイター情報を取得
+    """
+    return (
+        db.query(Plans, Creators)
+        .join(Creators, Plans.creator_user_id == Creators.user_id)
+        .filter(Plans.id == plan_id)
+        .first()
+    )
 
 def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
     """

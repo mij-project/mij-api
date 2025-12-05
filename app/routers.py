@@ -8,7 +8,7 @@ from app.api.endpoints.customer import (
     transcode_mc, top, category, ranking, social,
     preregistrations, account, auth_email_verify,
     conversations, order, sms_verifications, banners, video_temp, notifications as customer_notifications,
-    search, creator_type, password_reset, user_settings, generation_media
+    search, creator_type, password_reset, user_settings, generation_media, subscriptions, user_provider
 )
 
 # Admin routes
@@ -74,6 +74,9 @@ api_router.include_router(search.router, prefix="", tags=["Search"])
 api_router.include_router(creator_type.router, prefix="/creator-type", tags=["Creator Type"])
 api_router.include_router(user_settings.router, prefix="/user-settings", tags=["User Settings"])
 api_router.include_router(generation_media.router, prefix="/generation-media", tags=["Generation Media"])
+api_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
+api_router.include_router(user_provider.router, prefix="/user-provider", tags=["User Provider"])
+
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])
 # Admin routes

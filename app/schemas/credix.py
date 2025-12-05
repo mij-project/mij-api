@@ -18,7 +18,6 @@ class CredixSessionRequest(BaseModel):
     purchase_type: PurchaseType = Field(..., description="購入タイプ（single/subscription）")
     plan_id: Optional[str] = Field(None, description="プランID（サブスクリプションの場合）")
     price_id: Optional[str] = Field(None, description="価格ID（単発購入の場合）")
-    telno: str = Field(..., min_length=10, max_length=11, description="電話番号")
 
 
 class CredixSessionResponse(BaseModel):
