@@ -187,6 +187,7 @@ def _create_payment_record(
     seller_user_id: UUID,
     payment_amount: int,
     platform_fee: int,
+    status: int = PaymentStatus.SUCCEEDED,
 ) -> Payments:
     """
     決済レコードを作成
@@ -213,7 +214,7 @@ def _create_payment_record(
         seller_user_id=seller_user_id,
         payment_amount=payment_amount,
         payment_price=payment_price,
-        status=PaymentStatus.SUCCEEDED,
+        status=status,
         platform_fee=platform_fee,
     )
 
@@ -375,6 +376,7 @@ def _handle_successful_payment(
 def _handle_failed_payment(
     db: Session,
     transaction: PaymentTransactions,
+    payment_amount: int,
 ) -> None:
     """
     決済失敗時の処理
@@ -390,6 +392,25 @@ def _handle_failed_payment(
         db=db,
         transaction_id=transaction.id,
         status=PaymentTransactionStatus.FAILED,
+    )
+
+    # トランザクションを取得
+    payment_transaction = payment_transactions_crud.get_transaction_by_id(db, transaction.id)
+    if not payment_transaction:
+        logger.error(f"Payment transaction not found: {transaction.id}")
+        return
+
+    payment_price, seller_user_id, platform_fee = _get_order_info(db, payment_transaction)
+
+    # 決済レコードを作成
+    _create_payment_record(
+        db=db,
+        transaction=transaction,
+        payment_price=payment_price,
+        seller_user_id=seller_user_id,
+        platform_fee=platform_fee,
+        payment_amount=payment_amount,
+        status=PaymentStatus.FAILED,
     )
 
 def _send_payment_notifications_for_buyer(
@@ -604,7 +625,7 @@ async def payment_webhook(
                 # TODO: バッチからのリクエストの場合は決済処理を行う
                 return
         else:
-            _handle_failed_payment(db, transaction)
+            _handle_failed_payment(db, transaction, payment_amount)
 
         # 決済通知を送信
         _send_payment_notifications_for_buyer(
