@@ -207,7 +207,12 @@ def get_user_profile_by_username_endpoint(
                     currency="JPY",  # 通貨は固定（必要に応じてDBから取得）
                     type=plan.type,
                     post_count=plan_details["post_count"],
-                    thumbnails=plan_details["thumbnails"],
+                    plan_post=[
+                        {
+                            "description": post["description"],
+                            "thumbnail_url": f"{BASE_URL}/{post['storage_key']}"
+                        } for post in plan_details.get("plan_post", [])
+                    ],
                 )
             )
 

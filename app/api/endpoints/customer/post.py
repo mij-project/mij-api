@@ -453,11 +453,17 @@ def _format_sale_info(price: dict | None, plans: list | None):
         },
         "plans": [
             {
-                "id": str(plan.id) if plan else None,
-                "name": plan.name if plan else None,
-                "description": plan.description if plan else None,
-                "price": plan.price if plan else None,
+                "id": str(plan["id"]) if plan and "id" in plan else None,
+                "name": plan["name"] if plan and "name" in plan else None,
+                "description": plan.get("description") if plan else None,
+                "price": plan.get("price") if plan else None,
+                "plan_post": [
+                    {
+                        "description": post["description"],
+                        "thumbnail_url": f"{CDN_BASE_URL}/{post["thumbnail_url"]}"
+                    } for post in plan.get("plan_post", [])
+                ] if plan and "plan_post" in plan else [],
             }
-            for plan in plans
+            for plan in (plans or [])
         ]
     }

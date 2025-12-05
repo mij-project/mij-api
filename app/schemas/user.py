@@ -2,7 +2,7 @@
 from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -46,7 +46,7 @@ class ProfilePlanResponse(BaseModel):
     currency: str = "JPY"
     type: Optional[int] = 1  # 1: 通常プラン, 2: おすすめプラン
     post_count: Optional[int] = 0
-    thumbnails: Optional[List[str]] = []
+    plan_post: Optional[List[Dict[str, str]]] = []
 
 class ProfilePurchaseResponse(BaseModel):
     id: UUID

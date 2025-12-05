@@ -74,8 +74,8 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
     プランの詳細情報を取得（投稿数、サムネイル）
     """
     # プランに紐づく投稿のサムネイルを取得（最大3枚）
-    thumbnails_query = (
-        db.query(MediaAssets.storage_key)
+    plan_posts_query = (
+        db.query(Posts.description, MediaAssets.storage_key)
         .join(Posts, MediaAssets.post_id == Posts.id)
         .join(PostPlans, Posts.id == PostPlans.post_id)
         .filter(PostPlans.plan_id == plan_id)
@@ -86,7 +86,14 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
         .all()
     )
 
-    thumbnails = [f"{BASE_URL}/{thumb.storage_key}" for thumb in thumbnails_query]
+    # plan_postを辞書形式で返す
+    plan_post = [
+        {
+            "description": post.description if hasattr(post, 'description') else post[0],
+            "storage_key": post.storage_key if hasattr(post, 'storage_key') else post[1]
+        }
+        for post in plan_posts_query
+    ]
 
     # プランに紐づく投稿数を取得
     post_count = (
@@ -99,7 +106,7 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
     )
 
     return {
-        "thumbnails": thumbnails,
+        "plan_post": plan_post,
         "post_count": post_count or 0
     }
 

@@ -1162,39 +1162,39 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
     price = db.query(Prices).filter(Prices.post_id == post_id).first()
 
     # Planテーブルからプラン金額を取得（post_plansテーブルを経由）
-    # プランに紐づく投稿のサムネイル情報も取得
     plans_query = (
-        db.query(Plans, PostPlans.post_id)
+        db.query(Plans)
         .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(PostPlans.post_id == post_id)
         .all()
     )
 
-    # 各プランに投稿のサムネイル情報を追加
+    # プランにサムネイル情報を追加
     plans_with_thumbnails = []
-    for plan, plan_post_id in plans_query:
-        # プランに紐づく投稿のサムネイル画像を取得
-        thumbnail = (
-            db.query(MediaAssets)
-            .filter(
-                MediaAssets.post_id == plan_post_id,
-                MediaAssets.kind == MediaAssetKind.THUMBNAIL
-            )
-            .first()
+    for plan in plans_query:
+        # プランに紐づく投稿のサムネイル画像を取得（最大3枚）
+        plan_post_info = (
+            db.query(MediaAssets.storage_key, Posts.description)
+            .join(Posts, MediaAssets.post_id == Posts.id)
+            .join(PostPlans, MediaAssets.post_id == PostPlans.post_id)
+            .filter(PostPlans.plan_id == plan.id)
+            .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+            .limit(3)
+            .all()
         )
 
-        # サムネイルURLを構築
-        thumbnail_url = None
-        if thumbnail:
-            thumbnail_url = f"{CDN_BASE_URL}/{thumbnail.storage_key}"
-
-        # プランオブジェクトに追加情報を設定
-        plan_dict = {
-            "plan": plan,
-            "thumbnail_url": thumbnail_url,
-            "post_id": plan_post_id
-        }
-        plans_with_thumbnails.append(plan_dict)
+        plans_with_thumbnails.append({
+            "id": plan.id,
+            "name": plan.name,
+            "description": plan.description,
+            "price": plan.price,
+            "plan_post": [
+                {
+                    "description": post.description,
+                    "thumbnail_url": post.storage_key
+                } for post in plan_post_info
+            ]
+        })
 
     return {"price": price, "plans": plans_with_thumbnails}
 
