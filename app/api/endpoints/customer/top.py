@@ -49,7 +49,8 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                     name=p.profile_name,
                     username=p.username,
                     avatar_url=f"{BASE_URL}/{p.avatar_url}" if p.avatar_url else None,
-                    verified=False
+                    verified=False,
+                    official=p.offical_flg if hasattr(p, 'offical_flg') else False
                 ),
             ) for idx, p in enumerate(ranking_posts)],
             top_creators=[CreatorResponse(
@@ -60,7 +61,8 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                 followers=c.followers_count,
                 rank=idx + 1,
                 follower_ids=[str(x)for x in c.follower_ids],
-                likes=c.likes_count
+                likes=c.likes_count,
+                official=c.Users.offical_flg if hasattr(c.Users, 'offical_flg') else False
             ) for idx, c in enumerate(top_creators)],
             new_creators=[CreatorResponse(
                 id=str(c.Users.id),
@@ -68,6 +70,7 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                 username=c.username,
                 avatar=f"{BASE_URL}/{c.avatar_url}" if c.avatar_url else None,
                 followers=0,
+                official=c.Users.offical_flg if hasattr(c.Users, 'offical_flg') else False
             ) for c in new_creators],
             recent_posts=[RecentPostResponse(
                 id=str(p.Posts.id),
@@ -80,7 +83,8 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                     name=p.profile_name,
                     username=p.username,
                     avatar_url=f"{BASE_URL}/{p.avatar_url}" if p.avatar_url else None,
-                    verified=False
+                    verified=False,
+                    official=p.offical_flg if hasattr(p, 'offical_flg') else False
                 )
             ) for p in recent_posts]
         )

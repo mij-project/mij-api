@@ -84,6 +84,7 @@ def search(
                         followers_count=r.followers_count,
                         is_verified=r.is_verified,
                         posts_count=r.posts_count,
+                        official=r.offical_flg if hasattr(r, 'offical_flg') and r.offical_flg is not None else False,
                         recent_posts=recent_posts
                     )
                 )

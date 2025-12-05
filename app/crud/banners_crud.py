@@ -444,8 +444,8 @@ def get_pre_register_users_random(
             "id": str(user.id),
             "profile_name": user.profile_name,
             "username": username,
-            "avatar_url": f"{CDN_URL}/{avatar_url}" if avatar_url else f"{FRONTEND_URL}/assets/mijfans.png",
-            "cover_url": f"{CDN_URL}/{cover_url}" if cover_url else f"{FRONTEND_URL}/assets/no-image.svg",
+            "avatar_url": f"{CDN_URL}/{avatar_url}" if avatar_url else f"{FRONTEND_URL}/assets/no-image.svg ",
+            "cover_url": f"{CDN_URL}/{cover_url}" if cover_url else f"{FRONTEND_URL}/assets/mijfans.png",
         })
 
     return users

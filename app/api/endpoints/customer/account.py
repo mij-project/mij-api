@@ -555,7 +555,7 @@ def get_bookmarks(
         bookmarks_data = get_bookmarked_posts_by_user_id(db, current_user.id)
 
         bookmarks = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, bookmarked_at in bookmarks_data:
+        for post, profile_name, offical_flg, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, bookmarked_at in bookmarks_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -570,6 +570,7 @@ def get_bookmarks(
                 creator_avatar=f"{BASE_URL}/{avatar_url}" if avatar_url else None,
                 creator_name=profile_name,
                 creator_username=username,
+                official=offical_flg if offical_flg is not None else False,
                 likes_count=likes_count or 0,
                 comments_count=comments_count or 0,
                 duration=duration,
@@ -597,7 +598,7 @@ def get_likes(
         liked_posts_data = get_liked_posts_list_by_user_id(db, current_user.id)
 
         liked_posts = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, liked_at in liked_posts_data:
+        for post, profile_name, offical_flg, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, post_price, post_currency, liked_at in liked_posts_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -612,6 +613,7 @@ def get_likes(
                 creator_avatar=f"{BASE_URL}/{avatar_url}" if avatar_url else None,
                 creator_name=profile_name,
                 creator_username=username,
+                official=offical_flg if offical_flg is not None else False,
                 likes_count=likes_count or 0,
                 comments_count=comments_count or 0,
                 duration=duration,
@@ -639,7 +641,7 @@ def get_bought(
         bought_posts_data = get_bought_posts_by_user_id(db, current_user.id)
 
         bought_posts = []
-        for post, profile_name, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count, purchased_at in bought_posts_data:
+        for post, profile_name, offical_flg, username, avatar_url, thumbnail_key, duration_sec, likes_count, comments_count in bought_posts_data:
             # 動画時間をフォーマット
             duration = None
             if duration_sec:
@@ -654,11 +656,12 @@ def get_bought(
                 creator_avatar=f"{BASE_URL}/{avatar_url}" if avatar_url else None,
                 creator_name=profile_name,
                 creator_username=username,
+                official=offical_flg if offical_flg is not None else False,
                 likes_count=likes_count or 0,
                 comments_count=comments_count or 0,
                 duration=duration,
                 is_video=(post.post_type == 2),  # 2が動画
-                created_at=purchased_at
+                created_at=post.created_at
             )
             bought_posts.append(bought_post)
 
