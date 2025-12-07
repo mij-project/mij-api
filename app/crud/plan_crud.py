@@ -5,7 +5,7 @@ from uuid import UUID
 from typing import List, Optional
 from app.schemas.plan import PlanCreateRequest, PlanResponse, SubscribedPlanResponse
 from app.schemas.purchases import SinglePurchaseResponse
-from app.constants.enums import PlanStatus, PlanLifecycleStatus
+from app.constants.enums import PlanStatus, PlanLifecycleStatus, ItemType
 from datetime import datetime, timezone
 from app.models.profiles import Profiles
 from app.models.creators import Creators
@@ -195,7 +195,7 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 db.query(func.count(Subscriptions.id))
                 .filter(
                     Subscriptions.order_id == str(plan.id),
-                    Subscriptions.order_type == 1,  # 1=plan_id
+                    Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
                     Subscriptions.status == 1,
                     Subscriptions.canceled_at.is_(None)
                 )
@@ -280,14 +280,14 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
     )
 
     # サブスクリプション状態を確認
+    # order_id = プランID, order_type = 2 (ItemType.PLAN), status = 1 (ACTIVE) で判定
     is_subscribed = (
         db.query(Subscriptions)
         .filter(
             Subscriptions.user_id == current_user_id,
             Subscriptions.order_id == str(plan_id),
-            Subscriptions.order_type == 1,  # 1=plan_id
-            Subscriptions.status == 1,
-            Subscriptions.canceled_at.is_(None),
+            Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
+            Subscriptions.status == 1,  # 1=ACTIVE (視聴権限あり)
         )
         .first() is not None
     )
@@ -451,7 +451,7 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
         db.query(func.count(Subscriptions.id))
         .filter(
             Subscriptions.order_id == str(plan_id),
-            Subscriptions.order_type == 1,  # 1=plan_id
+            Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
             Subscriptions.status == 1,
             Subscriptions.canceled_at.is_(None)
         )
@@ -472,7 +472,7 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
         .join(Profiles, Users.id == Profiles.user_id)
         .filter(
             Subscriptions.order_id == str(plan_id),
-            Subscriptions.order_type == 1,  # 1=plan_id
+            Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
             Subscriptions.status == 1,
             Subscriptions.canceled_at.is_(None)
         )

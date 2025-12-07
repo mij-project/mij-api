@@ -28,6 +28,7 @@ from app.constants.enums import (
     SubscriptionType,
     SubscriptionStatus,
     TransactionType,
+    ItemType,
 )
 from app.services.email.send_email import send_payment_succuces_email, send_payment_faild_email, send_selling_info_email, send_cancel_subscription_email, send_buyer_cancel_subscription_email
 from app.models.payment_transactions import PaymentTransactions
@@ -227,13 +228,13 @@ def _create_subscription_record(
 ) -> Subscriptions:
     """
     サブスクリプションレコードを作成
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
         seller_user_id: 売主ユーザーID
         payment_id: 決済ID
-        
+
     Returns:
         作成されたサブスクリプションレコード
     """
@@ -244,6 +245,16 @@ def _create_subscription_record(
         SubscriptionType.PLAN
         if transaction.type == PaymentTransactionType.SUBSCRIPTION
         else SubscriptionType.SINGLE
+    )
+
+    # order_typeはItemTypeを使用
+    # PaymentTransactionType.SUBSCRIPTION(2) -> ItemType.PLAN(2) ※プランID
+    # PaymentTransactionType.SINGLE(1) -> ItemType.POST(1) ※投稿ID (price_idではなく)
+    # 注意: 単品購入の場合、order_idにはprice_idが入るため、order_typeはItemType.POST(1)とする
+    order_type = (
+        ItemType.PLAN
+        if transaction.type == PaymentTransactionType.SUBSCRIPTION
+        else ItemType.POST
     )
 
     access_start = datetime.now(timezone.utc)
@@ -260,7 +271,7 @@ def _create_subscription_record(
         user_id=transaction.user_id,
         creator_id=seller_user_id,
         order_id=transaction.order_id,
-        order_type=transaction.type,
+        order_type=order_type,
         access_start=access_start,
         access_end=access_end,
         next_billing_date=next_billing_date,

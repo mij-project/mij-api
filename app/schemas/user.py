@@ -47,6 +47,7 @@ class ProfilePlanResponse(BaseModel):
     type: Optional[int] = 1  # 1: 通常プラン, 2: おすすめプラン
     post_count: Optional[int] = 0
     plan_post: Optional[List[Dict[str, str]]] = []
+    is_subscribed: Optional[bool] = False  # 現在のユーザーが加入済みかどうか
 
 class ProfilePurchaseResponse(BaseModel):
     id: UUID

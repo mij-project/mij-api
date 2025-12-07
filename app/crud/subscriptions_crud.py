@@ -197,3 +197,33 @@ def update_subscription_status(db: Session, subscription_id: UUID, status: int):
     db.commit()
     db.refresh(subscription)
     return subscription
+
+
+def create_free_subscription(
+    db: Session,
+    access_type: int,  # 1=plan_subscription, 2=one_time_purchase
+    user_id: UUID,
+    creator_id: UUID,
+    order_id: str,
+    order_type: int,  # ItemType.PLAN or ItemType.POST
+    payment_id: UUID,
+) -> Subscriptions:
+    """0円プラン・商品用のサブスクリプション作成（無期限）"""
+    subscription = Subscriptions(
+        access_type=access_type,
+        user_id=user_id,
+        creator_id=creator_id,
+        order_id=order_id,
+        order_type=order_type,
+        access_start=datetime.now(timezone.utc),
+        access_end=None,  # 無期限
+        next_billing_date=None,  # 無期限なので課金なし
+        provider_id=None,  # 0円なのでプロバイダーなし
+        payment_id=payment_id,
+        status=SubscriptionStatus.ACTIVE,
+        cancel_at_period_end=False,
+        failed_payment_count=0
+    )
+    db.add(subscription)
+    db.flush()
+    return subscription

@@ -389,13 +389,8 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
     set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
     set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
 
-    # 単品販売で価格が0の場合フラグを立てる
-    free_flg = True if price and price.price == 0 else False
-
-    if free_flg:
-        set_file_name = "_1080w.webp"
-        set_media_kind = MediaAssetKind.MAIN_VIDEO
-
+    # 単品販売で価格が0の場合、画像のみブラーなしで表示（動画は通常通りis_entitlementで判定）
+    free_image_flg = True if price and price.price == 0 else False
 
     media_info = []
     thumbnail_key = None
@@ -403,13 +398,15 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
         elif media_asset.kind == MediaAssetKind.IMAGES:
+            # 画像の場合: 0円ならブラーなし、それ以外は通常のset_file_nameを使用
+            image_file_name = "_1080w.webp" if free_image_flg else set_file_name
             media_info.append({
                 "kind": media_asset.kind,
                 "duration": media_asset.duration_sec,
                 "media_assets_id": media_asset.id,
                 "orientation": media_asset.orientation,
                 "post_id": media_asset.post_id,
-                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{set_file_name}"
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{image_file_name}"
             })
         elif media_asset.kind == set_media_kind:
             media_info.append({
