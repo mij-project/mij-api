@@ -41,6 +41,8 @@ CDN_BASE_URL = os.environ.get('CDN_BASE_URL')
 logger = Logger.get_logger()
 router = APIRouter()
 
+FREE_ORDER_ID = "FREE_ORDER"
+
 # CREDIXへのレスポンス
 CREDIX_SUCCESS_RESPONSE = "successok"
 CREDIX_ERROR_RESPONSE = "error"
@@ -288,6 +290,7 @@ def _update_or_create_user_provider(
     cardbrand: Optional[str],
     cardnumber: Optional[str],
     yuko: Optional[str],
+    main_card: bool,
 ) -> None:
     """
     ユーザープロバイダー情報を更新または作成
@@ -313,6 +316,7 @@ def _update_or_create_user_provider(
             cardbrand=cardbrand,
             cardnumber=cardnumber,
             yuko=yuko,
+            main_card=main_card,
         )
         logger.info(
             f"Created user_provider: user_id={transaction.user_id}, sendid={send_id}"
@@ -357,37 +361,52 @@ def _handle_successful_payment(
         status=PaymentTransactionStatus.COMPLETED,
     )
 
-    # 注文情報を取得
-    try:
-        payment_price, seller_user_id, platform_fee = _get_order_info(db, transaction)
-    except ValueError as e:
-        logger.error(str(e))
-        raise
+    if transaction_origin == TransactionType.PAYMENT_ORIGIN_FREE:
+        # 0円決済（無料）の決済レコードを作成
+        payment = _create_payment_record(
+            db=db,
+            transaction=transaction,
+            payment_price=0,
+            seller_user_id=transaction.user_id,
+            platform_fee=0,
+            payment_amount=0,
+            status=PaymentStatus.SUCCEEDED,
+        )
+        logger.info(f"Free payment created: {payment.id}")
 
-    # 決済レコードを作成
-    payment = _create_payment_record(
-        db=db,
-        transaction=transaction,
-        payment_price=payment_price,
-        seller_user_id=seller_user_id,
-        platform_fee=platform_fee,
-        payment_amount=payment_amount,
-        status=PaymentStatus.SUCCEEDED,
-    )
+    else:
+         # 注文情報を取得
+        try:
+            payment_price, seller_user_id, platform_fee = _get_order_info(db, transaction)
+        except ValueError as e:
+            logger.error(str(e))
+            raise
 
-    # サブスクリプションレコードを作成
-    subscription = _create_subscription_record(
-        db=db,
-        transaction=transaction,
-        seller_user_id=seller_user_id,
-        payment_id=payment.id,
-    )
+        # 決済レコードを作成
+        payment = _create_payment_record(
+            db=db,
+            transaction=transaction,
+            payment_price=payment_price,
+            seller_user_id=seller_user_id,
+            platform_fee=platform_fee,
+            payment_amount=payment_amount,
+            status=PaymentStatus.SUCCEEDED,
+        )
+
+        # サブスクリプションレコードを作成
+        subscription = _create_subscription_record(
+            db=db,
+            transaction=transaction,
+            seller_user_id=seller_user_id,
+            payment_id=payment.id,
+        )
+
+        logger.info(f"Payment created: {payment.id}")
+        logger.info(f"Subscription created: {subscription.id}")
 
     # ユーザープロバイダー情報を更新または作成
-    _update_or_create_user_provider(db, transaction, send_id, cardbrand, cardnumber, yuko)
-
-    logger.info(f"Payment created: {payment.id}")
-    logger.info(f"Subscription created: {subscription.id}")
+    main_card = True if transaction_origin == TransactionType.PAYMENT_ORIGIN_FREE else False
+    _update_or_create_user_provider(db, transaction, send_id, cardbrand, cardnumber, yuko, main_card)
 
 
 def _expire_existing_subscriptions(
@@ -758,24 +777,27 @@ async def payment_webhook(
         else:
             _handle_failed_payment(db, transaction, payment_amount, transaction_origin)
 
-        # 決済通知を送信 (バッチからの失敗時、またはフロントエンドからのリクエスト時)
-        _send_payment_notifications_for_buyer(
-            db=db,
-            result=result,
-            transaction=transaction,
-            send_id=sendid,
-            email=email,
-            money=money,
-            transaction_origin=transaction_origin,
-        )
+        
+        # 0円決済（無料）の場合は決済通知を送信しない
+        if transaction_origin != TransactionType.PAYMENT_ORIGIN_FREE:
+            # 決済通知を送信 (バッチからの失敗時、またはフロントエンドからのリクエスト時)
+            _send_payment_notifications_for_buyer(
+                db=db,
+                result=result,
+                transaction=transaction,
+                send_id=sendid,
+                email=email,
+                money=money,
+                transaction_origin=transaction_origin,
+            )
 
-        # 決済通知を追加
-        _add_payment_notifications_for_seller(
-            db=db,
-            result=result,
-            transaction=transaction,
-            transaction_origin=transaction_origin,
-        )
+            # 決済通知を追加
+            _add_payment_notifications_for_seller(
+                db=db,
+                result=result,
+                transaction=transaction,
+                transaction_origin=transaction_origin,
+            )
 
         # トランザクションをリフレッシュ
         db.refresh(transaction)

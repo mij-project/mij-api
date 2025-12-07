@@ -19,6 +19,10 @@ from app.api.commons.utils import get_video_duration
 from app.models.user import Users
 from sqlalchemy import func, and_, or_, String
 from app.constants.function import CommonFunction
+from app.constants.enums import PaymentTransactionType
+from app.models.payments import Payments
+from app.constants.enums import SubscriptionStatus
+from app.constants.enums import PaymentStatus
 import os
 from app.core.logger import Logger
 logger = Logger.get_logger()
@@ -35,8 +39,8 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
         db.query(Subscriptions)
         .filter(
             Subscriptions.user_id == user_id,
-            Subscriptions.access_type == 1,  # プラン購読
-            Subscriptions.status == 1  # active
+            Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,  # プラン購読
+            Subscriptions.status == SubscriptionStatus.ACTIVE  # active
         )
         .all()
     )
@@ -103,7 +107,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
                 PostPlans.plan_id == plan_id,
                 MediaAssets.kind == MediaAssetKind.THUMBNAIL,
                 Posts.deleted_at.is_(None),
-                Posts.status == 5  # APPROVED
+                Posts.status == PostStatus.APPROVED
             )
             .order_by(Posts.created_at.desc())
             .limit(4)
@@ -659,3 +663,59 @@ def get_single_purchases_by_user_id(db: Session, user_id: UUID) -> List[SinglePu
         ))
 
     return single_purchases
+
+
+def get_plan_monthly_sales(db: Session, creator_user_id: UUID) -> int:
+    """
+    クリエイターのプラン月間売上を取得
+    paymentsテーブルから、payment_type=1（サブスクリプション）で、
+    seller_user_id=creator_user_idのデータを集計
+    同じorder_idとbuyer_user_idの組み合わせは1回のみカウント（最新の支払いのみ）
+    """
+
+    # 今月の開始日を取得
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+    # サブクエリ: 各order_idとbuyer_user_idの組み合わせで最新の支払いのみ取得
+    subquery = (
+        db.query(
+            Payments.order_id,
+            Payments.buyer_user_id,
+            func.max(Payments.paid_at).label('latest_paid_at')
+        )
+        .filter(
+            Payments.seller_user_id == creator_user_id,
+            Payments.payment_type == PaymentTransactionType.SUBSCRIPTION,  # 1=SUBSCRIPTION
+            Payments.status == PaymentStatus.SUCCEEDED,  # 2=succeeded
+            Payments.paid_at >= month_start
+        )
+        .group_by(Payments.order_id, Payments.buyer_user_id)
+        .subquery()
+    )
+
+    # メインクエリ: 最新の支払いのpayment_priceからプラットフォーム手数料を引いた金額を合計
+    # payment_price - (payment_price * platform_fee / 100) の合計を計算（小数点は切り捨て）
+    total_sales = (
+        db.query(
+            func.sum(
+                func.floor(Payments.payment_price - (Payments.payment_price * Payments.platform_fee / 100))
+            )
+        )
+        .join(
+            subquery,
+            and_(
+                Payments.order_id == subquery.c.order_id,
+                Payments.buyer_user_id == subquery.c.buyer_user_id,
+                Payments.paid_at == subquery.c.latest_paid_at
+            )
+        )
+        .filter(
+            Payments.seller_user_id == creator_user_id,
+            Payments.payment_type == PaymentTransactionType.SUBSCRIPTION,
+            Payments.status == PaymentStatus.SUCCEEDED
+        )
+        .scalar()
+    )
+
+    return int(total_sales) if total_sales else 0

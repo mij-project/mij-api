@@ -30,6 +30,7 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://mijfans.jp")
 logger = Logger.get_logger()
 router = APIRouter(prefix="/credix", tags=["CREDIX決済"])
 
+FREE_ORDER_ID = "FREE_ORDER"
 
 @router.post("/session", response_model=CredixSessionResponse)
 async def create_credix_session(
@@ -151,63 +152,96 @@ async def create_credix_session(
         logger.error(f"CREDIX session creation failed: {e}")
         raise HTTPException(status_code=500, detail=f"CREDIX session creation failed: {str(e)}")
 
-
-@router.get("/result/{transaction_id}", response_model=CredixPaymentResultResponse)
-async def get_payment_result(
-    transaction_id: UUID,
+@router.post("/free/payment", response_model=CredixSessionResponse)
+async def create_credix_free_payment(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user_optional)
 ):
     """
-    決済結果確認
+    CREDIXセッション発行（カード登録）
 
-    - transaction_idから決済結果を取得
+    - user_providersテーブルを確認し、sendidの有無で初回/リピーター決済を判定
+    - セッションIDを発行し、payment_transactionsテーブルにレコード作成
+    - 初回決済: カード情報を毎回入力し、決済完了したカード情報をCREDIXサーバに保存
+    - リピーター決済: CREDIXサーバに保存されたカード情報を利用して決済処理を実行
     """
     try:
-        # トランザクション取得
-        transaction = payment_transactions_crud.get_transaction_by_id(db, transaction_id)
-        if not transaction:
-            raise HTTPException(status_code=404, detail="Transaction not found")
+        # CREDIXプロバイダーID取得
+        credix_provider = providers_crud.get_provider_by_code(db, "credix")
 
-        # ユーザー確認
-        if transaction.user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Forbidden")
+        # 決済完了後のリダイレクトURL
+        success_url = f"{FRONTEND_URL}/account/payment"
+        failure_url = f"{FRONTEND_URL}/account/payment"
 
-        # ステータス判定
-        status_map = {1: "pending", 2: "completed", 3: "failed"}
-        result_map = {2: "success", 3: "failure", 1: "pending"}
+        # sendid生成
+        sendid = generate_sendid(length=20)
 
-        # 関連するpayment, subscription取得
-        payment_id = None
-        subscription_id = None
+        # 決済金額計算
+        money = 0
+        order_id = FREE_ORDER_ID
+        transaction_type = PaymentTransactionType.FREE
 
-        if transaction.status == 2:  # completed
-            from app.models.payments import Payments
-            payment = db.query(Payments).filter(Payments.transaction_id == transaction.id).first()
-            if payment:
-                payment_id = str(payment.id)
+        # 決済トランザクション作成（仮のセッションID生成）
+        temp_session_id = generate_sendid(length=20)
 
-                from app.models.subscriptions import Subscriptions
-                subscription = db.query(Subscriptions).filter(Subscriptions.payment_id == payment.id).first()
-                if subscription:
-                    subscription_id = str(subscription.id)
-
-        return CredixPaymentResultResponse(
-            status=status_map.get(transaction.status, "pending"),
-            result=result_map.get(transaction.status, "pending"),
-            transaction_id=str(transaction.id),
-            payment_id=payment_id,
-            subscription_id=subscription_id
+        transaction = _create_transaction(
+            db=db,
+            current_user=current_user,
+            provider_id=credix_provider.id,
+            transaction_type=transaction_type,
+            session_id=temp_session_id,
+            order_id=order_id,
         )
+
+        # sendpointにtransaction_idを含める
+        sendpoint = TransactionType.PAYMENT_ORIGIN_FREE + "_" + str(transaction.id)
+
+        # CREDIXセッジン発行API呼び出し
+        try:
+            session_data = await credix_client.create_session(
+                sendid=sendid,
+                money=money,
+                email=current_user.email if current_user else None,
+                sendpoint=sendpoint,
+                success_url=success_url,
+                failure_url=failure_url,
+                is_repeater=False,  # リピーター決済ではない
+                search_type=2,  # clientip + sendid で会員を検索（デフォルト）
+                use_seccode=False,  # セキュリティコード入力を非表示
+                send_email=False,  # 決済完了メール送信を非表示
+            )
+        except Exception as e:
+            logger.error(f"CREDIX API error: {e}")
+            raise HTTPException(status_code=500, detail=f"CREDIX API error: {str(e)}")
+
+        if session_data["result"] != "ok":
+            error_msg = session_data.get("error_message", "Unknown error")
+            logger.error(f"CREDIX session creation failed: {error_msg}")
+            raise HTTPException(status_code=400, detail=f"CREDIX session creation failed: {error_msg}")
+
+        session_id = session_data["sid"]
+
+        # transaction の session_id を更新
+        transaction.session_id = session_id
+        db.commit()
+        db.refresh(transaction)
+
+        # 決済画面URL生成（初回決済・リピーター決済共通）
+        payment_url = credix_client.get_payment_url()
+
+        return CredixSessionResponse(
+            session_id=session_id,
+            payment_url=payment_url,
+            transaction_id=str(transaction.id),
+        )
+
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
-        if db is not None:
-            db.rollback()
-        logger.error(f"CREDIX payment result failed: {e}")
-        raise HTTPException(status_code=500, detail=f"CREDIX payment result failed: {str(e)}")
-
-
+        db.rollback()
+        logger.error(f"CREDIX free session creation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"CREDIX free session creation failed: {str(e)}")
 
 def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, int]:
     """決済金額設定"""

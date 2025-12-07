@@ -249,6 +249,7 @@ class GenerationMediaKind:
 class PaymentTransactionType:
     SINGLE = 1 # 単品購入
     SUBSCRIPTION = 2 # プラン購読
+    FREE = 3 # 0円決済（無料）
 
 
 class PaymentTransactionStatus:
@@ -268,6 +269,7 @@ class SubscriptionStatus:
 class TransactionType:
     PAYMENT_ORIGIN_BATCH = "B" # バッチからのリクエスト 
     PAYMENT_ORIGIN_FRONT = "F" # フロントエンドからのリクエスト
+    PAYMENT_ORIGIN_FREE = "G" # 0円決済（無料）
 
 class PaymentStatus:
     PENDING = 1 # 保留

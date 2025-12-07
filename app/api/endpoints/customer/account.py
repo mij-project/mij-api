@@ -53,9 +53,8 @@ from app.crud.post_crud import (
     update_post_by_creator
 )
 from app.crud.post_categries import get_post_categories
-from app.crud.plan_crud import get_plan_by_user_id, get_single_purchases_by_user_id
+from app.crud.plan_crud import get_plan_by_user_id, get_single_purchases_by_user_id, get_user_plans, get_plan_monthly_sales
 from app.crud.sales_crud import get_sales_summary_by_creator
-from app.crud.plan_crud import get_plan_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
 from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile, exist_profile_by_username
 from app.crud import profile_image_crud
@@ -153,8 +152,15 @@ def get_account_info(
             total_sales=sales or 0,
         )
 
-        # プラン情報
+        # プラン情報（加入中のプラン）
         plan_data = get_plan_by_user_id(db, current_user.id)
+
+        # クリエイターが作成・運用中のプラン情報を取得
+        creator_plans = get_user_plans(db, current_user.id)
+        creator_plan_count = len(creator_plans)
+
+        # プラン月間売上を取得（paymentsテーブルから集計）
+        creator_monthly_sales = get_plan_monthly_sales(db, current_user.id)
 
         # 単品購入データを取得
         single_purchases_raw = get_single_purchases_by_user_id(db, current_user.id)
@@ -187,8 +193,8 @@ def get_account_info(
             })
 
         plan_info = PlanInfo(
-            plan_count=plan_data["plan_count"] if plan_data else 0,
-            total_price=plan_data["total_price"] if plan_data else 0,
+            plan_count=creator_plan_count,  # クリエイターが作成したプラン数
+            total_price=creator_monthly_sales,  # プラン月間売上（paymentsテーブルから集計）
             subscribed_plan_count=plan_data["subscribed_plan_count"] if plan_data else 0,
             subscribed_total_price=plan_data["subscribed_total_price"] if plan_data else 0,
             subscribed_plan_details=subscribed_plan_details,
@@ -204,7 +210,7 @@ def get_account_info(
             plan_info=plan_info,
         )
     except Exception as e:
-        logger.error("アカウント情報取得エラーが発生しました", e)
+        logger.error(f"アカウント情報取得エラーが発生しました: {e}", exc_info=True)
         # エラー時はデフォルト値で返す
         return AccountInfoResponse(
             profile_info=ProfileInfo(
@@ -277,7 +283,7 @@ def get_profile_edit_info(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("プロフィール編集情報取得エラー:", e)
+        logger.error(f"プロフィール編集情報取得エラー: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/update", response_model=AccountUpdateResponse)
@@ -381,7 +387,7 @@ def update_account_info(
         )
 
     except Exception as e:
-        logger.error("アカウント情報更新エラーが発生しました", e)
+        logger.error(f"アカウント情報更新エラーが発生しました: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -422,7 +428,7 @@ def presign_upload(
 
         return AccountPresignResponse(uploads=uploads)
     except Exception as e:
-        logger.error("アップロードURL生成エラーが発生しました", e)
+        logger.error(f"アップロードURL生成エラーが発生しました: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/posts")
@@ -445,7 +451,7 @@ def get_post_status(
             reserved_posts=_convert_posts(posts_data["reserved_posts"])
         )
     except Exception as e:
-        logger.error("投稿ステータス取得エラーが発生しました", e)
+        logger.error(f"投稿ステータス取得エラーが発生しました: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/post/{post_id}", response_model=AccountPostDetailResponse)
@@ -525,7 +531,7 @@ def get_account_post_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("投稿詳細取得エラーが発生しました", e)
+        logger.error(f"投稿詳細取得エラーが発生しました: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -559,7 +565,7 @@ def get_plans(
             subscribed_plan_details=subscribed_plan_details,
         )
     except Exception as e:
-        logger.error("プラン一覧取得エラーが発生しました", e)
+        logger.error(f"プラン一覧取得エラーが発生しました: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/bookmarks", response_model=BookmarkedPostsResponse)
@@ -602,7 +608,7 @@ def get_bookmarks(
 
         return BookmarkedPostsResponse(bookmarks=bookmarks)
     except Exception as e:
-        logger.error("ブックマーク一覧取得エラー:", e)
+        logger.error(f"ブックマーク一覧取得エラー: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/likes", response_model=LikedPostsListResponse)
@@ -645,7 +651,7 @@ def get_likes(
 
         return LikedPostsListResponse(liked_posts=liked_posts)
     except Exception as e:
-        logger.error("いいね一覧取得エラー:", e)
+        logger.error(f"いいね一覧取得エラー: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/bought", response_model=BoughtPostsResponse)
@@ -686,7 +692,7 @@ def get_bought(
 
         return BoughtPostsResponse(bought_posts=bought_posts)
     except Exception as e:
-        logger.error("購入済み一覧取得エラー:", e)
+        logger.error(f"購入済み一覧取得エラー: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/profile-image/submit", response_model=ProfileImageSubmissionResponse)
@@ -731,7 +737,7 @@ def submit_profile_image(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("プロフィール画像申請エラー:", e)
+        logger.error(f"プロフィール画像申請エラー: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -753,7 +759,7 @@ def get_profile_image_status(
             cover_submission=submissions["cover_submission"]
         )
     except Exception as e:
-        logger.error("申請状況取得エラー:", e)
+        logger.error(f"申請状況取得エラー: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # データ変換用のヘルパー関数

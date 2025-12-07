@@ -27,6 +27,12 @@ class CredixSessionResponse(BaseModel):
     transaction_id: str = Field(..., description="トランザクションID（UUID）")
 
 
+class CredixSessionResponse(BaseModel):
+    """CREDIXセッション発行レスポンス"""
+    session_id: str = Field(..., description="セッションID")
+    payment_url: str = Field(..., description="決済画面URL")
+    transaction_id: str = Field(..., description="トランザクションID（UUID）")
+
 class CredixWebhookRequest(BaseModel):
     """CREDIX Webhook受信リクエスト"""
     result: str = Field(..., description="決済結果（OK/NG）")

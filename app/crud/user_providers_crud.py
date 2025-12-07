@@ -36,6 +36,7 @@ def create_user_provider(
     cardbrand: Optional[str],
     cardnumber: Optional[str],
     yuko: Optional[str],
+    main_card: bool,
 ) -> UserProviders:
     """ユーザープロバイダー情報作成"""
     user_provider = UserProviders(
@@ -47,6 +48,7 @@ def create_user_provider(
         cardbrand=cardbrand,
         cardnumber=cardnumber,
         yuko=yuko,
+        is_main_card=main_card,
     )
     db.add(user_provider)
     db.commit()
