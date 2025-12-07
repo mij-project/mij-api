@@ -245,3 +245,27 @@ class EventStatus:
 class GenerationMediaKind:
     PROFILE_IMAGE = 1 # プロフィール画像
     POST_IMAGE = 2 # 投稿画像
+
+class PaymentStatus:
+    PENDING = 1 # 保留
+    SUCCEEDED = 2 # 成功
+    FAILED = 3 # 失敗
+    REFUNDED = 4 # 返金
+    PARTIALLY_REFUNDED = 5 # 一部返金
+
+class WithdrawStatus:
+    PENDING = 1 # 保留
+    PROCESSING = 2 # 処理中
+    COMPLETED = 3 # 完了
+    FAILED = 4 # 失敗
+    CANCELLED = 5 # キャンセル
+    #1=pending, 2=processing, 3=completed, 4=failed, 5=cancelled
+
+class PaymentType:
+    PLAN = 1 # サブスクリプション
+    SINGLE = 2 # 単品購入
+
+class UserBankAccountType:
+    NORMAL = 1 # 普通
+    CURRENT = 2 # 当座
+    SAVINGS = 3 # 貯蓄
