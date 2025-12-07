@@ -319,6 +319,7 @@ def _handle_successful_payment(
     cardbrand: Optional[str],
     cardnumber: Optional[str],
     yuko: Optional[str],
+    transaction_origin: Optional[str],
 ) -> None:
     """
     決済成功時の処理
@@ -331,6 +332,7 @@ def _handle_successful_payment(
         cardbrand: カードブランド
         cardnumber: カード番号
         yuko: 有効期限
+        transaction_origin: トランザクションオリジン
     """
     logger.info(f"決済成功: transaction_id={transaction.id}")
 
@@ -356,6 +358,7 @@ def _handle_successful_payment(
         seller_user_id=seller_user_id,
         platform_fee=platform_fee,
         payment_amount=payment_amount,
+        status=PaymentStatus.SUCCEEDED,
     )
 
     # サブスクリプションレコードを作成

@@ -461,6 +461,33 @@ def send_selling_info_email(
         ctx=ctx,
         tags={"category": "selling_info"},
     )
+
+
+def send_cancel_subscription_email(
+    to: str,
+    user_name: str | None = None,
+    creator_user_name: str | None = None,
+    plan_name: str | None = None,
+    plan_url: str | None = None,
+) -> None:
+    """プラン解約通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】プラン解約通知"
+    ctx = {
+        "user_name": user_name,
+        "creator_user_name": creator_user_name,
+        "plan_name": plan_name,
+        "plan_url": plan_url,
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="cancel_subscription.html",
+        ctx=ctx,
+        tags={"category": "cancel_subscription"},
+    )
+
 # --------------------------
 # 実体：バックエンド切替
 # --------------------------

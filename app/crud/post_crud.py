@@ -397,7 +397,6 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
     プランに紐づく投稿一覧を取得
     ユーザーがそのプランを購入しているか確認してから返す
     """
-
     ThumbnailAssets = aliased(MediaAssets)
 
     # ユーザーがこのプランを購入しているか確認

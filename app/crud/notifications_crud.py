@@ -121,6 +121,21 @@ def add_notification_for_payment_succuces(
         logger.error(f"Add notification for payment succuces error: {e}")
         pass
 
+def add_notification_for_cancel_subscription(
+    db: Session,
+    notification: dict,
+) -> None:
+    """
+    プラン解約の通知を追加
+    """
+    try:
+        notification = Notifications(**notification)
+        db.add(notification)
+        db.commit()
+    except Exception as e:
+        logger.error(f"Add notification for cancel subscription error: {e}")
+        pass
+
 
 def add_notification_for_selling_info(
     db: Session,

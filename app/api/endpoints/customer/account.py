@@ -53,8 +53,9 @@ from app.crud.post_crud import (
     update_post_by_creator
 )
 from app.crud.post_categries import get_post_categories
-from app.crud.sales_crud import get_total_sales
 from app.crud.plan_crud import get_plan_by_user_id, get_single_purchases_by_user_id
+from app.crud.sales_crud import get_sales_summary_by_creator
+from app.crud.plan_crud import get_plan_by_user_id
 from app.crud.user_crud import check_profile_name_exists, update_user
 from app.crud.profile_crud import get_profile_by_user_id, get_profile_info_by_user_id, get_profile_edit_info_by_user_id, update_profile, exist_profile_by_username
 from app.crud import profile_image_crud
@@ -146,9 +147,10 @@ def get_account_info(
         )
         
         # 売上
-        total_sales = get_total_sales(db, current_user.id)
+        total_sales = get_sales_summary_by_creator(db, current_user.id)
+        sales = total_sales["cumulative_sales"] if total_sales is not None else 0
         sales_info = SalesInfo(
-            total_sales=total_sales or 0,
+            total_sales=sales or 0,
         )
 
         # プラン情報

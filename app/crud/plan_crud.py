@@ -17,7 +17,8 @@ from app.models.prices import Prices
 from app.constants.enums import MediaAssetKind
 from app.api.commons.utils import get_video_duration
 from app.models.user import Users
-from sqlalchemy import func, and_, String
+from sqlalchemy import func, and_, or_, String
+from app.constants.function import CommonFunction
 import os
 from app.core.logger import Logger
 logger = Logger.get_logger()
@@ -236,6 +237,8 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
     """
     プラン詳細情報を取得
     """
+    active_post_cond = CommonFunction.get_active_post_cond()
+    
     # プラン情報を取得
     plan = (
         db.query(Plans)
@@ -270,7 +273,8 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         .filter(
             PostPlans.plan_id == plan_id,
             Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
+            Posts.status == PostStatus.APPROVED,
+            active_post_cond
         )
         .scalar()
     )
@@ -283,7 +287,7 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
             Subscriptions.order_id == str(plan_id),
             Subscriptions.order_type == 1,  # 1=plan_id
             Subscriptions.status == 1,
-            Subscriptions.canceled_at.is_(None)
+            Subscriptions.canceled_at.is_(None),
         )
         .first() is not None
     )
@@ -308,6 +312,8 @@ def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, 
     """
     offset = (page - 1) * per_page
 
+    active_post_cond = CommonFunction.get_active_post_cond()
+
     # サムネイルと動画用のエイリアスを作成
     ThumbnailAssets = aliased(MediaAssets)
     VideoAssets = aliased(MediaAssets)
@@ -319,7 +325,8 @@ def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, 
         .filter(
             PostPlans.plan_id == plan_id,
             Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
+            Posts.status == PostStatus.APPROVED,
+            active_post_cond
         )
         .scalar()
     )
@@ -356,7 +363,8 @@ def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, 
         .filter(
             PostPlans.plan_id == plan_id,
             Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
+            Posts.status == PostStatus.APPROVED,
+            active_post_cond
         )
         .group_by(
             Posts.id,
