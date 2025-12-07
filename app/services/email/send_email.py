@@ -470,7 +470,7 @@ def send_cancel_subscription_email(
     plan_name: str | None = None,
     plan_url: str | None = None,
 ) -> None:
-    """プラン解約通知メール"""
+    """プラン解約通知メール（販売者向け）"""
     if not getattr(settings, "EMAIL_ENABLED", True):
         return
     subject = f"【mijfans】プラン解約通知"
@@ -486,6 +486,32 @@ def send_cancel_subscription_email(
         template_html="cancel_subscription.html",
         ctx=ctx,
         tags={"category": "cancel_subscription"},
+    )
+
+
+def send_buyer_cancel_subscription_email(
+    to: str,
+    user_name: str | None = None,
+    creator_user_name: str | None = None,
+    plan_name: str | None = None,
+    plan_url: str | None = None,
+) -> None:
+    """プラン解約通知メール（購入者向け）"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】プラン解約のご連絡"
+    ctx = {
+        "user_name": user_name,
+        "creator_user_name": creator_user_name,
+        "plan_name": plan_name,
+        "plan_url": plan_url,
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="buyer_cancel_subscription.html",
+        ctx=ctx,
+        tags={"category": "buyer_cancel_subscription"},
     )
 
 # --------------------------

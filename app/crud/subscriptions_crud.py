@@ -50,6 +50,31 @@ def create_subscription(
     db.refresh(subscription)
     return subscription
 
+def create_expired_subscription(    
+    db: Session,
+    user_id: UUID,
+    creator_id: UUID,
+    order_id: str,
+    order_type: int,
+) -> Subscriptions:
+
+    subscription = Subscriptions(
+        access_type=SubscriptionType.PLAN,
+        user_id=user_id,
+        creator_id=creator_id,
+        order_id=order_id,
+        order_type=order_type,
+        status=SubscriptionStatus.EXPIRED,
+        cancel_at_period_end=True,
+        failed_payment_count=1,
+        last_payment_failed_at=datetime.now(timezone.utc),
+        next_billing_date=None,
+        canceled_at=datetime.now(timezone.utc),
+    )
+    db.add(subscription)
+    db.commit()
+    db.refresh(subscription)
+    return subscription
 
 def check_viewing_rights(db: Session, post_id: str, user_id: str | None) -> bool:
     """
@@ -146,6 +171,29 @@ def cancel_subscription(db: Session, plan_id: str, user_id: UUID):
             )
     subscription.status = SubscriptionStatus.CANCELED
     subscription.canceled_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(subscription)
+    return subscription
+
+
+def get_subscription_by_order_id(db: Session, order_id: str):
+    return (
+        db.query(Subscriptions)
+        .filter(
+            Subscriptions.order_id == order_id,
+            Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,
+            Subscriptions.status == SubscriptionStatus.ACTIVE,
+            Subscriptions.canceled_at.is_(None)
+        )
+        .all()
+    )
+
+
+def update_subscription_status(db: Session, subscription_id: UUID, status: int):
+    subscription = db.query(Subscriptions).filter(Subscriptions.id == subscription_id).first()
+    if not subscription:
+        raise HTTPException(status_code=404, detail=f"Subscription not found: {subscription_id}")
+    subscription.status = status
     db.commit()
     db.refresh(subscription)
     return subscription

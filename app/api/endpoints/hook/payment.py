@@ -29,7 +29,7 @@ from app.constants.enums import (
     SubscriptionStatus,
     TransactionType,
 )
-from app.services.email.send_email import send_payment_succuces_email, send_payment_faild_email, send_selling_info_email
+from app.services.email.send_email import send_payment_succuces_email, send_payment_faild_email, send_selling_info_email, send_cancel_subscription_email, send_buyer_cancel_subscription_email
 from app.models.payment_transactions import PaymentTransactions
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
@@ -76,32 +76,25 @@ def _log_webhook_received(
 def _get_order_info(
     db: Session,
     transaction: PaymentTransactions,
-) -> Tuple[int, UUID]:
+) -> Tuple[int, UUID, int]:
     """
-    注文情報（価格と売主ユーザーID）を取得
+    注文情報（価格、売主ユーザーID、プラットフォーム手数料率）を取得
     
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
         
     Returns:
-        (payment_price, seller_user_id) のタプル
+        (payment_price, seller_user_id, platform_fee_percent) のタプル
         
     Raises:
         ValueError: 注文情報が見つからない場合
     """
-    payment_type = (
-        PaymentTransactionType.SINGLE
-        if transaction.type == PaymentTransactionType.SINGLE
-        else PaymentTransactionType.SUBSCRIPTION
-    )
-
-    if payment_type == PaymentTransactionType.SINGLE:
+    if transaction.type == PaymentTransactionType.SINGLE:
         price, post, creator = price_crud.get_price_and_post_by_id(db, transaction.order_id)
         if not price or not post or not creator:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
         return price.price, post.creator_user_id, creator.platform_fee_percent
-
     else:  # SUBSCRIPTION
         plan, creator = plan_crud.get_plan_and_creator_by_id(db, transaction.order_id)
         if not plan or not creator:
@@ -115,28 +108,28 @@ def _get_payment_info(
 ) -> Tuple[str, str]:
     """
     決済情報を取得（通知用の相対URLとコンテンツ名）
+    
+    Args:
+        db: データベースセッション
+        transaction: 決済トランザクション
+        
+    Returns:
+        (content_url, contents_name) のタプル
+        
+    Raises:
+        ValueError: 注文情報が見つからない場合
     """
-    # コンテンツ情報を取得
-    payment_type = (
-        PaymentTransactionType.SINGLE
-        if transaction.type == PaymentTransactionType.SINGLE
-        else PaymentTransactionType.SUBSCRIPTION
-    )
-
-    if payment_type == PaymentTransactionType.SINGLE:
+    if transaction.type == PaymentTransactionType.SINGLE:
         price, post = price_crud.get_price_and_post_by_id(db, transaction.order_id)
         if not price or not post:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
         contents_name = post.description
-        # 通知用に相対パスのみを返す
         content_url = f"/post/detail?post_id={post.id}"
-
     else:  # SUBSCRIPTION
         plan = plan_crud.get_plan_by_id(db, transaction.order_id)
         if not plan:
             raise ValueError(f"Plan not found: {transaction.order_id}")
         contents_name = plan.name
-        # 通知用に相対パスのみを返す
         content_url = f"/plan/{plan.id}"
 
     return content_url, contents_name
@@ -145,36 +138,41 @@ def _get_payment_info(
 def _get_selling_info(
     db: Session,
     transaction: PaymentTransactions,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, str, UUID, str, int]:
     """
     売り上げ情報を取得
+    
+    Args:
+        db: データベースセッション
+        transaction: 決済トランザクション
+        
+    Returns:
+        (content_url, contents_name, seller_name, seller_user_id, seller_email, contents_type) のタプル
+        
+    Raises:
+        ValueError: 注文情報が見つからない場合
     """
-    # コンテンツ情報を取得
-    contents_type = (
-        PaymentTransactionType.SINGLE
-        if transaction.type == PaymentTransactionType.SINGLE
-        else PaymentTransactionType.SUBSCRIPTION
-    )
-
-    if contents_type == PaymentTransactionType.SINGLE:
+    if transaction.type == PaymentTransactionType.SINGLE:
         price, post = price_crud.get_price_and_post_by_id(db, transaction.order_id)
         if not price or not post:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
-
         seller_user_id = post.creator_user_id
         contents_name = post.description
         content_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/post/detail?post_id={post.id}"
-
+        contents_type = PaymentTransactionType.SINGLE
     else:  # SUBSCRIPTION
         plan = plan_crud.get_plan_by_id(db, transaction.order_id)
         if not plan:
             raise ValueError(f"Plan not found: {transaction.order_id}")
-
         seller_user_id = plan.creator_user_id
         contents_name = plan.name
         content_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/plan/{plan.id}"
+        contents_type = PaymentTransactionType.SUBSCRIPTION
 
     seller_user = user_crud.get_user_by_id(db, seller_user_id)
+    if not seller_user:
+        raise ValueError(f"Seller user not found: {seller_user_id}")
+    
     seller_name = seller_user.profile_name
     seller_email = seller_user.email
 
@@ -198,7 +196,9 @@ def _create_payment_record(
         payment_price: 商品価格
         seller_user_id: 売主ユーザーID
         payment_amount: 決済金額
-        platform_fee: プラットフォーム手数料
+        platform_fee: プラットフォーム手数料（金額）
+        status: 決済ステータス（PaymentStatus）
+        
     Returns:
         作成された決済レコード
     """
@@ -246,7 +246,7 @@ def _create_subscription_record(
         else SubscriptionType.SINGLE
     )
 
-    access_start = datetime.utcnow()
+    access_start = datetime.now(timezone.utc)
     access_end = (
         access_start + timedelta(days=SUBSCRIPTION_DURATION_DAYS)
         if access_type == SubscriptionType.PLAN
@@ -285,6 +285,9 @@ def _update_or_create_user_provider(
         db: データベースセッション
         transaction: 決済トランザクション
         send_id: CREDIXのsendid
+        cardbrand: カードブランド
+        cardnumber: カード番号
+        yuko: 有効期限
     """
     if not send_id:
         return
@@ -376,10 +379,31 @@ def _handle_successful_payment(
     logger.info(f"Subscription created: {subscription.id}")
 
 
+def _expire_existing_subscriptions(
+    db: Session,
+    order_id: str,
+) -> None:
+    """
+    既存のアクティブなサブスクリプションを期限切れにする
+    
+    Args:
+        db: データベースセッション
+        order_id: 注文ID
+    """
+    subscriptions = subscriptions_crud.get_subscription_by_order_id(db, order_id)
+    if not subscriptions:
+        return
+    
+    for subscription in subscriptions:
+        subscriptions_crud.update_subscription_status(db, subscription.id, SubscriptionStatus.EXPIRED)
+        logger.info(f"Expired subscription updated: subscription_id={subscription.id}")
+
+
 def _handle_failed_payment(
     db: Session,
     transaction: PaymentTransactions,
     payment_amount: int,
+    transaction_origin: Optional[str],
 ) -> None:
     """
     決済失敗時の処理
@@ -387,6 +411,8 @@ def _handle_failed_payment(
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
+        payment_amount: 決済金額
+        transaction_origin: トランザクションオリジン
     """
     logger.info(f"決済失敗: transaction_id={transaction.id}")
 
@@ -397,16 +423,15 @@ def _handle_failed_payment(
         status=PaymentTransactionStatus.FAILED,
     )
 
-    # トランザクションを取得
-    payment_transaction = payment_transactions_crud.get_transaction_by_id(db, transaction.id)
-    if not payment_transaction:
-        logger.error(f"Payment transaction not found: {transaction.id}")
-        return
-
-    payment_price, seller_user_id, platform_fee = _get_order_info(db, payment_transaction)
+    # 注文情報を取得
+    try:
+        payment_price, seller_user_id, platform_fee = _get_order_info(db, transaction)
+    except ValueError as e:
+        logger.error(f"Failed to get order info: {e}")
+        raise
 
     # 決済レコードを作成
-    _create_payment_record(
+    payment = _create_payment_record(
         db=db,
         transaction=transaction,
         payment_price=payment_price,
@@ -416,6 +441,21 @@ def _handle_failed_payment(
         status=PaymentStatus.FAILED,
     )
 
+    # バッチ決済失敗時でサブスクリプションタイプの場合、期限切れサブスクリプションを処理
+    if transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH and transaction.type == PaymentTransactionType.SUBSCRIPTION:
+        # 既存のアクティブなサブスクリプションを期限切れにする
+        _expire_existing_subscriptions(db, transaction.order_id)
+        
+        # 期限切れサブスクリプションレコードを作成
+        subscriptions_crud.create_expired_subscription(
+            db=db,
+            user_id=transaction.user_id,
+            creator_id=seller_user_id,
+            order_id=transaction.order_id,
+            order_type=transaction.type,
+        )
+        logger.info(f"Expired subscription created for batch failed payment: transaction_id={transaction.id}")
+
 def _send_payment_notifications_for_buyer(
     db: Session,
     result: str,
@@ -423,10 +463,22 @@ def _send_payment_notifications_for_buyer(
     email: Optional[str],
     money: Optional[int],
     transaction: PaymentTransactions,
+    transaction_origin: Optional[str],
 ) -> None:
     """
     決済成功・失敗時のメール送信と通知追加
     """
+
+    # バッチからの成功時は通知を送らない
+    if transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH and result == RESULT_OK:
+        return
+
+    # バッチからの失敗時、またはフロントエンドからのリクエスト時のみ処理を続行
+    is_batch_failure = transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH and result == RESULT_NG
+    is_frontend_request = transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT
+
+    if not (is_batch_failure or is_frontend_request):
+        return
 
     #　購入者ユーザー情報を取得
     buyer_user = user_crud.get_user_by_id(db, transaction.user_id)
@@ -453,9 +505,18 @@ def _send_payment_notifications_for_buyer(
     frontend_url = os.environ.get('FRONTEND_URL', 'https://mijfans.jp')
     email_content_url = f"{frontend_url}{notification_redirect_url}"
 
+    # トランザクションタイプを確認（プラン解約の通知が必要かどうか）
+    is_subscription = transaction.type == PaymentTransactionType.SUBSCRIPTION
+    is_payment_failed = result == RESULT_NG
+
     # 通知内容を作成
-    title = "決済が完了しました" if result == RESULT_OK else "決済に失敗しました"
-    subtitle = "決済が完了しました" if result == RESULT_OK else "決済に失敗しました"
+    if is_payment_failed and is_subscription:
+        # プラン解約の通知
+        title = f"{contents_name}プランの決済に失敗したため、プランが解約されました"
+        subtitle = f"{contents_name}プランの決済に失敗したため、プランが解約されました"
+    else:
+        title = "決済が完了しました" if result == RESULT_OK else "決済に失敗しました"
+        subtitle = "決済が完了しました" if result == RESULT_OK else "決済に失敗しました"
 
     payload = {
         "title": title,
@@ -479,33 +540,77 @@ def _send_payment_notifications_for_buyer(
                 purchase_history_url=purchase_history_url,
             )
         else:
-            send_payment_faild_email(
-                to=user_email,
-                transaction_id=transaction_id,
-                failure_date=payment_date,
-                sendid=sendid,
-                user_name=user_name,
-                user_email=user_email,
-            )
+            if is_subscription:
+                # プラン解約のメールを送信
+                # クリエイター情報を取得
+                plan = plan_crud.get_plan_by_id(db, transaction.order_id)
+                if plan:
+                    creator_user = user_crud.get_user_by_id(db, plan.creator_user_id)
+                    creator_user_name = creator_user.profile_name if creator_user else None
+                    send_buyer_cancel_subscription_email(
+                        to=user_email,
+                        user_name=user_name,
+                        creator_user_name=creator_user_name,
+                        plan_name=contents_name,
+                        plan_url=email_content_url,
+                    )
+                else:
+                    # プラン情報が取得できない場合は通常の決済失敗メールを送信
+                    send_payment_faild_email(
+                        to=user_email,
+                        transaction_id=transaction_id,
+                        failure_date=payment_date,
+                        sendid=sendid,
+                        user_name=user_name,
+                        user_email=user_email,
+                    )
+            else:
+                send_payment_faild_email(
+                    to=user_email,
+                    transaction_id=transaction_id,
+                    failure_date=payment_date,
+                    sendid=sendid,
+                    user_name=user_name,
+                    user_email=user_email,
+                )
 
     except Exception as e:
         logger.error(f"Failed to send payment email: {e}")
         return
 
     # 通知を追加（購入者向け - NotificationType.USERS）
-    notification = {
-        "user_id": buyer_user.id,
-        "type": NotificationType.USERS,
-        "payload": payload,
-    }
-    notifications_crud.add_notification_for_payment_succuces(db=db, notification=notification)
+    if is_payment_failed and is_subscription:
+        # プラン解約の通知
+        notifications_crud.add_notification_for_cancel_subscription(db=db, notification={
+            "user_id": buyer_user.id,
+            "type": NotificationType.USERS,
+            "payload": payload,
+        })
+    else:
+        # 通常の決済通知
+        notifications_crud.add_notification_for_payment_succuces(db=db, notification={
+            "user_id": buyer_user.id,
+            "type": NotificationType.USERS,
+            "payload": payload,
+        })
 
 
 def _add_payment_notifications_for_seller(
     db: Session,
     transaction: PaymentTransactions,
+    result: str,
+    transaction_origin: Optional[str],
 ) -> None:
     """販売者への決済通知を追加"""
+
+    # バッチからのリクエストで失敗の場合、またはフロントエンドからのリクエストで成功の場合のみ処理を続行
+    # それ以外の場合は通知を追加しない
+    is_batch_failure = result == RESULT_NG and transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
+    is_frontend_success = result == RESULT_OK and transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT
+    
+    if not (is_batch_failure or is_frontend_success):
+        return
+
     buyer_user = user_crud.get_user_by_id(db, transaction.user_id)
     buyer_name = buyer_user.profile_name
 
@@ -517,14 +622,18 @@ def _add_payment_notifications_for_seller(
 
     content_url, contents_name, seller_name, seller_user_id, seller_email, contents_type = _get_selling_info(db, transaction)
 
-
-    if contents_type == PaymentTransactionType.SINGLE:
-        title = f"{buyer_name}さんが{contents_name}を購入しました"
-        subtitle = f"{buyer_name}さんが{contents_name}を購入しました"
-    else:
-        title = f"{buyer_name}さんが{contents_name}プランに加入しました"
-        subtitle = f"{buyer_name}さんが{contents_name}プランに加入しました"
-
+    # バッチからの失敗時のメッセージ
+    if is_batch_failure:
+        title = f"{buyer_name}さんが{contents_name}プランの決済に失敗したため、プラン解約しました"
+        subtitle = f"{buyer_name}さんが{contents_name}プランの決済に失敗したため、プラン解約しました"
+    # フロントエンドからの成功時のメッセージ
+    elif is_frontend_success:
+        if contents_type == PaymentTransactionType.SINGLE:
+            title = f"{buyer_name}さんが{contents_name}を購入しました"
+            subtitle = f"{buyer_name}さんが{contents_name}を購入しました"
+        else:
+            title = f"{buyer_name}さんが{contents_name}プランに加入しました"
+            subtitle = f"{buyer_name}さんが{contents_name}プランに加入しました"
 
     # アバターURLの取得（buyer_userのprofileが存在するか確認）
     avatar_url = "https://logo.mijfans.jp/bimi/logo.svg"
@@ -546,15 +655,24 @@ def _add_payment_notifications_for_seller(
 
     if send_flg:
         try:
-            send_selling_info_email(
-                to=seller_email,
-                buyer_name=buyer_name,
-                contents_name=contents_name,
-                seller_name=seller_name,
-                content_url=content_url,
-                contents_type=contents_type,
-                dashboard_url=dashboard_url,
-            )
+            if is_batch_failure:
+                send_cancel_subscription_email(
+                    to=seller_email,
+                    user_name=buyer_name,
+                    creator_user_name=seller_name,
+                    plan_name=contents_name,
+                    plan_url=content_url,
+                )
+            elif is_frontend_success:
+                send_selling_info_email(
+                    to=seller_email,
+                    buyer_name=buyer_name,
+                    contents_name=contents_name,
+                    seller_name=seller_name,
+                    content_url=content_url,
+                    contents_type=contents_type,
+                    dashboard_url=dashboard_url,
+                )
         except Exception as e:
             logger.error(f"Failed to send selling info email: {e}")
             return
@@ -603,45 +721,50 @@ async def payment_webhook(
             logger.error("sendpoint is required")
             return PlainTextResponse(content=CREDIX_SUCCESS_RESPONSE, status_code=200)
 
-
-        transaction_origin = sendpoint.split("_")[0]
-        transaction_id = sendpoint.split("_")[1]
+        try:
+            sendpoint_parts = sendpoint.split("_")
+            if len(sendpoint_parts) < 2:
+                raise ValueError(f"Invalid sendpoint format: {sendpoint}")
+            transaction_origin = sendpoint_parts[0]
+            transaction_id = sendpoint_parts[1]
+        except (ValueError, IndexError) as e:
+            logger.error(f"Failed to parse sendpoint: {e}")
+            return PlainTextResponse(content=CREDIX_SUCCESS_RESPONSE, status_code=200)
 
         # トランザクション取得
-        transaction = payment_transactions_crud.get_transaction_by_id(
-            db, transaction_id
-        )
+        transaction = payment_transactions_crud.get_transaction_by_id(db, transaction_id)
         if not transaction:
             logger.error(f"Transaction not found: {transaction_id}")
             return PlainTextResponse(content=CREDIX_SUCCESS_RESPONSE, status_code=200)
 
         # 決済結果に応じて処理を分岐
-        is_success = result == "ok"
+        is_success = result == RESULT_OK
         payment_amount = money if money else 0
 
 
         if is_success:
             _handle_successful_payment(db, transaction, payment_amount, sendid, email, cardbrand, cardnumber, yuko, transaction_origin)
         else:
-            _handle_failed_payment(db, transaction, payment_amount)
+            _handle_failed_payment(db, transaction, payment_amount, transaction_origin)
 
-        # 決済通知を送信 (フロントエンドからのリクエストの場合のみ)
-        if transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT:
-            _send_payment_notifications_for_buyer(
-                db=db,
-                result=result,
-                transaction=transaction,
-                send_id=sendid,
-                email=email,
-                money=money,
-            )
+        # 決済通知を送信 (バッチからの失敗時、またはフロントエンドからのリクエスト時)
+        _send_payment_notifications_for_buyer(
+            db=db,
+            result=result,
+            transaction=transaction,
+            send_id=sendid,
+            email=email,
+            money=money,
+            transaction_origin=transaction_origin,
+        )
 
         # 決済通知を追加
-        if result == RESULT_OK and transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT:
-            _add_payment_notifications_for_seller(
-                db=db,
-                transaction=transaction,
-            )
+        _add_payment_notifications_for_seller(
+            db=db,
+            result=result,
+            transaction=transaction,
+            transaction_origin=transaction_origin,
+        )
 
         # トランザクションをリフレッシュ
         db.refresh(transaction)
