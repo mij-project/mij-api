@@ -187,7 +187,7 @@ def _create_payment_record(
     seller_user_id: UUID,
     payment_amount: int,
     platform_fee: int,
-    status: int = PaymentStatus.SUCCEEDED,
+    status: int,
 ) -> Payments:
     """
     決済レコードを作成
@@ -618,27 +618,23 @@ async def payment_webhook(
 
 
         if is_success:
-            # フロントエンドからのリクエストの場合は決済処理を行う
-            if transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT:
-                _handle_successful_payment(db, transaction, payment_amount, sendid, email, cardbrand, cardnumber, yuko)
-            else:
-                # TODO: バッチからのリクエストの場合は決済処理を行う
-                return
+            _handle_successful_payment(db, transaction, payment_amount, sendid, email, cardbrand, cardnumber, yuko, transaction_origin)
         else:
             _handle_failed_payment(db, transaction, payment_amount)
 
-        # 決済通知を送信
-        _send_payment_notifications_for_buyer(
-            db=db,
-            result=result,
-            transaction=transaction,
-            send_id=sendid,
-            email=email,
-            money=money,
-        )
+        # 決済通知を送信 (フロントエンドからのリクエストの場合のみ)
+        if transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT:
+            _send_payment_notifications_for_buyer(
+                db=db,
+                result=result,
+                transaction=transaction,
+                send_id=sendid,
+                email=email,
+                money=money,
+            )
 
         # 決済通知を追加
-        if result == RESULT_OK:
+        if result == RESULT_OK and transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT:
             _add_payment_notifications_for_seller(
                 db=db,
                 transaction=transaction,
