@@ -457,7 +457,7 @@ def _format_sale_info(price: dict | None, plans: list | None):
                 "plan_post": [
                     {
                         "description": post["description"],
-                        "thumbnail_url": f"{CDN_BASE_URL}/{post["thumbnail_url"]}"
+                        "thumbnail_url": f"{CDN_BASE_URL}/{post['thumbnail_url']}"
                     } for post in plan.get("plan_post", [])
                 ] if plan and "plan_post" in plan else [],
             }
