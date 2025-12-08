@@ -73,7 +73,22 @@ jobs:
 
       - name: Force new deployment
         run: |
-          aws ecs update-service --cluster ${{ env.ECS_API_CLUSTER }} --service ${{ env.ECS_API_SERVICE }} --force-new-deployment
+          FAMILY="prd-mij-api"
+
+          LATEST_TD=$(aws ecs list-task-definitions \
+            --family-prefix "$FAMILY" \
+            --sort DESC \
+            --max-items 1 \
+            --query "taskDefinitionArns[0]" \
+            --output text)
+
+          echo "Latest task definition: $LATEST_TD"
+
+          aws ecs update-service \
+            --cluster ${{ env.ECS_API_CLUSTER }} \
+            --service ${{ env.ECS_API_SERVICE }} \
+            --task-definition "$LATEST_TD" \
+            --force-new-deployment
 
       - name: Notify Slack (success)
         if: success()
