@@ -2,7 +2,9 @@ import os
 from operator import or_
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import distinct, func, desc, and_, BigInteger
+from sqlalchemy import distinct, func, desc, and_, BigInteger, union_all, Text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from app.crud.subscriptions_crud import check_viewing_rights
 from app.models import UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
@@ -26,6 +28,7 @@ from app.models.media_assets import MediaAssets
 from app.models.plans import Plans, PostPlans
 from app.models.prices import Prices
 from app.models.media_rendition_jobs import MediaRenditionJobs
+from app.models.subscriptions import Subscriptions
 from app.constants.enums import PostType
 from app.schemas.user_settings import UserSettingsType
 from app.services.email.send_email import (
@@ -394,7 +397,6 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
     プランに紐づく投稿一覧を取得
     ユーザーがそのプランを購入しているか確認してから返す
     """
-
     ThumbnailAssets = aliased(MediaAssets)
 
     # ユーザーがこのプランを購入しているか確認
@@ -593,10 +595,59 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
 
 def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     """
-    ユーザーが購入した投稿を取得
-    """
-    # サブクエリで投稿ごとの最新購入日時を取得（投稿IDのみでグループ化）
+    ユーザーが購入した投稿を取得（有効なsubscription経由）
 
+    購読中のプランまたは単品購入した投稿を取得します。
+    - order_type=1: order_id は prices.id → prices.post_id 経由で投稿を取得
+    - order_type=2: order_id は plans.id → post_plans 経由で投稿を取得
+
+    有効なsubscriptionのみ対象（access_end がNULLまたは現在日時より後、かつstatus=1）
+    """
+    now = datetime.now(timezone.utc)
+
+    # 有効なsubscriptionの条件
+    valid_subscription_filter = and_(
+        Subscriptions.user_id == user_id,
+        Subscriptions.status == 1,  # active
+        or_(
+            Subscriptions.access_end.is_(None),
+            Subscriptions.access_end > now
+        )
+    )
+
+    # order_type=1: subscriptions → prices → posts の経路でpost_idとplan_nameを取得
+    price_posts_subquery = (
+        db.query(
+            Prices.post_id.label("post_id"),
+            func.cast(None, Text).label("plan_name")  # 単品購入はplan_name=NULL
+        )
+        .select_from(Subscriptions)
+        .join(Prices, Prices.id == func.cast(Subscriptions.order_id, PG_UUID(as_uuid=True)))
+        .filter(valid_subscription_filter)
+        .filter(Subscriptions.order_type == 1)
+    )
+
+    # order_type=2: subscriptions → plans → post_plans → posts の経路でpost_idとplan_nameを取得
+    plan_posts_subquery = (
+        db.query(
+            PostPlans.post_id.label("post_id"),
+            Plans.name.label("plan_name")  # プラン名を取得
+        )
+        .select_from(Subscriptions)
+        .join(Plans, Plans.id == func.cast(Subscriptions.order_id, PG_UUID(as_uuid=True)))
+        .join(PostPlans, PostPlans.plan_id == Plans.id)
+        .filter(valid_subscription_filter)
+        .filter(Subscriptions.order_type == 2)
+    )
+
+    # 両方をUNION ALLして（重複は後でGROUP BYで処理）
+    purchased_post_ids_subquery = union_all(
+        price_posts_subquery,
+        plan_posts_subquery
+    ).subquery()
+
+    # メインクエリ: 購入済み投稿の詳細情報を取得
+    # 同じpost_idが複数のプランに属する場合、最初に見つかったplan_nameを使用
     return (
         db.query(
             Posts,
@@ -608,8 +659,11 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             ThumbnailAssets.duration_sec,
             func.count(func.distinct(Likes.user_id)).label("likes_count"),
             func.count(func.distinct(Comments.id)).label("comments_count"),
+            Posts.created_at.label("purchased_at"),  # 投稿の作成日を購入日として使用
+            func.max(purchased_post_ids_subquery.c.plan_name).label("plan_name")  # プラン名を取得
         )
         .select_from(Posts)
+        .join(purchased_post_ids_subquery, Posts.id == purchased_post_ids_subquery.c.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(
@@ -630,6 +684,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
         )
+        .order_by(Posts.created_at.desc())
         .all()
     )
 
@@ -1106,27 +1161,57 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
     price = db.query(Prices).filter(Prices.post_id == post_id).first()
 
     # Planテーブルからプラン金額を取得（post_plansテーブルを経由）
-    plans = (
+    plans_query = (
         db.query(Plans)
         .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(PostPlans.post_id == post_id)
         .all()
     )
 
-    return {"price": price, "plans": plans}
+    # プランにサムネイル情報を追加
+    plans_with_thumbnails = []
+    for plan in plans_query:
+        # プランに紐づく投稿のサムネイル画像を取得（最大3枚）
+        plan_post_info = (
+            db.query(MediaAssets.storage_key, Posts.description)
+            .join(Posts, MediaAssets.post_id == Posts.id)
+            .join(PostPlans, MediaAssets.post_id == PostPlans.post_id)
+            .filter(PostPlans.plan_id == plan.id)
+            .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+            .limit(3)
+            .all()
+        )
 
+        plans_with_thumbnails.append({
+            "id": plan.id,
+            "name": plan.name,
+            "description": plan.description,
+            "price": plan.price,
+            "plan_post": [
+                {
+                    "description": post.description,
+                    "thumbnail_url": post.storage_key
+                } for post in plan_post_info
+            ]
+        })
+
+    return {"price": price, "plans": plans_with_thumbnails}
 
 def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     """メディア情報を取得・処理"""
     media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
-    is_entitlement = False
 
+    # 視聴権限をチェック
+    is_entitlement = check_viewing_rights(db, post_id, user_id)
+
+    # 視聴権限に応じてメディア種別とファイル名を設定
     set_media_kind = (
         MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
     )
     set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
 
     media_info = []
+    thumbnail_key = None
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
@@ -1155,6 +1240,8 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
 
     return {
         "media_assets": media_assets,
+        "media_info": media_info,
+        "thumbnail_key": thumbnail_key,
         "is_entitlement": is_entitlement,
     }
 

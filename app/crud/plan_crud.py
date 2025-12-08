@@ -4,9 +4,11 @@ from app.models.subscriptions import Subscriptions
 from uuid import UUID
 from typing import List, Optional
 from app.schemas.plan import PlanCreateRequest, PlanResponse, SubscribedPlanResponse
-from app.constants.enums import PlanStatus, PlanLifecycleStatus
+from app.schemas.purchases import SinglePurchaseResponse
+from app.constants.enums import PlanStatus, PlanLifecycleStatus, ItemType
 from datetime import datetime, timezone
 from app.models.profiles import Profiles
+from app.models.creators import Creators
 from app.models.plans import PostPlans
 from app.models.posts import Posts
 from app.models.media_assets import MediaAssets
@@ -15,7 +17,12 @@ from app.models.prices import Prices
 from app.constants.enums import MediaAssetKind
 from app.api.commons.utils import get_video_duration
 from app.models.user import Users
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, or_, String
+from app.constants.function import CommonFunction
+from app.constants.enums import PaymentTransactionType
+from app.models.payments import Payments
+from app.constants.enums import SubscriptionStatus
+from app.constants.enums import PaymentStatus
 import os
 from app.core.logger import Logger
 logger = Logger.get_logger()
@@ -27,28 +34,35 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
     ユーザーが加入中のプラン数と詳細を取得
     """
 
-    # サブスクリプション中のプラン（type=2）を取得
-    # TODO: 仮の値として空のリストを設定
-    subscribed_subscriptions = []
+    # サブスクリプション中のプランを取得（access_type=1）
+    subscribed_subscriptions = (
+        db.query(Subscriptions)
+        .filter(
+            Subscriptions.user_id == user_id,
+            Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,  # プラン購読
+            Subscriptions.status == SubscriptionStatus.ACTIVE  # active
+        )
+        .all()
+    )
 
-    subscribed_plan_count = 0
+    subscribed_plan_count = len(subscribed_subscriptions)
     subscribed_total_price = 0
     subscribed_plan_names = []
     subscribed_plan_details = []
 
     # 加入中のプランの詳細情報を取得
     for subscription in subscribed_subscriptions:
-        # order_idからプランIDを取得（order_type == 1の場合のみ）
-        if subscription.order_type != 1:
-            continue
-        
+        # order_idからプランIDを取得
         try:
             plan_id = UUID(subscription.order_id)
         except (ValueError, TypeError):
             continue
-        
+
         # プラン情報を取得
-        plan = db.query(Plans).filter(Plans.id == plan_id).first()
+        plan = db.query(Plans).filter(
+            Plans.id == plan_id,
+            Plans.deleted_at.is_(None)
+        ).first()
         if not plan:
             continue
         
@@ -80,7 +94,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             .filter(
                 PostPlans.plan_id == plan_id,
                 Posts.deleted_at.is_(None),
-                Posts.status == PostStatus.APPROVED
+                Posts.status == 5  # APPROVED
             ).scalar()
         )
 
@@ -107,14 +121,12 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
 
         # 詳細情報を追加
         subscribed_plan_details.append({
-            "subscription_id": str(subscription.id),
+            "purchase_id": str(subscription.id),
             "plan_id": str(plan.id),
             "plan_name": plan.name,
             "plan_description": plan.description,
             "price": plan_price,
-            "subscription_created_at": subscription.created_at,
-            "current_period_start": subscription.access_start if hasattr(subscription, 'access_start') else None,
-            "current_period_end": subscription.access_end if hasattr(subscription, 'access_end') else None,
+            "purchase_created_at": subscription.created_at,
             "creator_avatar_url": creator_profile.avatar_url if creator_profile and creator_profile.avatar_url else None,
             "creator_username": creator_profile.username if creator_profile else None,
             "creator_profile_name": creator_profile.profile_name if creator_profile else None,
@@ -187,7 +199,7 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 db.query(func.count(Subscriptions.id))
                 .filter(
                     Subscriptions.order_id == str(plan.id),
-                    Subscriptions.order_type == 1,  # 1=plan_id
+                    Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
                     Subscriptions.status == 1,
                     Subscriptions.canceled_at.is_(None)
                 )
@@ -214,10 +226,23 @@ def get_plan_by_id(db: Session, plan_id: UUID) -> Plans:
     """
     return db.query(Plans).filter(Plans.id == plan_id).first()
 
+def get_plan_and_creator_by_id(db: Session, plan_id: UUID) -> tuple[Plans, Creators]:
+    """
+    プランとクリエイター情報を取得
+    """
+    return (
+        db.query(Plans, Creators)
+        .join(Creators, Plans.creator_user_id == Creators.user_id)
+        .filter(Plans.id == plan_id)
+        .first()
+    )
+
 def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
     """
     プラン詳細情報を取得
     """
+    active_post_cond = CommonFunction.get_active_post_cond()
+    
     # プラン情報を取得
     plan = (
         db.query(Plans)
@@ -252,20 +277,21 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         .filter(
             PostPlans.plan_id == plan_id,
             Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
+            Posts.status == PostStatus.APPROVED,
+            active_post_cond
         )
         .scalar()
     )
 
     # サブスクリプション状態を確認
+    # order_id = プランID, order_type = 2 (ItemType.PLAN), status = 1 (ACTIVE) で判定
     is_subscribed = (
         db.query(Subscriptions)
         .filter(
             Subscriptions.user_id == current_user_id,
             Subscriptions.order_id == str(plan_id),
-            Subscriptions.order_type == 1,  # 1=plan_id
-            Subscriptions.status == 1,
-            Subscriptions.canceled_at.is_(None)
+            Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
+            Subscriptions.status == 1,  # 1=ACTIVE (視聴権限あり)
         )
         .first() is not None
     )
@@ -290,6 +316,8 @@ def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, 
     """
     offset = (page - 1) * per_page
 
+    active_post_cond = CommonFunction.get_active_post_cond()
+
     # サムネイルと動画用のエイリアスを作成
     ThumbnailAssets = aliased(MediaAssets)
     VideoAssets = aliased(MediaAssets)
@@ -301,7 +329,8 @@ def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, 
         .filter(
             PostPlans.plan_id == plan_id,
             Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
+            Posts.status == PostStatus.APPROVED,
+            active_post_cond
         )
         .scalar()
     )
@@ -338,7 +367,8 @@ def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, 
         .filter(
             PostPlans.plan_id == plan_id,
             Posts.deleted_at.is_(None),
-            Posts.status == PostStatus.APPROVED
+            Posts.status == PostStatus.APPROVED,
+            active_post_cond
         )
         .group_by(
             Posts.id,
@@ -425,7 +455,7 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
         db.query(func.count(Subscriptions.id))
         .filter(
             Subscriptions.order_id == str(plan_id),
-            Subscriptions.order_type == 1,  # 1=plan_id
+            Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
             Subscriptions.status == 1,
             Subscriptions.canceled_at.is_(None)
         )
@@ -446,7 +476,7 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
         .join(Profiles, Users.id == Profiles.user_id)
         .filter(
             Subscriptions.order_id == str(plan_id),
-            Subscriptions.order_type == 1,  # 1=plan_id
+            Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
             Subscriptions.status == 1,
             Subscriptions.canceled_at.is_(None)
         )
@@ -574,5 +604,118 @@ def get_creator_posts_for_plan(db: Session, creator_user_id: UUID, plan_id: Opti
             "created_at": post.created_at,
             "is_included": post.id in included_post_ids
         })
-    
+
     return posts
+
+def get_single_purchases_by_user_id(db: Session, user_id: UUID) -> List[SinglePurchaseResponse]:
+    """
+    ユーザーの単品購入一覧を取得
+    subscriptionsテーブルのaccess_type=2から取得
+    """
+    ThumbnailAssets = aliased(MediaAssets)
+
+    # 単品購入データを取得（access_type=2）
+    purchases_query = (
+        db.query(
+            Subscriptions.id.label("purchase_id"),
+            Posts.id.label("post_id"),
+            Prices.id.label("plan_id"),
+            Posts.description.label("post_title"),
+            Posts.description.label("post_description"),
+            Users.profile_name.label("creator_name"),
+            Profiles.username.label("creator_username"),
+            Profiles.avatar_url.label("creator_avatar_url"),
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            Prices.price.label("purchase_price"),
+            Subscriptions.created_at.label("purchase_created_at")
+        )
+        .join(Prices, Subscriptions.order_id == func.cast(Prices.id, String))
+        .join(Posts, Prices.post_id == Posts.id)
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            ThumbnailAssets,
+            and_(ThumbnailAssets.post_id == Posts.id, ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL)
+        )
+        .filter(
+            Subscriptions.user_id == user_id,
+            Subscriptions.access_type == 2,  # 単品購入
+            Posts.deleted_at.is_(None)
+        )
+        .order_by(Subscriptions.created_at.desc())
+        .all()
+    )
+
+    single_purchases = []
+    for purchase in purchases_query:
+        single_purchases.append(SinglePurchaseResponse(
+            purchase_id=purchase.purchase_id,
+            post_id=purchase.post_id,
+            plan_id=purchase.plan_id,
+            post_title=purchase.post_title or "",
+            post_description=purchase.post_description or "",
+            creator_name=purchase.creator_name,
+            creator_username=purchase.creator_username,
+            creator_avatar_url=purchase.creator_avatar_url,
+            thumbnail_key=purchase.thumbnail_key,
+            purchase_price=int(purchase.purchase_price) if purchase.purchase_price else 0,
+            purchase_created_at=purchase.purchase_created_at
+        ))
+
+    return single_purchases
+
+
+def get_plan_monthly_sales(db: Session, creator_user_id: UUID) -> int:
+    """
+    クリエイターのプラン月間売上を取得
+    paymentsテーブルから、payment_type=1（サブスクリプション）で、
+    seller_user_id=creator_user_idのデータを集計
+    同じorder_idとbuyer_user_idの組み合わせは1回のみカウント（最新の支払いのみ）
+    """
+
+    # 今月の開始日を取得
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+    # サブクエリ: 各order_idとbuyer_user_idの組み合わせで最新の支払いのみ取得
+    subquery = (
+        db.query(
+            Payments.order_id,
+            Payments.buyer_user_id,
+            func.max(Payments.paid_at).label('latest_paid_at')
+        )
+        .filter(
+            Payments.seller_user_id == creator_user_id,
+            Payments.payment_type == PaymentTransactionType.SUBSCRIPTION,  # 1=SUBSCRIPTION
+            Payments.status == PaymentStatus.SUCCEEDED,  # 2=succeeded
+            Payments.paid_at >= month_start
+        )
+        .group_by(Payments.order_id, Payments.buyer_user_id)
+        .subquery()
+    )
+
+    # メインクエリ: 最新の支払いのpayment_priceからプラットフォーム手数料を引いた金額を合計
+    # payment_price - (payment_price * platform_fee / 100) の合計を計算（小数点は切り捨て）
+    total_sales = (
+        db.query(
+            func.sum(
+                func.floor(Payments.payment_price - (Payments.payment_price * Payments.platform_fee / 100))
+            )
+        )
+        .join(
+            subquery,
+            and_(
+                Payments.order_id == subquery.c.order_id,
+                Payments.buyer_user_id == subquery.c.buyer_user_id,
+                Payments.paid_at == subquery.c.latest_paid_at
+            )
+        )
+        .filter(
+            Payments.seller_user_id == creator_user_id,
+            Payments.payment_type == PaymentTransactionType.SUBSCRIPTION,
+            Payments.status == PaymentStatus.SUCCEEDED
+        )
+        .scalar()
+    )
+
+    return int(total_sales) if total_sales else 0

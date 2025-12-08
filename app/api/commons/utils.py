@@ -1,5 +1,6 @@
 import random
 import string
+import secrets
 import base64
 import hashlib, bcrypt
 from typing import Dict, Any, Optional
@@ -55,6 +56,25 @@ def generate_sms_code(length: int = 5) -> int:
     """
     code = f"{random.randint(0, 999999):06d}"
     return int(code)
+
+def generate_sendid(length: int = 20) -> str:
+    """
+    CREDIX決済用のランダムなカードID（sendid）を生成
+
+    Args:
+        length (int): 生成する文字列の長さ（デフォルト20文字、最大25文字）
+
+    Returns:
+        str: ランダム文字列（半角英数字）
+
+    Raises:
+        ValueError: lengthが25を超える場合
+    """
+    if length > 25:
+        raise ValueError("sendid length must be 25 or less")
+
+    characters = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(characters) for _ in range(length))
 
 def get_video_duration(duration_sec: float) -> str:
     """

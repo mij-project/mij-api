@@ -131,6 +131,7 @@ class PostCardResponse(BaseModel):
     created_at: datetime
     price: Optional[int] = None
     currency: Optional[str] = None
+    plan_name: Optional[str] = None  # プラン名（プラン購読の場合のみ）
 
     class Config:
         from_attributes = True
