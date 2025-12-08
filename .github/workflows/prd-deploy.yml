@@ -73,26 +73,7 @@ jobs:
 
       - name: Force new deployment
         run: |
-          set -euo pipefail
-
-          FAMILY="prd-mij-api"
-
-          LATEST_ARN=$(aws ecs list-task-definitions \
-            --family-prefix "$FAMILY" \
-            --sort DESC \
-            --max-items 1 \
-            --query "taskDefinitionArns[0]" \
-            --output text)
-
-          LATEST_REV="${LATEST_ARN##*:}"  # "51"
-
-          echo "Latest task definition: ${FAMILY}:${LATEST_REV}"
-
-          aws ecs update-service \
-            --cluster "${{ env.ECS_API_CLUSTER }}" \
-            --service "${{ env.ECS_API_SERVICE }}" \
-            --task-definition "${FAMILY}:${LATEST_REV}" \
-            --force-new-deployment
+          aws ecs update-service --cluster ${{ env.ECS_API_CLUSTER }} --service ${{ env.ECS_API_SERVICE }} --force-new-deployment
 
       - name: Notify Slack (success)
         if: success()
