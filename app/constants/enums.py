@@ -246,6 +246,31 @@ class GenerationMediaKind:
     PROFILE_IMAGE = 1 # プロフィール画像
     POST_IMAGE = 2 # 投稿画像
 
+class PaymentTransactionType:
+    SINGLE = 1 # 単品購入
+    SUBSCRIPTION = 2 # プラン購読
+    FREE = 3 # 0円決済（無料）
+
+
+class PaymentTransactionStatus:
+    PENDING = 1 # 未承認
+    COMPLETED = 2 # 承認済み
+    FAILED = 3 # 拒否
+
+class SubscriptionType:
+    PLAN = 1 # プラン
+    SINGLE = 2 # 単品
+
+class SubscriptionStatus:
+    ACTIVE = 1 # 有効
+    CANCELED = 2 # 期末まで視聴可
+    EXPIRED = 3 # キャンセル
+
+class TransactionType:
+    PAYMENT_ORIGIN_BATCH = "B" # バッチからのリクエスト 
+    PAYMENT_ORIGIN_FRONT = "F" # フロントエンドからのリクエスト
+    PAYMENT_ORIGIN_FREE = "G" # 0円決済（無料）
+
 class PaymentStatus:
     PENDING = 1 # 保留
     SUCCEEDED = 2 # 成功

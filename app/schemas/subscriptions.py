@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 
 class SubscriptionAdminInfo(BaseModel):
@@ -22,3 +23,16 @@ class SubscriptionAdminInfoResponse(BaseModel):
     page: int
     limit: int
     total_pages: int
+
+
+class FreeSubscriptionRequest(BaseModel):
+    """0円プラン・商品加入リクエスト"""
+    purchase_type: int  # 1=SINGLE, 2=SUBSCRIPTION
+    order_id: str  # プランIDまたはpriceID(post_id)
+
+
+class FreeSubscriptionResponse(BaseModel):
+    """0円プラン・商品加入レスポンス"""
+    result: bool
+    subscription_id: UUID
+    message: str

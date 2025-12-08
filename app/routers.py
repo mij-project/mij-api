@@ -34,6 +34,8 @@ from app.api.endpoints.customer import (
     user_settings,
     generation_media,
     user_banks as customer_user_banks,
+    subscriptions,
+    user_provider
 )
 
 # Admin routes
@@ -62,6 +64,9 @@ from app.api.endpoints.debug import debug_email
 from app.api.endpoints.hook.media_convert import router as media_convert_hook
 from app.api.endpoints.hook.conversations import router as conversations_hook
 from app.api.endpoints.hook.payment import router as payment_hook
+
+# Payment routes
+from app.api.endpoints.payments import credix
 
 api_router = APIRouter()
 
@@ -130,6 +135,12 @@ api_router.include_router(
 api_router.include_router(
     customer_user_banks.router, prefix="/user-banks", tags=["User Banks"]
 )
+api_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
+api_router.include_router(user_provider.router, prefix="/user-provider", tags=["User Provider"])
+
+# Payment routes
+api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])
+
 
 # Admin routes
 api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin Auth"])
