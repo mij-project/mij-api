@@ -128,7 +128,8 @@ def get_sales_period_by_creator(
                 func.sum(
                     case(
                         (
-                            Payments.payment_type == PaymentType.SINGLE,
+                            # Payments.payment_type == PaymentType.SINGLE,
+                            Payments.payment_type == 1,
                             net_per_payment,
                         ),
                         else_=0,
@@ -141,7 +142,8 @@ def get_sales_period_by_creator(
                 func.sum(
                     case(
                         (
-                            Payments.payment_type == PaymentType.PLAN,
+                            # Payments.payment_type == PaymentType.PLAN,
+                            Payments.payment_type == 2,
                             net_per_payment,
                         ),
                         else_=0,
@@ -211,14 +213,14 @@ def get_sales_history_by_creator(
             .outerjoin(
                 Prices,
                 and_(
-                    Payments.order_type == 2,
+                    Payments.order_type == 1,
                     cast(Payments.order_id, PG_UUID) == Prices.id,
                 ),
             )
             .outerjoin(
                 Plans,
                 and_(
-                    Payments.order_type == 1,
+                    Payments.order_type == 2,
                     cast(Payments.order_id, PG_UUID) == Plans.id,
                 ),
             )

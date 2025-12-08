@@ -1237,6 +1237,11 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
                     "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}",
                 }
             )
+    
+    # for media_asset in media_assets:
+    #     if media_asset.kind == MediaAssetKind.MAIN_VIDEO:
+    #         main_duration = 
+
 
     return {
         "media_assets": media_assets,

@@ -37,6 +37,9 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
     )
 
     if participant:
+        participant.joined_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(participant)
         return participant.conversation
 
     # 新規作成
@@ -360,7 +363,7 @@ def get_new_conversations_unread(db: Session, user_id: UUID) -> int:
             db.query(
                 ConversationParticipants,
                 Conversations.last_message_at.label("last_message_at"),
-                ConversationMessages
+                ConversationMessages,
             )
             .join(
                 Conversations,
@@ -373,7 +376,10 @@ def get_new_conversations_unread(db: Session, user_id: UUID) -> int:
             .filter(ConversationParticipants.user_id == user_id)
             .first()
         )
-        if participant.ConversationMessages.sender_admin_id is not None:
+        if (participant.ConversationMessages.sender_admin_id is not None) and (
+            participant.ConversationParticipants.joined_at
+            < participant.ConversationMessages.created_at
+        ):
             return True
         return False
     except Exception as e:

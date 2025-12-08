@@ -151,30 +151,33 @@ async def get_credix_income_report(
     current_admin: Admins = Depends(get_current_admin_user),
 ):
     logger.info(f"Getting credix income reports for admin: {current_admin.id}")
-    now = datetime.now(timezone.utc)
-    this_month = now.month
-    previous_month = this_month - 1
-    start_date_of_previous_month = datetime.combine(
-        datetime.now(timezone.utc).replace(
-            month=previous_month, day=1, hour=0, minute=0, second=0, microsecond=0
-        ),
-        time.min,
-        tzinfo=timezone.utc,
+    now_utc = datetime.now(timezone.utc)
+
+    if now_utc.month == 1:
+        prev_year = now_utc.year - 1
+        prev_month = 12
+    else:
+        prev_year = now_utc.year
+        prev_month = now_utc.month - 1
+
+    # start of previous month (JST 00:00) expressed by your pattern
+    start_date_of_previous_month = datetime(
+        prev_year, prev_month, 1, 0, 0, 0, 0, tzinfo=timezone.utc
     ) - timedelta(hours=9)
-    end_date_of_previous_month = datetime.combine(
-        datetime.now(timezone.utc).replace(
-            month=previous_month, day=1, hour=0, minute=0, second=0, microsecond=0
-        ),
-        time.max,
-        tzinfo=timezone.utc,
+
+    start_date_of_current_month = datetime(
+        now_utc.year, now_utc.month, 1, 0, 0, 0, 0, tzinfo=timezone.utc
     ) - timedelta(hours=9)
+    end_date_of_previous_month = start_date_of_current_month - timedelta(microseconds=1)
 
     revenue_reports_period = get_revenue_period_report(
         db, start_date_of_previous_month, end_date_of_previous_month
     )
+
     payment_transactions_reports_period = get_payment_transactions_period_report(
         db, start_date_of_previous_month, end_date_of_previous_month
     )
+
     pevious_month_revenue = revenue_reports_period["total_platform_fee_gross"] or 0
     pevious_month_payment_transactions = (
         payment_transactions_reports_period["total_payment_transaction_fee"] or 0
@@ -182,7 +185,7 @@ async def get_credix_income_report(
     total_income = max(pevious_month_revenue - pevious_month_payment_transactions, 0)
 
     return {
-        "this_month": this_month,
-        "previous_month": previous_month,
+        "this_month": now_utc.month,
+        "previous_month": prev_month,
         "total_income": total_income,
     }
