@@ -310,10 +310,12 @@ def get_all_delusion_conversations_for_admin(
             Conversations.id == ConversationParticipants.conversation_id,
         )
         .join(Users, ConversationParticipants.user_id == Users.id)
+        .join(ConversationMessages, Conversations.last_message_id == ConversationMessages.id)
         .join(Profiles, Users.id == Profiles.user_id)
         .filter(
             Conversations.type == ConversationType.DELUSION,
             Conversations.is_active == True,
+            ConversationMessages.sender_admin_id.is_(None),
         )
         .order_by(desc(Conversations.last_message_at))
         .offset(skip)

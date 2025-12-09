@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Optional
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -250,10 +251,14 @@ def get_sales_history_by_creator(
         rows = db.execute(payments_query).all()
         payments = []
         for row in rows:
+            fee_per_payment = math.ceil(
+                row.Payments.payment_price * row.Payments.platform_fee / 100.0
+            )
+            net_per_payment = row.Payments.payment_price - fee_per_payment
             payments.append(
                 {
                     "id": row.Payments.id,
-                    "payment_price": row.Payments.payment_price,
+                    "payment_price": net_per_payment,
                     "payment_type": row.Payments.payment_type,
                     "paid_at": row.Payments.paid_at,
                     "buyer_username": row.buyer_username,
