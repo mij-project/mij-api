@@ -14,19 +14,18 @@ from models.payment_transactions import PaymentTransactions
 from slack_sdk import WebClient
 from common.constants import ENV
 
+
 class SubscriptionsDomain:
     def __init__(self, logger: Logger):
-        self.db: Session = next(get_db())
+        # self.db: Session = next(get_db())
         self.logger = logger
         self.thread_pool = []
-        self.slack_client = WebClient(
-            token=os.environ.get(
-                "SLACK_BOT_TOKEN","")
-        )
+        self.slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN", ""))
         self.slack_channel = os.environ.get("SLACK_CHANNEL", "C0A0YDFF5PS")
 
     def _exec(self):
-        subscriptions = self._query_inday_need_to_pay_subscriptions()
+        db: Session = next(get_db())
+        subscriptions = self._query_inday_need_to_pay_subscriptions(db)
         if not subscriptions:
             self.logger.info("No subscriptions found")
             return
@@ -42,11 +41,17 @@ class SubscriptionsDomain:
 
         return
 
-    def _query_inday_need_to_pay_subscriptions(self):
+    def _query_inday_need_to_pay_subscriptions(self, db: Session):
         now = datetime.now(timezone.utc)
         return (
-            self.db.query(Subscriptions, UserProviders, Payments)
-            .join(UserProviders, Subscriptions.user_id == UserProviders.user_id)
+            db.query(Subscriptions, UserProviders, Payments)
+            .join(
+                UserProviders,
+                and_(
+                    Subscriptions.user_id == UserProviders.user_id,
+                    UserProviders.is_main_card == True,
+                ),
+            )
             .join(Payments, Subscriptions.payment_id == Payments.id)
             .filter(
                 and_(
@@ -58,29 +63,33 @@ class SubscriptionsDomain:
         )
 
     def _task_process_subscription(self, subscription: tuple):
+        db: Session = next(get_db())
         done = False
         need_change_status = None
-        while not done:
-            try:
-                subs: Subscriptions = subscription[0]
-                user_provider: UserProviders = subscription[1]
-                payment: Payments = subscription[2]
+        try:
+            while not done:
+                try:
+                    subs: Subscriptions = subscription[0]
+                    user_provider: UserProviders = subscription[1]
+                    payment: Payments = subscription[2]
 
-                if subs.status == 2:
-                    self.__mark_subscription_as_cancelled(subs)
-                    self.logger.info(f"Subscription {subs.id} marked as cancelled")
-                elif subs.status == 1:
-                    self.__process_next_subscription(subs, user_provider, payment)
-                    need_change_status = subs.id
-                done = True
-            except Exception as e:
-                self.db.rollback()
-                self.logger.exception(f"Error processing subscription: {e}")
-                self.__slack_error_notification(str(subscription[0].user_id))
-                time.sleep(60)
+                    if subs.status == 2:
+                        self.__mark_subscription_as_cancelled(db, subs)
+                        self.logger.info(f"Subscription {subs.id} marked as cancelled")
+                    elif subs.status == 1:
+                        self.__process_next_subscription(db, subs, user_provider, payment)
+                        need_change_status = subs.id
+                    done = True
+                except Exception as e:
+                    db.rollback()
+                    self.logger.exception(f"Error processing subscription: {e}")
+                    self.__slack_error_notification(str(subscription[0].user_id))
+                    time.sleep(60)
 
-        if need_change_status:
-            self.__change_status_of_subscription(need_change_status)
+            if need_change_status:
+                self.__change_status_of_subscription(db, need_change_status)
+        finally:
+            db.close()
 
     def __slack_error_notification(self, user_id: str):
         self.slack_client.chat_postMessage(
@@ -97,10 +106,10 @@ class SubscriptionsDomain:
             ],
         )
 
-    def __mark_subscription_as_cancelled(self, subscription: Subscriptions):
+    def __mark_subscription_as_cancelled(self, db: Session, subscription: Subscriptions):
         now = datetime.now(timezone.utc)
         subs = (
-            self.db.query(Subscriptions)
+            db.query(Subscriptions)
             .filter(Subscriptions.id == subscription.id)
             .first()
         )
@@ -110,12 +119,13 @@ class SubscriptionsDomain:
         subs.status = 3
         # subs.canceled_at = now
         subs.updated_at = now
-        self.db.add(subs)
-        self.db.commit()
+        db.add(subs)
+        db.commit()
         return
 
     def __process_next_subscription(
         self,
+        db: Session,
         subscription: Subscriptions,
         user_provider: UserProviders,
         payment: Payments,
@@ -131,8 +141,8 @@ class SubscriptionsDomain:
             created_at=now,
             updated_at=now,
         )
-        self.db.add(txn)
-        self.db.commit()
+        db.add(txn)
+        db.commit()
 
         payload_to_credix = {
             "clientip": os.environ.get("CREDIX_CLIENT_IP", "1011004877"),
@@ -164,10 +174,10 @@ class SubscriptionsDomain:
         if res_text != "Success_order":
             raise Exception(f"Error processing subscription: {res_text}")
 
-    def __change_status_of_subscription(self, subscription_id: str):
+    def __change_status_of_subscription(self, db: Session, subscription_id: str):
         now = datetime.now(timezone.utc)
         subs = (
-            self.db.query(Subscriptions)
+            db.query(Subscriptions)
             .filter(Subscriptions.id == subscription_id)
             .first()
         )
@@ -176,6 +186,6 @@ class SubscriptionsDomain:
             return
         subs.status = 3
         subs.updated_at = now
-        self.db.add(subs)
-        self.db.commit()
+        db.add(subs)
+        db.commit()
         return

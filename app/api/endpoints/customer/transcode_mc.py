@@ -39,6 +39,7 @@ from app.constants.enums import MediaAssetKind
 import boto3
 from typing import Dict, Any, Optional
 from app.core.logger import Logger
+from app.utils.trigger_batch_notification_newpost_arrival import trigger_batch_notification_newpost_arrival
 logger = Logger.get_logger()
 S3 = boto3.client("s3", region_name="ap-northeast-1")
 
@@ -258,6 +259,9 @@ def transcode_mc_unified(
             add_mail_notification_for_post(db, post_id=post_id, type="approved")
             # 投稿に対する通知を追加
             add_notification_for_post(db, post, post.creator_user_id, type="approved")
+
+            # 新着投稿通知をトリガー
+            trigger_batch_notification_newpost_arrival(post_id=post_id, creator_user_id=str(post.creator_user_id))
 
         return {"status": True, "message": f"Media conversion completed for {type}"}
 

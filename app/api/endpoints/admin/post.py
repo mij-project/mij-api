@@ -25,7 +25,7 @@ from app.services.s3.presign import get_bucket_name
 from app.core.logger import Logger
 import boto3
 import os
-
+from app.utils.trigger_batch_notification_newpost_arrival import trigger_batch_notification_newpost_arrival
 logger = Logger.get_logger()
 router = APIRouter()
 
@@ -247,6 +247,9 @@ def approve_post(
             add_mail_notification_for_post(db, post_id=post_id, type="approved")
             # 投稿に対する通知を追加
             add_notification_for_post(db, updated_post, post.get('creator_user_id'), type="approved")
+
+            # 新着投稿通知をトリガー
+            trigger_batch_notification_newpost_arrival(post_id=post_id, creator_user_id=str(post.get('creator_user_id')))
 
             return {
                 "message": "投稿を承認しました（認証済み）",
