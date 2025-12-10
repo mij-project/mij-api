@@ -34,7 +34,8 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.PLAN),
+                            # & (Payments.payment_type == PaymentType.PLAN),
+                            & (Payments.payment_type == 2),
                             Payments.payment_price,
                         ),
                         else_=0,
@@ -48,7 +49,8 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.SINGLE),
+                            # & (Payments.payment_type == PaymentType.SINGLE),
+                            & (Payments.payment_type == 1),
                             Payments.payment_price,
                         ),
                         else_=0,
@@ -62,7 +64,8 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.PLAN),
+                            # & (Payments.payment_type == PaymentType.PLAN),
+                            & (Payments.payment_type == 2),
                             1,
                         ),
                         else_=0,
@@ -76,7 +79,8 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.SINGLE),
+                            # & (Payments.payment_type == PaymentType.SINGLE),
+                            & (Payments.payment_type == 1),
                             1,
                         ),
                         else_=0,
@@ -133,7 +137,8 @@ def get_gmv_period_report(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.PLAN),
+                            # & (Payments.payment_type == PaymentType.PLAN),
+                            & (Payments.payment_type == 2),
                             Payments.payment_price,
                         ),
                         else_=0,
@@ -147,7 +152,8 @@ def get_gmv_period_report(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.SINGLE),
+                            # & (Payments.payment_type == PaymentType.SINGLE),
+                            & (Payments.payment_type == 1),
                             Payments.payment_price,
                         ),
                         else_=0,
@@ -161,7 +167,8 @@ def get_gmv_period_report(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.PLAN),
+                            # & (Payments.payment_type == PaymentType.PLAN),
+                            & (Payments.payment_type == 2),
                             1,
                         ),
                         else_=0,
@@ -175,7 +182,8 @@ def get_gmv_period_report(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            & (Payments.payment_type == PaymentType.SINGLE),
+                            # & (Payments.payment_type == PaymentType.SINGLE),
+                            & (Payments.payment_type == 1),
                             1,
                         ),
                         else_=0,
@@ -224,10 +232,10 @@ def get_revenue_period_report(
             platform_fee_per_payment * company_fee_percent / 100.0
         )
 
-        card_fee_per_payment = func.round(Payments.payment_amount * 0.077) + 55
+        card_fee_per_payment = func.round(func.round(Payments.payment_amount * 0.077, 3) + 55, 3)
 
-        margin_per_payment = (
-            Payments.payment_amount - Payments.payment_price - card_fee_per_payment
+        margin_per_payment = func.round(
+            Payments.payment_amount - Payments.payment_price - card_fee_per_payment, 3
         )
 
         payments_stmt = (
@@ -245,8 +253,7 @@ def get_revenue_period_report(
                     0,
                 ).label("total_platform_fee_after_company"),
                 func.coalesce(
-                    func.sum(margin_per_payment),
-                    0,
+                    func.round(func.sum(margin_per_payment),3),0
                 ).label("total_platform_margin_card_fee"),
             )
             .select_from(Payments)
@@ -259,24 +266,26 @@ def get_revenue_period_report(
         payments_row = db.execute(payments_stmt).one()
 
         # Fail payment count
-        fail_paymenttransaction_conditions = [PaymentTransactions.status == 3]
-        if start_date is not None:
-            fail_paymenttransaction_conditions.append(
-                PaymentTransactions.created_at >= start_date.replace(tzinfo=None)
-            )
-        if end_date is not None:
-            fail_paymenttransaction_conditions.append(
-                PaymentTransactions.created_at <= end_date.replace(tzinfo=None)
-            )
+        # fail_paymenttransaction_conditions = [PaymentTransactions.status == 3]
+        # if start_date is not None:
+        #     fail_paymenttransaction_conditions.append(
+        #         PaymentTransactions.created_at >= start_date.replace(tzinfo=None)
+        #     )
+        # if end_date is not None:
+        #     fail_paymenttransaction_conditions.append(
+        #         PaymentTransactions.created_at <= end_date.replace(tzinfo=None)
+        #     )
 
-        failed_stmt = select(
-            func.coalesce(func.count(PaymentTransactions.id), 0)
-        ).where(*fail_paymenttransaction_conditions)
-        failed_row = db.execute(failed_stmt).scalar() or 0
+        # failed_stmt = select(
+        #     func.coalesce(func.count(PaymentTransactions.id), 0)
+        # ).where(*fail_paymenttransaction_conditions)
+        # failed_row = db.execute(failed_stmt).scalar() or 0
 
-        total_platform_fee_gross = payments_row.total_platform_fee_after_company - (
-            failed_row * 44
-        )
+        # total_platform_fee_gross = payments_row.total_platform_fee_after_company - (
+        #     failed_row * 44
+        # )
+
+        total_platform_fee_gross = payments_row.total_platform_fee_after_company
 
         # ---- approved withdraws ----
         withdraws_approved_conditions = [
@@ -297,14 +306,17 @@ def get_revenue_period_report(
         )
 
         approved_withdraw_count = db.execute(approved_stmt).scalar() or 0
-
-        total_platform_fee_gross = total_platform_fee_gross + (
-            approved_withdraw_count * 187
+        
+        total_platform_fee_gross = float(
+            payments_row.total_platform_fee_after_company
+            + (approved_withdraw_count * 187)
+            + float(payments_row.total_platform_margin_card_fee)
         )
-
+        
         return {
             "total_platform_fee_gross": total_platform_fee_gross,
             "total_platform_margin_card_fee": payments_row.total_platform_margin_card_fee,
+            "total_platform_fee_after_company": payments_row.total_platform_fee_after_company,
             "approved_withdraw_count": approved_withdraw_count,
             "withdraws_approved_profit": approved_withdraw_count * 187,
         }
@@ -346,8 +358,8 @@ def get_payment_transactions_period_report(
             success_paymenttransaction_conditions.append(
                 Payments.paid_at <= end_date.replace(tzinfo=None)
             )
-        fee_per_payment = (Payments.payment_amount * 0.077) + 55
-        fee_per_payment_transaction_fee_excluding = Payments.payment_amount * 0.077
+        fee_per_payment = func.round(func.round(Payments.payment_amount * 0.077, 3) + 55, 3)
+        fee_per_payment_transaction_fee_excluding = func.round(Payments.payment_amount * 0.077, 3)
         success_stmt = select(
             func.coalesce(
                 func.sum(fee_per_payment),
@@ -363,10 +375,10 @@ def get_payment_transactions_period_report(
             ).label("successful_payment_transaction_count"),
         ).where(*success_paymenttransaction_conditions)
         success_row = db.execute(success_stmt).one()
-        total_payment_transaction_fee = (
+        total_payment_transaction_fee = float(
             success_row.total_transaction_fee + (failed_row * 44) + 33000
         )
-
+        
         return {
             "failed_payment_transaction_fee": failed_row * 44,
             "failed_payment_transaction_count": failed_row,

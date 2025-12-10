@@ -59,6 +59,7 @@ class SubscriptionsDomain:
 
     def _task_process_subscription(self, subscription: tuple):
         done = False
+        need_change_status = None
         while not done:
             try:
                 subs: Subscriptions = subscription[0]
@@ -70,12 +71,16 @@ class SubscriptionsDomain:
                     self.logger.info(f"Subscription {subs.id} marked as cancelled")
                 elif subs.status == 1:
                     self.__process_next_subscription(subs, user_provider, payment)
+                    need_change_status = subs.id
                 done = True
             except Exception as e:
                 self.db.rollback()
                 self.logger.exception(f"Error processing subscription: {e}")
                 self.__slack_error_notification(str(subscription[0].user_id))
                 time.sleep(60)
+
+        if need_change_status:
+            self.__change_status_of_subscription(need_change_status)
 
     def __slack_error_notification(self, user_id: str):
         self.slack_client.chat_postMessage(
@@ -122,12 +127,12 @@ class SubscriptionsDomain:
             provider_id=subscription.provider_id,
             order_id=subscription.order_id,
             user_id=subscription.user_id,
-            session_id=f"{subscription.user_id}-batch-subscriptions-{now.timestamp}",
+            session_id=f"{subscription.user_id}-batch-subscriptions-{int(now.timestamp())}",
             created_at=now,
             updated_at=now,
         )
         self.db.add(txn)
-        self.db.flush()
+        self.db.commit()
 
         payload_to_credix = {
             "clientip": os.environ.get("CREDIX_CLIENT_IP", "1011004877"),
@@ -138,7 +143,7 @@ class SubscriptionsDomain:
             "money": payment.payment_amount,
             "telno": "0000000000",
             "sendid": str(user_provider.sendid),
-            "sendpoint": str(f"B_{subscription.id}"),
+            "sendpoint": str(f"B_{txn.id}"),
         }
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -154,6 +159,23 @@ class SubscriptionsDomain:
         )
         if response.status_code != 200:
             self.logger.error(f"Error processing subscription: {response.text}")
+            raise Exception(f"Error processing subscription: {response.text}")
         res_text = str(response.text)
         if res_text != "Success_order":
             raise Exception(f"Error processing subscription: {res_text}")
+
+    def __change_status_of_subscription(self, subscription_id: str):
+        now = datetime.now(timezone.utc)
+        subs = (
+            self.db.query(Subscriptions)
+            .filter(Subscriptions.id == subscription_id)
+            .first()
+        )
+        if not subs:
+            self.logger.error(f"Subscription {subscription_id} not found")
+            return
+        subs.status = 3
+        subs.updated_at = now
+        self.db.add(subs)
+        self.db.commit()
+        return

@@ -169,12 +169,12 @@ async def get_post_detail(
         creator_info = _format_creator_info(post_data["creator"], post_data["creator_profile"])
 
         # メディア情報を整形
-        media_info, thumbnail_key = _format_media_info(
+        media_info, thumbnail_key, main_duration = _format_media_info(
             post_data["media_assets"],
             post_data["is_entitlement"],
             post_data["price"],
         )
-
+        
         # カテゴリ情報を整形
         categories_data = _format_categories_info(post_data["categories"])
 
@@ -191,6 +191,7 @@ async def get_post_detail(
             "categories": categories_data,
             "media_info": media_info,
             "sale_info": sale_info,
+            "post_main_duration": main_duration,
         }
         
         return post_detail
@@ -394,6 +395,7 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
 
     media_info = []
     thumbnail_key = None
+    main_duration = None
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
@@ -417,8 +419,12 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
                 "post_id": media_asset.post_id,
                 "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
             })
+    for media_asset in media_assets:
+        if media_asset.kind == MediaAssetKind.MAIN_VIDEO:
+            main_duration = media_asset.duration_sec
+            break
 
-    return media_info, thumbnail_key
+    return media_info, thumbnail_key, main_duration
 
 def _format_creator_info(creator: dict, creator_profile: dict):
     """クリエイター情報を整形する"""
