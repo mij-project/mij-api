@@ -370,6 +370,150 @@ def send_like_notification_email(to: str, name: str | None = None, username: str
         tags={"category": "follow_notification"},
     )
 
+
+def send_payment_succuces_email(
+    to: str, 
+    content_url: str | None = None, 
+    transaction_id: int | None = None, 
+    contents_name: str | None = None, 
+    payment_date: str | None = None,
+    amount: int | None = None,
+    sendid: str | None = None,
+    user_name: str | None = None,
+    user_email: str | None = None,
+    purchase_history_url: str | None = None,
+) -> None:
+    """決済完了メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】決済結果のご連絡"
+    ctx = {
+        "content_url": content_url or "",
+        "transaction_id": transaction_id,
+        "contents_name": contents_name,
+        "amount": amount,
+        "payment_date": payment_date,
+        "sendid": sendid,
+        "user_name": user_name,
+        "user_email": user_email,
+        "purchase_history_url": purchase_history_url or "",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="payment_succuces.html",
+        ctx=ctx,
+        tags={"category": "payment_succuces"},
+    )
+
+def send_payment_faild_email(
+    to: str,
+    transaction_id: int | None = None,
+    failure_date: str | None = None,
+    sendid: str | None = None,
+    user_name: str | None = None,
+    user_email: str | None = None,
+) -> None:
+    """決済失敗メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】決済失敗のご連絡"
+    ctx = {
+        "transaction_id": transaction_id,
+        "failure_date": failure_date,
+        "sendid": sendid,
+        "user_name": user_name,
+        "user_email": user_email,
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="payment_faild.html",
+        ctx=ctx,
+        tags={"category": "payment_faild"},
+    )
+
+
+def send_selling_info_email(
+    to: str, 
+    buyer_name: str | None = None, 
+    contents_name: str | None = None,
+    seller_name: str | None = None,
+    content_url: str | None = None, 
+    contents_type: str | None = None,
+    dashboard_url: str | None = None) -> None:
+    """商品購入通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】商品購入通知"
+    ctx = {
+        "buyer_name": buyer_name,
+        "contents_name": contents_name,
+        "seller_name": seller_name,
+        "content_url": content_url,
+        "contents_type": contents_type,
+        "dashboard_url": dashboard_url,
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="selling_info.html",
+        ctx=ctx,
+        tags={"category": "selling_info"},
+    )
+
+
+def send_cancel_subscription_email(
+    to: str,
+    user_name: str | None = None,
+    creator_user_name: str | None = None,
+    plan_name: str | None = None,
+    plan_url: str | None = None,
+) -> None:
+    """プラン解約通知メール（販売者向け）"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】プラン解約通知"
+    ctx = {
+        "user_name": user_name,
+        "creator_user_name": creator_user_name,
+        "plan_name": plan_name,
+        "plan_url": plan_url,
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="cancel_subscription.html",
+        ctx=ctx,
+        tags={"category": "cancel_subscription"},
+    )
+
+
+def send_buyer_cancel_subscription_email(
+    to: str,
+    user_name: str | None = None,
+    creator_user_name: str | None = None,
+    plan_name: str | None = None,
+    plan_url: str | None = None,
+) -> None:
+    """プラン解約通知メール（購入者向け）"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】プラン解約のご連絡"
+    ctx = {
+        "user_name": user_name,
+        "creator_user_name": creator_user_name,
+        "plan_name": plan_name,
+        "plan_url": plan_url,
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="buyer_cancel_subscription.html",
+        ctx=ctx,
+        tags={"category": "buyer_cancel_subscription"},
+    )
+
 # --------------------------
 # 実体：バックエンド切替
 # --------------------------

@@ -169,12 +169,12 @@ async def get_post_detail(
         creator_info = _format_creator_info(post_data["creator"], post_data["creator_profile"])
 
         # メディア情報を整形
-        media_info, thumbnail_key = _format_media_info(
+        media_info, thumbnail_key, main_duration = _format_media_info(
             post_data["media_assets"],
             post_data["is_entitlement"],
             post_data["price"],
         )
-
+        
         # カテゴリ情報を整形
         categories_data = _format_categories_info(post_data["categories"])
 
@@ -191,6 +191,7 @@ async def get_post_detail(
             "categories": categories_data,
             "media_info": media_info,
             "sale_info": sale_info,
+            "post_main_duration": main_duration,
         }
         
         return post_detail
@@ -389,25 +390,25 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
     set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
     set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
 
-    # 単品販売で価格が0の場合フラグを立てる
-    free_flg = True if price and price.price == 0 else False
-
-    if free_flg:
-        set_file_name = "_1080w.webp"
-
+    # 単品販売で価格が0の場合、画像のみブラーなしで表示（動画は通常通りis_entitlementで判定）
+    free_image_flg = True if price and price.price == 0 else False
 
     media_info = []
+    thumbnail_key = None
+    main_duration = None
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
         elif media_asset.kind == MediaAssetKind.IMAGES:
+            # 画像の場合: 0円ならブラーなし、それ以外は通常のset_file_nameを使用
+            image_file_name = "_1080w.webp" if free_image_flg else set_file_name
             media_info.append({
                 "kind": media_asset.kind,
                 "duration": media_asset.duration_sec,
                 "media_assets_id": media_asset.id,
                 "orientation": media_asset.orientation,
                 "post_id": media_asset.post_id,
-                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{set_file_name}"
+                "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}{image_file_name}"
             })
         elif media_asset.kind == set_media_kind:
             media_info.append({
@@ -418,8 +419,12 @@ def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
                 "post_id": media_asset.post_id,
                 "storage_key": f"{MEDIA_CDN_URL}/{media_asset.storage_key}"
             })
+    for media_asset in media_assets:
+        if media_asset.kind == MediaAssetKind.MAIN_VIDEO:
+            main_duration = media_asset.duration_sec
+            break
 
-    return media_info, thumbnail_key
+    return media_info, thumbnail_key, main_duration
 
 def _format_creator_info(creator: dict, creator_profile: dict):
     """クリエイター情報を整形する"""
@@ -442,17 +447,26 @@ def _format_categories_info(categories: list):
         for category in categories
     ]
 
-def _format_sale_info(price: dict, plans: list):
+def _format_sale_info(price: dict | None, plans: list | None):
     """販売情報を整形する"""
     return {
-        "price": price.price if price else None,
+        "price": {
+            "id": str(price.id) if price else None,
+            "price": price.price if price else None,
+        },
         "plans": [
             {
-                "id": str(plan.id),
-                "name": plan.name,
-                "description": plan.description,
-                "price": plan.price
+                "id": str(plan["id"]) if plan and "id" in plan else None,
+                "name": plan["name"] if plan and "name" in plan else None,
+                "description": plan.get("description") if plan else None,
+                "price": plan.get("price") if plan else None,
+                "plan_post": [
+                    {
+                        "description": post["description"],
+                        "thumbnail_url": f"{CDN_BASE_URL}/{post['thumbnail_url']}"
+                    } for post in plan.get("plan_post", [])
+                ] if plan and "plan_post" in plan else [],
             }
-            for plan in plans
+            for plan in (plans or [])
         ]
     }

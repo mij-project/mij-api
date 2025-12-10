@@ -24,7 +24,7 @@ class PaymentTransactions(Base):
     provider_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False)
     order_id: Mapped[str] = mapped_column(String(255), nullable=False , comment="plan_id or price_id")
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    session_id: Mapped[str] = mapped_column(String(255), nullable=False, comment="credixから発行されたセッションID")
+    session_id: Mapped[str] = mapped_column(String(255), nullable=True, comment="credixから発行されたセッションID")
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 

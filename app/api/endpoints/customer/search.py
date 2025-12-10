@@ -5,7 +5,7 @@ from typing import Optional, List
 from uuid import UUID
 
 from app.db.base import get_db
-from app.deps.auth import get_current_user
+from app.deps.auth import get_current_user, get_current_user_optional
 from app.models.user import Users
 from app.crud import search_crud, search_history_crud
 from app.schemas.search import (
@@ -35,7 +35,7 @@ def search(
     page: int = Query(1, ge=1, description="ページ番号"),
     per_page: int = Query(20, ge=1, le=100, description="1ページあたりの件数"),
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user_optional)
 ):
     """
     統合検索API
@@ -166,21 +166,22 @@ def search(
 
         # 検索履歴保存 (結果が1件以上ある場合のみ)
         # if total_results > 0:
-        try:
-            search_history_crud.create_or_update_search_history(
-                db,
-                user_id=current_user.id,
-                query=query,
-                search_type=type,
-                filters={
-                    "category_ids": [str(cid) for cid in category_ids] if category_ids else None,
-                    "post_type": post_type
-                }
-            )
-            response_data["search_history_saved"] = True
-        except Exception as e:
-            # 検索履歴保存エラーは無視
-            pass
+        if current_user is not None:
+            try:
+                search_history_crud.create_or_update_search_history(
+                    db,
+                    user_id=current_user.id,
+                    query=query,
+                    search_type=type,
+                    filters={
+                        "category_ids": [str(cid) for cid in category_ids] if category_ids else None,
+                        "post_type": post_type
+                    }
+                )
+                response_data["search_history_saved"] = True
+            except Exception as e:
+                # 検索履歴保存エラーは無視
+                pass
 
         return SearchResponse(**response_data)
     except Exception as e:
