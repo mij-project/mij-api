@@ -493,7 +493,7 @@ def generate_ogp_image(
     except Exception as e:
         print(f"Failed to load PNG logo: {e}")
         # PNG読み込み失敗時はテキストで代替
-        font_mijfans = get_font(36)
+        font_mijfans = get_font_en(36)
         mijfans_text = "mijfans"
         bbox = draw.textbbox((0, 0), mijfans_text, font=font_mijfans)
         text_width = int(bbox[2] - bbox[0])

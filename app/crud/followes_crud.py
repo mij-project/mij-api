@@ -166,6 +166,18 @@ def add_notification_follow(db: Session, follower_user_id: UUID, creator_user_id
     フォロー通知を追加
     """
     try:
+        should_send_notification_follow = True
+        settings = (
+            db.query(UserSettings.settings)
+            .filter(UserSettings.user_id == creator_user_id)
+            .first()
+        )
+        if settings is not None and isinstance(settings[0], dict):
+            follow_setting = settings[0].get("follow", True)
+            if follow_setting is False:
+                should_send_notification_follow = False
+        if not should_send_notification_follow:
+            return
         follower_profile = db.query(Profiles).filter(Profiles.user_id == follower_user_id).first()
         follower_user = db.query(Users).filter(Users.id == follower_user_id).first()
         if not follower_user:
@@ -217,8 +229,14 @@ def add_mail_notification_follow(db: Session, follower_user_id: UUID, creator_us
             .first()
         )
         follower_profile = db.query(Profiles).filter(Profiles.user_id == follower_user_id).first()
-        if (not user.settings) or (user.settings is None) or (user.settings.get("follow", True) == True):
-            send_follow_notification_email(user.Users.email, user.Profiles.username, follower_profile.username, f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp')}/profile?username={follower_profile.username}")
+        should_send_notification_follow = True
+        if user.settings is not None and isinstance(user.settings, dict):
+            follow_setting = user.settings.get("follow", True)
+            if follow_setting is False:
+                should_send_notification_follow = False
+        if not should_send_notification_follow:
+            return
+        send_follow_notification_email(user.Users.email, user.Profiles.username, follower_profile.username, f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp')}/profile?username={follower_profile.username}")
     except Exception as e:
         db.rollback()
         logger.error(f"Add mail notification follow error: {e}")

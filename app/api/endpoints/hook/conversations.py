@@ -24,6 +24,7 @@ router = APIRouter()
 # Key: conversation_id, Value: Set of WebSocket connections
 active_connections: Dict[str, Set[WebSocket]] = {}
 
+
 class ConnectionManager:
     """WebSocket接続を管理するクラス"""
 
@@ -85,6 +86,7 @@ async def get_user_from_cookie(websocket: WebSocket, db: Session) -> Optional[Us
     except Exception as e:
         logger.error(f"❌ Authentication error: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -95,31 +97,28 @@ async def get_admin_from_cookie(websocket: WebSocket, db: Session) -> Optional[A
         # WebSocketのCookieヘッダーから access_token を取得
         cookies = websocket.cookies
         access_token = cookies.get(ACCESS_COOKIE)
-
         if not access_token:
             logger.error("❌ No access token found in cookies")
             return None
 
         payload = decode_token(access_token)
-
         if payload.get("type") != "access":
             logger.error("❌ Invalid token type")
             return None
-
         admin_id = payload.get("sub")
         admin = get_admin_by_id(db, admin_id)
         return admin
     except Exception as e:
         logger.error(f"❌ Admin authentication error: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
 
 @router.websocket("/conversations/delusion")
 async def websocket_delusion_endpoint(
-    websocket: WebSocket,
-    db: Session = Depends(get_db)
+    websocket: WebSocket, db: Session = Depends(get_db)
 ):
     """
     妄想メッセージ用WebSocketエンドポイント
@@ -130,11 +129,11 @@ async def websocket_delusion_endpoint(
 
     # トークン検証
     user = await get_user_from_cookie(websocket, db)
+
     if not user:
         logger.error("❌ Authentication failed, closing connection")
         await websocket.close(code=4001, reason="Invalid token")
         return
-
 
     # ユーザーの妄想メッセージ会話を取得または作成
     conversation = conversations_crud.get_or_create_delusion_conversation(db, user.id)
@@ -148,7 +147,7 @@ async def websocket_delusion_endpoint(
         connection_message = {
             "type": "connected",
             "conversation_id": conversation_id,
-            "message": "Connected to delusion messages"
+            "message": "Connected to delusion messages",
         }
         await websocket.send_json(connection_message)
 
@@ -175,7 +174,7 @@ async def websocket_delusion_endpoint(
                     db=db,
                     conversation_id=UUID(conversation_id),
                     sender_user_id=user.id,
-                    body_text=body_text
+                    body_text=body_text,
                 )
                 logger.info(f"✅ Message saved with ID: {message.id}")
 
@@ -185,14 +184,22 @@ async def websocket_delusion_endpoint(
                     "message": {
                         "id": str(message.id),
                         "conversation_id": str(message.conversation_id),
-                        "sender_user_id": str(message.sender_user_id) if message.sender_user_id else None,
+                        "sender_user_id": str(message.sender_user_id)
+                        if message.sender_user_id
+                        else None,
                         "sender_admin_id": None,
                         "body_text": message.body_text,
                         "created_at": message.created_at.isoformat(),
-                        "sender_username": user.profile_name if hasattr(user, 'profile_name') else None,
-                        "sender_avatar": f"{BASE_URL}/{user.profile.avatar_url}" if user.profile and user.profile.avatar_url else None,
-                        "sender_profile_name": user.profile_name if hasattr(user, 'profile_name') else None
-                    }
+                        "sender_username": user.profile_name
+                        if hasattr(user, "profile_name")
+                        else None,
+                        "sender_avatar": f"{BASE_URL}/{user.profile.avatar_url}"
+                        if user.profile and user.profile.avatar_url
+                        else None,
+                        "sender_profile_name": user.profile_name
+                        if hasattr(user, "profile_name")
+                        else None,
+                    },
                 }
                 await manager.broadcast_to_conversation(conversation_id, broadcast_data)
 
@@ -205,15 +212,14 @@ async def websocket_delusion_endpoint(
     except Exception as e:
         logger.error(f"❌ WebSocket error: {e}")
         import traceback
+
         traceback.print_exc()
         manager.disconnect(websocket, conversation_id)
 
 
 @router.websocket("/admin/conversations/delusion/{conversation_id}")
 async def websocket_admin_delusion_endpoint(
-    websocket: WebSocket,
-    conversation_id: str,
-    db: Session = Depends(get_db)
+    websocket: WebSocket, conversation_id: str, db: Session = Depends(get_db)
 ):
     """
     管理人用WebSocketエンドポイント
@@ -237,11 +243,13 @@ async def websocket_admin_delusion_endpoint(
 
     try:
         # 接続成功メッセージを送信
-        await websocket.send_json({
-            "type": "connected",
-            "conversation_id": conversation_id,
-            "message": "Connected to conversation as admin"
-        })
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "conversation_id": conversation_id,
+                "message": "Connected to conversation as admin",
+            }
+        )
 
         # メッセージの受信ループ
         while True:
@@ -251,10 +259,9 @@ async def websocket_admin_delusion_endpoint(
             if message_type == "message":
                 body_text = data.get("body_text")
                 if not body_text:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "body_text is required"
-                    })
+                    await websocket.send_json(
+                        {"type": "error", "message": "body_text is required"}
+                    )
                     continue
 
                 # メッセージをDBに保存（管理者メッセージとして保存）
@@ -262,24 +269,27 @@ async def websocket_admin_delusion_endpoint(
                     db=db,
                     conversation_id=UUID(conversation_id),
                     sender_admin_id=admin.id,
-                    body_text=body_text
+                    body_text=body_text,
                 )
 
                 # 会話に接続している全員に配信
-                await manager.broadcast_to_conversation(conversation_id, {
-                    "type": "new_message",
-                    "message": {
-                        "id": str(message.id),
-                        "conversation_id": str(message.conversation_id),
-                        "sender_user_id": None,
-                        "sender_admin_id": str(message.sender_admin_id),
-                        "body_text": message.body_text,
-                        "created_at": message.created_at.isoformat(),
-                        "sender_username": "運営",
-                        "sender_avatar": None,
-                        "sender_profile_name": "運営"
-                    }
-                })
+                await manager.broadcast_to_conversation(
+                    conversation_id,
+                    {
+                        "type": "new_message",
+                        "message": {
+                            "id": str(message.id),
+                            "conversation_id": str(message.conversation_id),
+                            "sender_user_id": None,
+                            "sender_admin_id": str(message.sender_admin_id),
+                            "body_text": message.body_text,
+                            "created_at": message.created_at.isoformat(),
+                            "sender_username": "運営",
+                            "sender_avatar": None,
+                            "sender_profile_name": "運営",
+                        },
+                    },
+                )
 
             elif message_type == "mark_read":
                 # 既読マーク
@@ -289,12 +299,11 @@ async def websocket_admin_delusion_endpoint(
                         db=db,
                         conversation_id=UUID(conversation_id),
                         user_id=admin.id,
-                        message_id=UUID(message_id)
+                        message_id=UUID(message_id),
                     )
-                    await websocket.send_json({
-                        "type": "read_confirmed",
-                        "message_id": message_id
-                    })
+                    await websocket.send_json(
+                        {"type": "read_confirmed", "message_id": message_id}
+                    )
 
             elif message_type == "ping":
                 await websocket.send_json({"type": "pong"})
