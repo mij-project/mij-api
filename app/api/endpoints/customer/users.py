@@ -29,7 +29,7 @@ from app.schemas.user import (
     ProfileGachaResponse,
 )
 from app.models.subscriptions import Subscriptions
-from app.constants.enums import ItemType
+from app.constants.enums import ItemType, SubscriptionStatus
 from app.api.commons.utils import generate_email_verification_url
 import os
 from app.crud.email_verification_crud import issue_verification_token
@@ -212,7 +212,7 @@ def get_user_profile_by_username_endpoint(
                         Subscriptions.user_id == current_user.id,
                         Subscriptions.order_id == str(plan.id),
                         Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-                        Subscriptions.status == 1,  # 1=ACTIVE
+                        Subscriptions.status == SubscriptionStatus.ACTIVE,  # 1=ACTIVE
                     )
                     .first() is not None
                 )

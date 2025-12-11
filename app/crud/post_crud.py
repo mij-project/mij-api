@@ -288,6 +288,7 @@ def _build_post_status_query(
             func.min(Prices.currency).label("post_currency"),
             MediaAssets.storage_key.label("thumbnail_key"),
             VideoAsset.duration_sec,
+            func.count(func.distinct(PostPlans.plan_id)).label("plan_count"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
@@ -304,6 +305,7 @@ def _build_post_status_query(
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
+        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status.in_(post_statuses))
