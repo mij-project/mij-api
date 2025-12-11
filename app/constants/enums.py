@@ -224,7 +224,8 @@ class SMSPurpose:
 # バナーの種類
 class BannerType:
     CREATOR = 1 # クリエイター
-    SPECIAL_EVENT = 2 # お知らせ
+    SPECIAL_EVENT = 2 # お知らせ(外部URL)
+    INTERNAL_EVENT = 3 # お知らせ(画像のみ)
 
 # バナーのステータス
 class BannerStatus:

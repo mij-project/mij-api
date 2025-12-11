@@ -499,6 +499,8 @@ def get_account_post_detail(
                 {
                     "id": str(plan.plan_id),
                     "name": getattr(plan.plan, "name", None),
+                    "price": getattr(plan.plan, "price", None),
+                    "currency": getattr(plan.plan, "currency", "JPY"),
                 }
             )
 
@@ -779,6 +781,9 @@ def _convert_posts(posts_list):
         # 投稿タイプを判定
         is_video = post_obj.post_type == 1 if post_obj.post_type else False  # PostType.VIDEO = 1
 
+        # プランに属しているかを判定
+        has_plan = row.plan_count > 0 if hasattr(row, 'plan_count') else False
+
         result.append(AccountPostResponse(
             id=str(post_obj.id),
             description=post_obj.description,
@@ -793,7 +798,8 @@ def _convert_posts(posts_list):
             currency=row.post_currency or "JPY",
             created_at=post_obj.created_at.isoformat() if post_obj.created_at else None,
             duration=duration,
-            is_video=is_video
+            is_video=is_video,
+            has_plan=has_plan
         ))
     return result
 

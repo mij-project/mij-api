@@ -168,13 +168,17 @@ async def get_post_detail(
         # クリエイター情報を整形
         creator_info = _format_creator_info(post_data["creator"], post_data["creator_profile"])
 
+        # 投稿者自身かどうかを判定
+        is_own_post = user_id and str(post_data["post"].creator_user_id) == str(user_id)
+
         # メディア情報を整形
         media_info, thumbnail_key, main_duration = _format_media_info(
             post_data["media_assets"],
             post_data["is_entitlement"],
             post_data["price"],
+            is_own_post,
         )
-        
+
         # カテゴリ情報を整形
         categories_data = _format_categories_info(post_data["categories"])
 
@@ -192,10 +196,11 @@ async def get_post_detail(
             "media_info": media_info,
             "sale_info": sale_info,
             "post_main_duration": main_duration,
+            "is_purchased": post_data["is_entitlement"] or is_own_post,  # 購入済み or 自分の投稿
         }
-        
+
         return post_detail
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -385,10 +390,12 @@ def _create_plan(db: Session, post_id: str, plan_ids: list):
         plan_post.append(create_post_plan(db, plan_post_data))
     return plan_post
 
-def _format_media_info(media_assets: list, is_entitlement: bool, price: dict):
+def _format_media_info(media_assets: list, is_entitlement: bool, price: dict, is_own_post: bool = False):
     """メディア情報を整形する。priceは今後の判定用に受け取る。"""
-    set_media_kind = MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
-    set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
+    # 投稿者自身、または視聴権限がある場合はMAIN_VIDEOを表示
+    should_show_main = is_own_post or is_entitlement
+    set_media_kind = MediaAssetKind.MAIN_VIDEO if should_show_main else MediaAssetKind.SAMPLE_VIDEO
+    set_file_name = "_1080w.webp" if should_show_main else "_blurred.webp"
 
     # 単品販売で価格が0の場合、画像のみブラーなしで表示（動画は通常通りis_entitlementで判定）
     free_image_flg = True if price and price.price == 0 else False

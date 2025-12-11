@@ -160,6 +160,7 @@ class AccountPostResponse(BaseModel):
     created_at: Optional[str] = None
     duration: Optional[str] = None
     is_video: bool = False
+    has_plan: bool = False
 
 class AccountPostStatusResponse(BaseModel):
     pending_posts: List[AccountPostResponse] = []
@@ -186,6 +187,8 @@ class PlanSummary(BaseModel):
     """投稿に紐づくプランの簡易情報"""
     id: str
     name: Optional[str] = None
+    price: Optional[int] = None
+    currency: Optional[str] = "JPY"
 
 
 class AccountPostDetailResponse(BaseModel):
