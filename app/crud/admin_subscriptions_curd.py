@@ -241,7 +241,7 @@ def __get_subscriptions_info_failed(
             and_(
                 Subscriptions.access_type == 1,
                 Subscriptions.status == 3,
-                Subscriptions.last_payment_failed_at.isnot(None),
+                # Subscriptions.last_payment_failed_at.isnot(None),
                 Subscriptions.access_start >= start_naive,
                 Subscriptions.access_start <= end_naive,
             )

@@ -25,7 +25,14 @@ async def get_user_settings(
             new_settings = UserSettings(
                 user_id=current_user.id,
                 type=type,
-                settings={"follow": True, "postLike": True, "postApprove": True, "profileApprove": True, "identityApprove": True},
+                settings={
+                    "follow": True, 
+                    "postLike": True, 
+                    "postApprove": True, 
+                    "profileApprove": True, 
+                    "identityApprove": True,
+                    "newpost_arrival": True,
+                },
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )

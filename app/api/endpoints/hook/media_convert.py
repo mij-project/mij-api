@@ -16,6 +16,7 @@ from app.db.base import get_db
 from app.constants.enums import AuthenticatedFlag
 from app.services.s3.client import MEDIA_BUCKET_NAME, AWS_REGION
 from app.core.logger import Logger
+from app.utils.trigger_batch_notification_newpost_arrival import trigger_batch_notification_newpost_arrival
 logger = Logger.get_logger()
 # Constants
 HLS_VARIANT_SUFFIXES = (
@@ -227,6 +228,10 @@ def _handle_final_hls_completion(db: Session, webhook_data: dict) -> None:
         add_mail_notification_for_post(db, post_id=post.id, type="approved")
         # 投稿に対する通知を追加
         add_notification_for_post(db, post, post.creator_user_id, type="approved")
+
+        # 新着投稿通知をトリガー
+        trigger_batch_notification_newpost_arrival(post_id=str(post.id), creator_user_id=str(post.creator_user_id))
+
 
 def _find_master_file(detail: dict, output_prefix: str) -> Tuple[Optional[str], Optional[int]]:
     """マスターファイルを検索する"""
