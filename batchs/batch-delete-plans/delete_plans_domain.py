@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import select, exists
+from sqlalchemy.sql import delete
 from common.logger import Logger
 from common.db_session import get_db
 from sqlalchemy.orm import Session, aliased
@@ -80,6 +81,16 @@ class DeletePlansDomain:
         posts = db.scalars(stmt).all()
         if posts:
             self.logger.info(f"Marking posts to unpublish: {len(posts)}")
+            post_ids = [post.id for post in posts]
             for post in posts:
                 post.status = 3
+                post.visibility = 1
+
+            db.execute(
+                delete(PostPlans).where(
+                    PostPlans.plan_id == str(plan.id),
+                    PostPlans.post_id.in_(post_ids),
+                )
+            )
+            
             db.commit()
