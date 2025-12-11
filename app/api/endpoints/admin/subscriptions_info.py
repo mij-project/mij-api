@@ -1,7 +1,6 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from app.constants.enums import SubscriptionStatus
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
 from app.models.admins import Admins
@@ -81,6 +80,7 @@ async def get_subscriptions_for_admin(
                 creator_username=subscription.creator_username,
                 status=status,
                 money=subscription.money,
+                payment_amount=subscription.payment_amount,
                 access_start=subscription.Subscriptions.access_start,
                 access_end=subscription.Subscriptions.access_end,
                 canceled_at=subscription.Subscriptions.canceled_at,

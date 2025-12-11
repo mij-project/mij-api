@@ -316,6 +316,7 @@ def me(user: Users = Depends(get_current_user_for_me), db: Session = Depends(get
             "is_identity_verified": user.is_identity_verified,
             "offical_flg": user.offical_flg,
             "user_updated_at": user_updated_at,
+            "user_created_at": user.created_at,
         }
 
     except HTTPException:

@@ -3,7 +3,7 @@ import math
 from typing import Optional
 from sqlalchemy.orm import Session
 from uuid import UUID
-from app.constants.enums import AccountType, PaymentStatus, PaymentType, WithdrawStatus
+from app.constants.enums import AccountType, PaymentStatus, WithdrawStatus
 from app.core.logger import Logger
 from sqlalchemy import func, or_, select, case, cast, and_
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -757,3 +757,91 @@ def update_withdrawal_application_status_by_admin(
         db.rollback()
         logger.exception(f"Update withdrawal application status by admin error: {e}")
         return False
+
+
+def get_payments_by_user_id(
+    db: Session,
+    user_id: UUID,
+    start_date: datetime,
+    end_date: datetime,
+    page: int = 1,
+    limit: int = 20,
+) -> dict:
+    """
+    ユーザーの決済履歴を取得
+    """
+    try:
+        offset = (page - 1) * limit
+        payments_query = (
+            select(
+                Payments,
+                Profiles.username.label("buyer_username"),
+                Prices.post_id.label("single_post_id"),
+                Plans.id.label("plan_id"),
+                Plans.name.label("plan_name"),
+            )
+            .join(Profiles, Profiles.user_id == Payments.buyer_user_id)
+            .outerjoin(
+                Prices,
+                and_(
+                    Payments.order_type == 1,
+                    cast(Payments.order_id, PG_UUID) == Prices.id,
+                ),
+            )
+            .outerjoin(
+                Plans,
+                and_(
+                    Payments.order_type == 2,
+                    cast(Payments.order_id, PG_UUID) == Plans.id,
+                ),
+            )
+            .where(
+                Payments.buyer_user_id == user_id,
+                Payments.status == PaymentStatus.SUCCEEDED,
+                Payments.paid_at >= start_date.replace(tzinfo=None),
+                Payments.paid_at <= end_date.replace(tzinfo=None),
+            )
+            .order_by(Payments.paid_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+
+        count_query = select(func.count()).select_from(
+            select(Payments)
+            .where(
+                Payments.buyer_user_id == user_id,
+                Payments.status == PaymentStatus.SUCCEEDED,
+                Payments.paid_at >= start_date.replace(tzinfo=None),
+                Payments.paid_at <= end_date.replace(tzinfo=None),
+            )
+            .subquery()
+        )
+        total = db.execute(count_query).scalar() or 0
+        rows = db.execute(payments_query).all()
+        total_pages = (total + limit - 1) // limit
+        payments = []
+        for row in rows:
+            payment = {
+                "id": row.Payments.id,
+                "payment_amount": row.Payments.payment_amount,
+                "payment_type": row.Payments.payment_type,
+                "payment_status": row.Payments.status,
+                "paid_at": row.Payments.paid_at,
+                "buyer_username": row.buyer_username,
+                "single_post_id": row.single_post_id,
+                "plan_id": row.plan_id,
+                "plan_name": row.plan_name,
+            }
+            payments.append(payment)
+        return {
+            "payments": payments,
+            "total": total,
+            "total_pages": total_pages,
+            "page": page,
+            "limit": limit,
+            "has_next": (page * limit) < total,
+            "has_previous": page > 1,
+        }
+    except Exception as e:
+        logger.exception(f"Get payments by user id error: {e}")
+        return None
