@@ -6,7 +6,7 @@ from app.schemas.top import (
     RecentPostResponse, TopPageResponse
 )
 from app.crud.categories_crud import get_top_categories
-from app.crud.creater_crud import get_top_creators, get_new_creators
+from app.crud.creator_crud import get_top_creators, get_new_creators
 from app.crud.post_crud import get_ranking_posts, get_recent_posts
 from os import getenv
 from app.api.commons.utils import get_video_duration

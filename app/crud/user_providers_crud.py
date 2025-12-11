@@ -17,14 +17,16 @@ def get_user_provider(
 ) -> UserProviders | None:
     """
     ユーザープロバイダー情報取得（最新の有効なレコードを取得）
+    is_main_cardがTrueのものを優先し、同じ場合はlast_used_atで降順にソート
     """
     result = db.query(UserProviders).filter(
         UserProviders.user_id == user_id,
         UserProviders.provider_id == provider_id,
         UserProviders.is_valid == True
-    ).order_by(UserProviders.last_used_at.desc()).first()
-
-    
+    ).order_by(
+        UserProviders.is_main_card.desc(),  # Trueを優先
+        UserProviders.last_used_at.desc()   # 同じ場合は最新のものを優先
+    ).first()    
     return result
 
 
@@ -88,3 +90,64 @@ def get_user_providers_by_user_id(
         UserProviders.is_valid == True
     ).order_by(UserProviders.last_used_at.desc()).all()
     return result
+
+
+def set_main_card(
+    db: Session,
+    provider_id: UUID,
+    user_id: UUID
+) -> UserProviders:
+    """
+    指定したプロバイダーをメインカードに設定
+    同じユーザーの他のカードは全てis_main_card=Falseに設定する
+    """
+    # 対象のプロバイダーを取得
+    target_provider = db.query(UserProviders).filter(
+        UserProviders.id == provider_id,
+        UserProviders.user_id == user_id,
+        UserProviders.is_valid == True
+    ).first()
+
+    if not target_provider:
+        raise ValueError("指定されたプロバイダーが見つかりません")
+
+    # 同じユーザーの全てのカードのis_main_cardをFalseに設定
+    db.query(UserProviders).filter(
+        UserProviders.user_id == user_id,
+        UserProviders.is_valid == True
+    ).update({"is_main_card": False})
+
+    # 対象のカードをメインカードに設定
+    target_provider.is_main_card = True
+    target_provider.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(target_provider)
+
+    logger.info(f"Set main card: user_id={user_id}, provider_id={provider_id}")
+    return target_provider
+
+
+def delete_user_provider(
+    db: Session,
+    provider_id: UUID,
+    user_id: UUID
+) -> bool:
+    """
+    指定したプロバイダーを物理削除
+    """
+    # 対象のプロバイダーを取得
+    target_provider = db.query(UserProviders).filter(
+        UserProviders.id == provider_id,
+        UserProviders.user_id == user_id
+    ).first()
+
+    if not target_provider:
+        raise ValueError("指定されたプロバイダーが見つかりません")
+
+    # 物理削除
+    db.delete(target_provider)
+    db.commit()
+
+    logger.info(f"Deleted user provider: user_id={user_id}, provider_id={provider_id}")
+    return True

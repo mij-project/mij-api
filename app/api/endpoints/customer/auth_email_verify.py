@@ -114,7 +114,12 @@ def verify_email(
                 verify_url = generate_email_verification_url(raw, email_verification_in.code)
             else:
                 verify_url = generate_email_verification_url(raw)
-            background.add_task(send_email_verification, user.email, verify_url, user.profile_name if hasattr(user, "display_name") else None)
+            background.add_task(
+                send_email_verification, 
+                user.email, 
+                verify_url, 
+                user.profile_name if hasattr(user, "profile_name") else None,
+            )
             db.commit()
             db.refresh(user)
         return {"message": "email resend"}

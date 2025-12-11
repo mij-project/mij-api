@@ -1,12 +1,14 @@
 """
 CREDIX決済Webhookエンドポイント
 """
+
 from fastapi import APIRouter, Query, Depends
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from typing import Optional, Tuple
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
+from app.crud.user_settings_curd import get_user_settings_by_user_id
 from app.schemas.notification import NotificationType
 from app.schemas.user_settings import UserSettingsType
 from app.core.logger import Logger
@@ -17,7 +19,7 @@ from app.crud import (
     payments_crud,
     subscriptions_crud,
     price_crud,
-    plan_crud, 
+    plan_crud,
     user_crud,
     notifications_crud,
 )
@@ -30,13 +32,19 @@ from app.constants.enums import (
     TransactionType,
     ItemType,
 )
-from app.services.email.send_email import send_payment_succuces_email, send_payment_faild_email, send_selling_info_email, send_cancel_subscription_email, send_buyer_cancel_subscription_email
+from app.services.email.send_email import (
+    send_payment_succuces_email,
+    send_payment_faild_email,
+    send_selling_info_email,
+    send_cancel_subscription_email,
+    send_buyer_cancel_subscription_email,
+)
 from app.models.payment_transactions import PaymentTransactions
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
 import os
 
-CDN_BASE_URL = os.environ.get('CDN_BASE_URL')
+CDN_BASE_URL = os.environ.get("CDN_BASE_URL")
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -76,25 +84,28 @@ def _log_webhook_received(
     logger.info(f"cardnumber: {cardnumber}")
     logger.info(f"yuko: {yuko}")
 
+
 def _get_order_info(
     db: Session,
     transaction: PaymentTransactions,
 ) -> Tuple[int, UUID, int]:
     """
     注文情報（価格、売主ユーザーID、プラットフォーム手数料率）を取得
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
-        
+
     Returns:
         (payment_price, seller_user_id, platform_fee_percent) のタプル
-        
+
     Raises:
         ValueError: 注文情報が見つからない場合
     """
     if transaction.type == PaymentTransactionType.SINGLE:
-        price, post, creator = price_crud.get_price_and_post_by_id(db, transaction.order_id)
+        price, post, creator = price_crud.get_price_and_post_by_id(
+            db, transaction.order_id
+        )
         if not price or not post or not creator:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
         return price.price, post.creator_user_id, creator.platform_fee_percent
@@ -111,14 +122,14 @@ def _get_payment_info(
 ) -> Tuple[str, str]:
     """
     決済情報を取得（通知用の相対URLとコンテンツ名）
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
-        
+
     Returns:
         (content_url, contents_name) のタプル
-        
+
     Raises:
         ValueError: 注文情報が見つからない場合
     """
@@ -144,14 +155,14 @@ def _get_selling_info(
 ) -> Tuple[str, str, str, UUID, str, int]:
     """
     売り上げ情報を取得
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
-        
+
     Returns:
         (content_url, contents_name, seller_name, seller_user_id, seller_email, contents_type) のタプル
-        
+
     Raises:
         ValueError: 注文情報が見つからない場合
     """
@@ -169,17 +180,27 @@ def _get_selling_info(
             raise ValueError(f"Plan not found: {transaction.order_id}")
         seller_user_id = plan.creator_user_id
         contents_name = plan.name
-        content_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/plan/{plan.id}"
+        content_url = (
+            f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/plan/{plan.id}"
+        )
         contents_type = PaymentTransactionType.SUBSCRIPTION
 
     seller_user = user_crud.get_user_by_id(db, seller_user_id)
     if not seller_user:
         raise ValueError(f"Seller user not found: {seller_user_id}")
-    
+
     seller_name = seller_user.profile_name
     seller_email = seller_user.email
 
-    return content_url, contents_name, seller_name, seller_user_id, seller_email, contents_type
+    return (
+        content_url,
+        contents_name,
+        seller_name,
+        seller_user_id,
+        seller_email,
+        contents_type,
+    )
+
 
 def _create_payment_record(
     db: Session,
@@ -192,7 +213,7 @@ def _create_payment_record(
 ) -> Payments:
     """
     決済レコードを作成
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
@@ -201,7 +222,7 @@ def _create_payment_record(
         payment_amount: 決済金額
         platform_fee: プラットフォーム手数料（金額）
         status: 決済ステータス（PaymentStatus）
-        
+
     Returns:
         作成された決済レコード
     """
@@ -294,7 +315,7 @@ def _update_or_create_user_provider(
 ) -> None:
     """
     ユーザープロバイダー情報を更新または作成
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
@@ -341,7 +362,7 @@ def _handle_successful_payment(
 ) -> None:
     """
     決済成功時の処理
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
@@ -375,9 +396,11 @@ def _handle_successful_payment(
         logger.info(f"Free payment created: {payment.id}")
 
     else:
-         # 注文情報を取得
+        # 注文情報を取得
         try:
-            payment_price, seller_user_id, platform_fee = _get_order_info(db, transaction)
+            payment_price, seller_user_id, platform_fee = _get_order_info(
+                db, transaction
+            )
         except ValueError as e:
             logger.error(str(e))
             raise
@@ -405,8 +428,13 @@ def _handle_successful_payment(
         logger.info(f"Subscription created: {subscription.id}")
 
     # ユーザープロバイダー情報を更新または作成
-    main_card = True if transaction_origin == TransactionType.PAYMENT_ORIGIN_FREE else False
-    _update_or_create_user_provider(db, transaction, send_id, cardbrand, cardnumber, yuko, main_card)
+    main_card = (
+        True if transaction_origin == TransactionType.PAYMENT_ORIGIN_FREE else False
+    )
+    _update_or_create_user_provider(
+        db, transaction, send_id, cardbrand, cardnumber, yuko, main_card
+    )
+    return payment
 
 
 def _expire_existing_subscriptions(
@@ -415,7 +443,7 @@ def _expire_existing_subscriptions(
 ) -> None:
     """
     既存のアクティブなサブスクリプションを期限切れにする
-    
+
     Args:
         db: データベースセッション
         order_id: 注文ID
@@ -423,9 +451,11 @@ def _expire_existing_subscriptions(
     subscriptions = subscriptions_crud.get_subscription_by_order_id(db, order_id)
     if not subscriptions:
         return
-    
+
     for subscription in subscriptions:
-        subscriptions_crud.update_subscription_status(db, subscription.id, SubscriptionStatus.EXPIRED)
+        subscriptions_crud.update_subscription_status(
+            db, subscription.id, SubscriptionStatus.EXPIRED
+        )
         logger.info(f"Expired subscription updated: subscription_id={subscription.id}")
 
 
@@ -437,7 +467,7 @@ def _handle_failed_payment(
 ) -> None:
     """
     決済失敗時の処理
-    
+
     Args:
         db: データベースセッション
         transaction: 決済トランザクション
@@ -472,10 +502,13 @@ def _handle_failed_payment(
     )
 
     # バッチ決済失敗時でサブスクリプションタイプの場合、期限切れサブスクリプションを処理
-    if transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH and transaction.type == PaymentTransactionType.SUBSCRIPTION:
+    if (
+        transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
+        and transaction.type == PaymentTransactionType.SUBSCRIPTION
+    ):
         # 既存のアクティブなサブスクリプションを期限切れにする
         _expire_existing_subscriptions(db, transaction.order_id)
-        
+
         # 期限切れサブスクリプションレコードを作成
         subscriptions_crud.create_expired_subscription(
             db=db,
@@ -484,7 +517,11 @@ def _handle_failed_payment(
             order_id=transaction.order_id,
             order_type=transaction.type,
         )
-        logger.info(f"Expired subscription created for batch failed payment: transaction_id={transaction.id}")
+        logger.info(
+            f"Expired subscription created for batch failed payment: transaction_id={transaction.id}"
+        )
+    return payment
+
 
 def _send_payment_notifications_for_buyer(
     db: Session,
@@ -500,20 +537,28 @@ def _send_payment_notifications_for_buyer(
     """
 
     # バッチからの成功時は通知を送らない
-    if transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH and result == RESULT_OK:
+    if (
+        transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
+        and result == RESULT_OK
+    ):
         return
 
     # バッチからの失敗時、またはフロントエンドからのリクエスト時のみ処理を続行
-    is_batch_failure = transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH and result == RESULT_NG
+    is_batch_failure = (
+        transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
+        and result == RESULT_NG
+    )
     is_frontend_request = transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT
 
     if not (is_batch_failure or is_frontend_request):
         return
 
-    #　購入者ユーザー情報を取得
+    # 購入者ユーザー情報を取得
     buyer_user = user_crud.get_user_by_id(db, transaction.user_id)
     user_name = buyer_user.profile_name
-    purchase_history_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/bought/post"
+    purchase_history_url = (
+        f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/bought/post"
+    )
     sendid = send_id
     transaction_id = transaction.id
     # UTCからJSTに変換
@@ -532,7 +577,7 @@ def _send_payment_notifications_for_buyer(
     notification_redirect_url, contents_name = _get_payment_info(db, transaction)
 
     # メール用URLを生成（完全なURL）
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://mijfans.jp')
+    frontend_url = os.environ.get("FRONTEND_URL", "https://mijfans.jp")
     email_content_url = f"{frontend_url}{notification_redirect_url}"
 
     # トランザクションタイプを確認（プラン解約の通知が必要かどうか）
@@ -576,7 +621,9 @@ def _send_payment_notifications_for_buyer(
                 plan = plan_crud.get_plan_by_id(db, transaction.order_id)
                 if plan:
                     creator_user = user_crud.get_user_by_id(db, plan.creator_user_id)
-                    creator_user_name = creator_user.profile_name if creator_user else None
+                    creator_user_name = (
+                        creator_user.profile_name if creator_user else None
+                    )
                     send_buyer_cancel_subscription_email(
                         to=user_email,
                         user_name=user_name,
@@ -611,18 +658,24 @@ def _send_payment_notifications_for_buyer(
     # 通知を追加（購入者向け - NotificationType.USERS）
     if is_payment_failed and is_subscription:
         # プラン解約の通知
-        notifications_crud.add_notification_for_cancel_subscription(db=db, notification={
-            "user_id": buyer_user.id,
-            "type": NotificationType.USERS,
-            "payload": payload,
-        })
+        notifications_crud.add_notification_for_cancel_subscription(
+            db=db,
+            notification={
+                "user_id": buyer_user.id,
+                "type": NotificationType.USERS,
+                "payload": payload,
+            },
+        )
     else:
         # 通常の決済通知
-        notifications_crud.add_notification_for_payment_succuces(db=db, notification={
-            "user_id": buyer_user.id,
-            "type": NotificationType.USERS,
-            "payload": payload,
-        })
+        notifications_crud.add_notification_for_payment_succuces(
+            db=db,
+            notification={
+                "user_id": buyer_user.id,
+                "type": NotificationType.USERS,
+                "payload": payload,
+            },
+        )
 
 
 def _add_payment_notifications_for_seller(
@@ -635,9 +688,15 @@ def _add_payment_notifications_for_seller(
 
     # バッチからのリクエストで失敗の場合、またはフロントエンドからのリクエストで成功の場合のみ処理を続行
     # それ以外の場合は通知を追加しない
-    is_batch_failure = result == RESULT_NG and transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
-    is_frontend_success = result == RESULT_OK and transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT
-    
+    is_batch_failure = (
+        result == RESULT_NG
+        and transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
+    )
+    is_frontend_success = (
+        result == RESULT_OK
+        and transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT
+    )
+
     if not (is_batch_failure or is_frontend_success):
         return
 
@@ -648,9 +707,18 @@ def _add_payment_notifications_for_seller(
     notification_redirect_url = "/account/sale"
 
     # メール用は完全なURL
-    dashboard_url = f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/sale"
+    dashboard_url = (
+        f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/sale"
+    )
 
-    content_url, contents_name, seller_name, seller_user_id, seller_email, contents_type = _get_selling_info(db, transaction)
+    (
+        content_url,
+        contents_name,
+        seller_name,
+        seller_user_id,
+        seller_email,
+        contents_type,
+    ) = _get_selling_info(db, transaction)
 
     # バッチからの失敗時のメッセージ
     if is_batch_failure:
@@ -668,7 +736,7 @@ def _add_payment_notifications_for_seller(
     # アバターURLの取得（buyer_userのprofileが存在するか確認）
     avatar_url = "https://logo.mijfans.jp/bimi/logo.svg"
 
-    if hasattr(buyer_user, 'profile') and buyer_user.profile:
+    if hasattr(buyer_user, "profile") and buyer_user.profile:
         if buyer_user.profile.avatar_url:
             # S3の相対パスの場合、完全なURLに変換
             avatar_path = buyer_user.profile.avatar_url
@@ -713,7 +781,10 @@ def _add_payment_notifications_for_seller(
         "type": NotificationType.PAYMENTS,
         "payload": payload,
     }
-    notifications_crud.add_notification_for_selling_info(db=db, notification=notification)
+    notifications_crud.add_notification_for_selling_info(
+        db=db, notification=notification
+    )
+
 
 @router.get("/payment")
 async def payment_webhook(
@@ -744,7 +815,18 @@ async def payment_webhook(
         money: 決済金額
     """
     try:
-        _log_webhook_received(clientip, telno, email, sendid, sendpoint, result, money, cardbrand, cardnumber, yuko)
+        _log_webhook_received(
+            clientip,
+            telno,
+            email,
+            sendid,
+            sendpoint,
+            result,
+            money,
+            cardbrand,
+            cardnumber,
+            yuko,
+        )
 
         # sendpointからtransaction_idを抽出
         if not sendpoint:
@@ -762,7 +844,9 @@ async def payment_webhook(
             return PlainTextResponse(content=CREDIX_SUCCESS_RESPONSE, status_code=200)
 
         # トランザクション取得
-        transaction = payment_transactions_crud.get_transaction_by_id(db, transaction_id)
+        transaction = payment_transactions_crud.get_transaction_by_id(
+            db, transaction_id
+        )
         if not transaction:
             logger.error(f"Transaction not found: {transaction_id}")
             return PlainTextResponse(content=CREDIX_SUCCESS_RESPONSE, status_code=200)
@@ -771,33 +855,50 @@ async def payment_webhook(
         is_success = result == RESULT_OK
         payment_amount = money if money else 0
 
-
         if is_success:
-            _handle_successful_payment(db, transaction, payment_amount, sendid, email, cardbrand, cardnumber, yuko, transaction_origin)
+            payment = _handle_successful_payment(
+                db,
+                transaction,
+                payment_amount,
+                sendid,
+                email,
+                cardbrand,
+                cardnumber,
+                yuko,
+                transaction_origin,
+            )
         else:
-            _handle_failed_payment(db, transaction, payment_amount, transaction_origin)
+            payment = _handle_failed_payment(
+                db, transaction, payment_amount, transaction_origin
+            )
 
-        
+        # get buyer and seller setting notification
+        send_notification_buyer, send_notification_seller = (
+            _get_buyer_and_seller_need_to_send_notification(
+                db, payment.buyer_user_id, payment.seller_user_id
+            )
+        )
         # 0円決済（無料）の場合は決済通知を送信しない
         if transaction_origin != TransactionType.PAYMENT_ORIGIN_FREE:
-            # 決済通知を送信 (バッチからの失敗時、またはフロントエンドからのリクエスト時)
-            _send_payment_notifications_for_buyer(
-                db=db,
-                result=result,
-                transaction=transaction,
-                send_id=sendid,
-                email=email,
-                money=money,
-                transaction_origin=transaction_origin,
-            )
-
-            # 決済通知を追加
-            _add_payment_notifications_for_seller(
-                db=db,
-                result=result,
-                transaction=transaction,
-                transaction_origin=transaction_origin,
-            )
+            if send_notification_buyer:
+                # 決済通知を送信 (バッチからの失敗時、またはフロントエンドからのリクエスト時)
+                _send_payment_notifications_for_buyer(
+                    db=db,
+                    result=result,
+                    transaction=transaction,
+                    send_id=sendid,
+                    email=email,
+                    money=money,
+                    transaction_origin=transaction_origin,
+                )
+            if send_notification_seller:
+                # 決済通知を追加
+                _add_payment_notifications_for_seller(
+                    db=db,
+                    result=result,
+                    transaction=transaction,
+                    transaction_origin=transaction_origin,
+                )
 
         # トランザクションをリフレッシュ
         db.refresh(transaction)
@@ -818,3 +919,30 @@ async def payment_webhook(
 
     finally:
         logger.info("=== CREDIX Webhook受信完了 ===")
+
+
+def _get_buyer_and_seller_need_to_send_notification(
+    db: Session,
+    buyer_user_id: UUID,
+    seller_user_id: UUID,
+) -> Tuple[bool, bool]:
+    """バイヤーとセラーの通知設定を取得"""
+    send_notification_buyer = True
+    send_notification_seller = True
+    buyer_settings = get_user_settings_by_user_id(
+        db, buyer_user_id, UserSettingsType.EMAIL
+    )
+    seller_settings = get_user_settings_by_user_id(
+        db, seller_user_id, UserSettingsType.EMAIL
+    )
+
+    if buyer_settings:
+        buyer_setting = buyer_settings.settings.get("userPayments", True)
+        if not buyer_setting:
+            send_notification_buyer = False
+    if seller_settings:
+        seller_setting = seller_settings.settings.get("creatorPayments", True)
+        if not seller_setting:
+            send_notification_seller = False
+
+    return send_notification_buyer, send_notification_seller

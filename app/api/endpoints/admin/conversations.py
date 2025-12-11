@@ -14,6 +14,8 @@ from app.schemas.conversation import (
     ConversationListResponse,
     MarkAsReadRequest
 )
+import os
+BASE_URL = os.getenv("CDN_BASE_URL")
 
 router = APIRouter()
 
@@ -71,7 +73,7 @@ def get_conversation_messages_admin(
         if sender and profile:
             # ユーザーメッセージの場合
             sender_username = sender.profile_name
-            sender_avatar = profile.avatar_url
+            sender_avatar = f"{BASE_URL}/{profile.avatar_url}" if profile.avatar_url else None
             sender_profile_name = sender.profile_name
         elif admin:
             # 管理者メッセージの場合

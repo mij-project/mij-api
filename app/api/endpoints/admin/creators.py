@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.api.commons.base64helper import decode_b64
+from app.crud.creator_crud import update_creator_platform_fee_by_admin
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
 from app.models.admins import Admins
@@ -13,6 +14,7 @@ from app.crud.sales_crud import (
     get_creators_withdrawals_by_period_for_admin,
     update_withdrawal_application_status_by_admin,
 )
+from app.schemas.creator import CreatorPlatformFeeUpdateRequest
 from app.schemas.withdraw import (
     WithdrawalApplicationHistoryForAdmin,
     WithdrawalApplicationHistoryResponseForAdmin,
@@ -156,5 +158,24 @@ async def update_withdrawal_application(
     if not success:
         raise HTTPException(
             status_code=500, detail="Failed to update withdrawal application"
+        )
+    return {"message": "Ok"}
+
+
+@router.post("/creator-platform-fee-update")
+async def update_creator_platform_fee(
+    payload: CreatorPlatformFeeUpdateRequest,
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user),
+):
+    logger.info(
+        f"Updating creator platform fee {payload.creator_id} with platform fee {payload.platform_fee}"
+    )
+    success = update_creator_platform_fee_by_admin(
+        db, payload.creator_id, payload.platform_fee
+    )
+    if not success:
+        raise HTTPException(
+            status_code=500, detail="Failed to update creator platform fee"
         )
     return {"message": "Ok"}

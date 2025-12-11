@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PostType
 from app.db.base import get_db
-from app.crud.creater_crud import (
+from app.crud.creator_crud import (
     get_ranking_creators_categories_detail,
     get_ranking_creators_categories_overall_all_time,
     get_ranking_creators_categories_overall_daily,

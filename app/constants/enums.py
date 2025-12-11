@@ -224,7 +224,8 @@ class SMSPurpose:
 # バナーの種類
 class BannerType:
     CREATOR = 1 # クリエイター
-    SPECIAL_EVENT = 2 # お知らせ
+    SPECIAL_EVENT = 2 # お知らせ(外部URL)
+    INTERNAL_EVENT = 3 # お知らせ(画像のみ)
 
 # バナーのステータス
 class BannerStatus:
@@ -287,8 +288,8 @@ class WithdrawStatus:
     #1=pending, 2=processing, 3=completed, 4=failed, 5=cancelled
 
 class PaymentType:
-    PLAN = 1 # サブスクリプション
-    SINGLE = 2 # 単品購入
+    PLAN = 2 # サブスクリプション
+    SINGLE = 1 # 単品購入
 
 class UserBankAccountType:
     NORMAL = 1 # 普通

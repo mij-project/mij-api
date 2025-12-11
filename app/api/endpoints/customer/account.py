@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, background
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Dict
-from app.constants.enums import PostType
+from app.constants.enums import PostStatus, PostType
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
@@ -499,6 +499,8 @@ def get_account_post_detail(
                 {
                     "id": str(plan.plan_id),
                     "name": getattr(plan.plan, "name", None),
+                    "price": getattr(plan.plan, "price", None),
+                    "currency": getattr(plan.plan, "currency", "JPY"),
                 }
             )
 
@@ -779,6 +781,9 @@ def _convert_posts(posts_list):
         # 投稿タイプを判定
         is_video = post_obj.post_type == 1 if post_obj.post_type else False  # PostType.VIDEO = 1
 
+        # プランに属しているかを判定
+        has_plan = row.plan_count > 0 if hasattr(row, 'plan_count') else False
+
         result.append(AccountPostResponse(
             id=str(post_obj.id),
             description=post_obj.description,
@@ -793,7 +798,8 @@ def _convert_posts(posts_list):
             currency=row.post_currency or "JPY",
             created_at=post_obj.created_at.isoformat() if post_obj.created_at else None,
             duration=duration,
-            is_video=is_video
+            is_video=is_video,
+            has_plan=has_plan
         ))
     return result
 
@@ -823,6 +829,8 @@ def update_account_post(
         update_data = {}
         if request.status is not None:
             update_data['status'] = request.status
+            if request.status == PostStatus.APPROVED:
+                update_data['expiration_at'] = None
         if request.visibility is not None:
             update_data['visibility'] = request.visibility
         if request.scheduled_at is not None:

@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from app.models.user import Users
 from app.models.profiles import Profiles
@@ -11,7 +12,8 @@ from uuid import UUID
 from app.constants.enums import (
     AccountType,
     AccountStatus,
-    PlanStatus
+    PlanStatus,
+    PostStatus
 )
 from app.crud.profile_crud import get_profile_by_username
 from app.models.posts import Posts
@@ -20,6 +22,7 @@ from app.models.media_assets import MediaAssets
 from app.models.social import Likes, Follows
 from app.models.prices import Prices
 from app.constants.enums import PostStatus, MediaAssetKind, PlanStatus
+from app.api.commons.function import CommonFunction
 import os
 
 BASE_URL = os.getenv("CDN_BASE_URL")
@@ -73,6 +76,8 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
     """
     プランの詳細情報を取得（投稿数、サムネイル）
     """
+    active_post_cond = CommonFunction.get_active_post_cond()
+    
     # プランに紐づく投稿のサムネイルを取得（最大3枚）
     plan_posts_query = (
         db.query(Posts.description, MediaAssets.storage_key)
@@ -82,6 +87,7 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
         .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .limit(3)
         .all()
     )
@@ -102,6 +108,7 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
         .filter(PostPlans.plan_id == plan_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .scalar()
     )
 
@@ -141,6 +148,8 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .subquery()
     )
 
+    active_post_cond = CommonFunction.get_active_post_cond()
+
     posts = (
         db.query(
             Posts,
@@ -158,6 +167,7 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .filter(Posts.creator_user_id == user.id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .group_by(Posts.id, thumbnail_subq.c.thumbnail_key, video_duration_subq.c.duration_sec, Prices.price, Prices.currency)
         .order_by(desc(Posts.created_at))
         .all()
@@ -215,6 +225,7 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .filter(Posts.deleted_at.is_(None))
         .filter(Prices.is_active == True)  # 有効な価格設定のみ
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .group_by(Posts.id, thumbnail_subq_purchase.c.thumbnail_key, Prices.price, Prices.currency, video_duration_subq_purchase.c.duration_sec)
         .order_by(desc(Posts.created_at))
         .all()

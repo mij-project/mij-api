@@ -15,7 +15,7 @@ from app.crud.sms_verifications_crud import (
     get_sms_verification_by_phone_e164_and_purpose,
     update_sms_verification_status
 )
-from app.crud.creater_crud import create_creator
+from app.crud.creator_crud import create_creator
 from app.crud.user_crud import update_user_phone_verified_at
 from app.services.s3.sms_auth import send_sms
 from app.constants.enums import SMSStatus, CreatorStatus
