@@ -13,6 +13,8 @@ from app.models.admins import Admins
 from app.constants.enums import ConversationType, ParticipantType
 from app.models.profiles import Profiles
 from app.constants.messages import WelcomeMessage
+import os
+BASE_URL = os.getenv("CDN_BASE_URL")
 
 logger = Logger.get_logger()
 # ========== 会話管理 ==========
@@ -345,7 +347,7 @@ def get_all_delusion_conversations_for_admin(
                 "user_id": conv.user_id,
                 "user_username": conv.profile_name,
                 "user_profile_name": conv.profile_name,
-                "user_avatar": conv.avatar_url,
+                "user_avatar": f"{BASE_URL}/{conv.avatar_url}" if conv.avatar_url else None,
                 "last_message_text": last_message,
                 "last_message_at": conv.last_message_at,
                 "unread_count": 0,  # 後で実装可能
