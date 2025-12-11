@@ -7,7 +7,7 @@ from app.schemas.creator import (
     IdentityDocumentCreate, IdentityDocumentOut
 )
 from app.db.base import get_db
-from app.crud.creater_crud import (
+from app.crud.creator_crud import (
     create_creator,
     update_creator,
     get_creator_by_user_id,
@@ -20,7 +20,7 @@ from app.crud.gender_crud import get_genders, get_gender_by_slug
 from app.crud.followes_crud import get_follower_count
 from app.models.creator_type import CreatorType
 from app.crud.post_crud import get_total_likes_by_user_id, get_posts_count_by_user_id
-from app.crud.creater_crud import get_creators
+from app.crud.creator_crud import get_creators
 from typing import List
 from os import getenv
 from app.core.logger import Logger

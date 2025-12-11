@@ -48,7 +48,7 @@ def get_subscriptions_summary(db: Session):
             )
             .where(
                 Subscriptions.access_type == 1,
-                Subscriptions.status == SubscriptionStatus.ACTIVE,
+                Subscriptions.status.in_([1, 2]),
             )
             .group_by(Subscriptions.user_id, Subscriptions.order_id)
             .subquery()
@@ -137,6 +137,7 @@ def __get_subscriptions_info_all(
             CreatorProfile.username.label("creator_username"),
             Payments.id.label("payment_id"),
             Payments.payment_price.label("money"),
+            Payments.payment_amount.label("payment_amount"),
         )
         .join(SubscriberProfile, Subscriptions.user_id == SubscriberProfile.user_id)
         .join(CreatorProfile, Subscriptions.creator_id == CreatorProfile.user_id)
@@ -179,6 +180,7 @@ def __get_subscriptions_info_active(
             CreatorProfile.username.label("creator_username"),
             Payments.id.label("payment_id"),
             Payments.payment_price.label("money"),
+            Payments.payment_amount.label("payment_amount"),
         )
         .join(SubscriberProfile, Subscriptions.user_id == SubscriberProfile.user_id)
         .join(CreatorProfile, Subscriptions.creator_id == CreatorProfile.user_id)
@@ -233,6 +235,7 @@ def __get_subscriptions_info_failed(
             CreatorProfile.username.label("creator_username"),
             Payments.id.label("payment_id"),
             Payments.payment_price.label("money"),
+            Payments.payment_amount.label("payment_amount"),
         )
         .join(SubscriberProfile, Subscriptions.user_id == SubscriberProfile.user_id)
         .join(CreatorProfile, Subscriptions.creator_id == CreatorProfile.user_id)
