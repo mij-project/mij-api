@@ -69,7 +69,7 @@ async def create_notification(
     通知を作成
     """
     if not current_admin:
-      raise HTTPExceptiona(status_code=401, detail="Unauthorized")
+      raise HTTPException(status_code=401, detail="Unauthorized")
     done = create_notification_admin(db=db, notification=notification)
     if not done:
       raise HTTPException(status_code=500, detail="Failed to create notification")

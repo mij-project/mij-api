@@ -25,7 +25,7 @@ class Payments(Base):
     transaction_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("payment_transactions.id"), nullable=True, index=True, comment="元となったCredixトランザクション")
 
     # 決済種別
-    payment_type: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="1=subscription(plan_id), 2=one_time_purchase(price_id)")
+    payment_type: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="2=subscription(plan_id), 1=one_time_purchase(price_id)")
 
     # order_id: plan_id または price_id を格納
     order_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, comment="plan_id（サブスク）またはprice_id（単品販売）")

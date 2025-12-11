@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, background
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Dict
-from app.constants.enums import PostType
+from app.constants.enums import PostStatus, PostType
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
@@ -829,6 +829,8 @@ def update_account_post(
         update_data = {}
         if request.status is not None:
             update_data['status'] = request.status
+            if request.status == PostStatus.APPROVED:
+                update_data['expiration_at'] = None
         if request.visibility is not None:
             update_data['visibility'] = request.visibility
         if request.scheduled_at is not None:
