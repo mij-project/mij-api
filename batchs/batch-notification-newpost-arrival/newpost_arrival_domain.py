@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
 import os
 from sqlalchemy.orm import Session, aliased
+from models.posts import Posts
 from common.db_session import get_db
 from common.logger import Logger
 from common.email_service import EmailService
@@ -54,6 +56,13 @@ class NewPostArrivalDomain:
 
     def _send_notification_to_follower(self, follower: Follows):
         try:
+            post = self.db.query(Posts).filter(Posts.id == self.post_id).first()
+            if not post:
+                self.logger.error(f"Post not found: {self.post_id}")
+                return
+            if post.scheduled_at and post.scheduled_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+                self.logger.error(f"Post is scheduled: {self.post_id}")
+                return
             should_send = True
             if follower.settings:
                 newpost_arrival_setting = follower.settings.get("newPostArrival", True)
