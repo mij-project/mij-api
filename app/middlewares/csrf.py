@@ -12,6 +12,7 @@ EXCLUDE_PATHS = {
     "/auth/email/verify", "/auth/email/verify/", "/_debug/send-email",
     "/admin/conversations", "/admin/create-admin", "/users/register/company",
     "/auth/password-reset/request", "/auth/password-reset/confirm",
+    "/tracking/track-access",  # 広告会社トラッキング（匿名アクセス許可）
 }
 
 class CSRFMiddleware(BaseHTTPMiddleware):
