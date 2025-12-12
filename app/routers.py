@@ -35,7 +35,8 @@ from app.api.endpoints.customer import (
     generation_media,
     user_banks as customer_user_banks,
     subscriptions,
-    user_provider
+    user_provider,
+    advertising_agency_tracking
 )
 
 # Admin routes
@@ -54,6 +55,7 @@ from app.api.endpoints.admin import (
     creators as admin_creators,
     reports as admin_reports,
     subscriptions_info as admin_subscriptions_info,
+    advertising_agencies as admin_advertising_agencies,
 )
 
 # Debug routes
@@ -137,6 +139,7 @@ api_router.include_router(
 )
 api_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
 api_router.include_router(user_provider.router, prefix="/user-provider", tags=["User Provider"])
+api_router.include_router(advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"])
 
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])
@@ -186,6 +189,11 @@ api_router.include_router(
     admin_subscriptions_info.router,
     prefix="/admin/subscriptions",
     tags=["Admin Subscriptions Info"],
+)
+api_router.include_router(
+    admin_advertising_agencies.router,
+    prefix="/admin/advertising-agencies",
+    tags=["Admin Advertising Agencies"],
 )
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])

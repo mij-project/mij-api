@@ -42,6 +42,7 @@ from .user_banks import UserBanks
 from .user_providers import UserProviders
 from .withdraws import Withdraws
 from .bank_request_histories import BankRequestHistories
+from .advertising_agencies import AdvertisingAgencies, UserReferrals
 
 __all__ = [
     "Users", "Profiles", "Creators", "Genres", "Categories", "Posts", "PostCategories",
@@ -53,5 +54,6 @@ __all__ = [
     "EmailVerificationTokens", "Conversations", "ConversationMessages", "ConversationParticipants",
     "Admins", "SMSVerifications", "Banners", "Events", "UserEvents", "Companies", "CompanyUsers",
     "SearchHistory", "PasswordResetToken", "UserSettings", "GenerationMedia",
-    "Banks", "UserBanks", "UserProviders", "Withdraws", "BankRequestHistories"
+    "Banks", "UserBanks", "UserProviders", "Withdraws", "BankRequestHistories",
+    "AdvertisingAgencies", "UserReferrals"
 ]

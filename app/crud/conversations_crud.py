@@ -345,7 +345,7 @@ def get_all_delusion_conversations_for_admin(
             {
                 "id": conv.id,
                 "user_id": conv.user_id,
-                "user_username": conv.profile_name,
+                "user_username": conv.username,
                 "user_profile_name": conv.profile_name,
                 "user_avatar": f"{BASE_URL}/{conv.avatar_url}" if conv.avatar_url else None,
                 "last_message_text": last_message,
