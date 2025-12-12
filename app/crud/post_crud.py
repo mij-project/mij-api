@@ -3087,8 +3087,8 @@ def add_notification_for_post(
                     .filter(UserSettings.user_id == post.creator_user_id)
                     .first()
                 )
-                if settings is not None and isinstance(settings[0], dict):
-                    post_approve_setting = settings[0].get("postApprove", True)
+                if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                    post_approve_setting = settings.settings.get("postApprove", True)
                     if post_approve_setting is False:
                         should_send_notification_post_approval = False
                 if not should_send_notification_post_approval:
@@ -3135,12 +3135,12 @@ def add_notification_for_post(
                 )
                 should_send_notification_post_approval = True
                 settings = (
-                    db.query(UserSettings.settings)
+                    db.query(UserSettings)
                     .filter(UserSettings.user_id == post.creator_user_id)
                     .first()
                 )
-                if settings is not None and isinstance(settings[0], dict):
-                    post_approve_setting = settings[0].get("postApprove", True)
+                if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                    post_approve_setting = settings.settings.get("postApprove", True)
                     if post_approve_setting is False:
                         should_send_notification_post_approval = False
                 if not should_send_notification_post_approval:
@@ -3178,8 +3178,8 @@ def add_notification_for_post(
                 .filter(UserSettings.user_id == post.creator_user_id)
                 .first()
             )
-            if settings is not None and isinstance(settings[0], dict):
-                post_like_setting = settings[0].get("postLike", True)
+            if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                post_like_setting = settings.settings.get("postLike", True)
                 if post_like_setting is False:
                     should_send_notification_post_like = False
             if not should_send_notification_post_like:
