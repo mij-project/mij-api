@@ -21,6 +21,9 @@ from app.schemas.withdraw import (
     WithdrawalApplicationRequest,
 )
 
+from app.services.slack.slack import SlackService
+
+slack_alert = SlackService.initialize()
 logger = Logger.get_logger()
 router = APIRouter()
 
@@ -245,6 +248,7 @@ async def create_withdrawal_application(
         raise HTTPException(
             status_code=500, detail="Failed to create withdrawal application"
         )
+    slack_alert._alert_withdrawal_request(current_user.profile_name)
 
     return {"message": "Ok"}
 

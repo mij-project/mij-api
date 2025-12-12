@@ -19,3 +19,4 @@ requests-oauthlib
 itsdangerous
 tenacity
 openpyxl
+slack_sdk
