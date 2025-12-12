@@ -134,7 +134,7 @@ def _get_payment_info(
         ValueError: 注文情報が見つからない場合
     """
     if transaction.type == PaymentTransactionType.SINGLE:
-        price, post = price_crud.get_price_and_post_by_id(db, transaction.order_id)
+        price, post, creator = price_crud.get_price_and_post_by_id(db, transaction.order_id)
         if not price or not post:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
         contents_name = post.description
@@ -167,7 +167,7 @@ def _get_selling_info(
         ValueError: 注文情報が見つからない場合
     """
     if transaction.type == PaymentTransactionType.SINGLE:
-        price, post = price_crud.get_price_and_post_by_id(db, transaction.order_id)
+        price, post, creator = price_crud.get_price_and_post_by_id(db, transaction.order_id)
         if not price or not post:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
         seller_user_id = post.creator_user_id
@@ -907,7 +907,7 @@ async def payment_webhook(
 
     except ValueError as e:
         # 注文情報が見つからない場合など、ビジネスロジックエラー
-        logger.error(f"Payment webhook validation error: {e}")
+        logger.exception(f"Payment webhook validation error: {e}")
         db.rollback()
         return PlainTextResponse(content=CREDIX_SUCCESS_RESPONSE, status_code=200)
 

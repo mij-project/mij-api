@@ -28,7 +28,9 @@ from app.crud.creator_crud import update_creator_status
 from app.constants.enums import CreatorStatus
 from app.crud.user_crud import update_user_identity_verified_at
 from app.core.logger import Logger
+from app.services.slack.slack import SlackService
 
+slack_alert = SlackService.initialize()
 logger = Logger.get_logger()
 router = APIRouter()
 
@@ -140,7 +142,9 @@ def kyc_complete(
             raise HTTPException(500, "身分証明の更新に失敗しました。")
         db.commit()
         db.refresh(users)
+        slack_alert._alert_identity_verification(user.profile_name)
         return {"ok": True, "verification_id": str(body.verification_id)}
     except Exception as e:
+        db.rollback()
         logger.exception("認証情報更新エラーが発生しました")
         raise HTTPException(500, f"Failed to complete: {e}")
