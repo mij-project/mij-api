@@ -145,7 +145,7 @@ def get_posts(
     )
 
 @router.patch("/{post_id}/status")
-def update_post_status(
+def update_post_status_admin(
     post_id: str,
     status: str,
     db: Session = Depends(get_db),
