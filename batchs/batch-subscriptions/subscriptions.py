@@ -3,8 +3,8 @@ import time
 import requests
 from threading import Thread
 from datetime import datetime, timezone
-from sqlalchemy import and_, func
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session, aliased
 from common.db_session import get_db
 from common.logger import Logger
 from models.subscriptions import Subscriptions
@@ -43,21 +43,43 @@ class SubscriptionsDomain:
 
     def _query_inday_need_to_pay_subscriptions(self, db: Session):
         now = datetime.now(timezone.utc)
-        return (
-            db.query(Subscriptions, UserProviders, Payments)
-            .join(
-                UserProviders,
-                and_(
-                    Subscriptions.user_id == UserProviders.user_id,
-                    UserProviders.is_main_card == True,
-                ),
+
+        UP = UserProviders
+
+        provider_ranked_sq = (
+            db.query(
+                UP.provider_id.label("provider_id"),
+                UP.user_id.label("user_id"),
+                func.row_number()
+                .over(
+                    partition_by=UP.provider_id,
+                    order_by=[
+                        desc(UP.is_main_card),
+                        desc(UP.last_used_at).nullslast(),
+                        desc(UP.updated_at).nullslast(),
+                    ],
+                )
+                .label("rn"),
             )
+            .filter(
+                UP.is_valid == True,
+                UP.cardbrand.isnot(None),
+                UP.cardnumber.isnot(None),
+                UP.yuko.isnot(None),
+            )
+            .subquery()
+        )
+        BestProvider = aliased(UserProviders)
+
+        return (
+            db.query(Subscriptions, BestProvider, Payments)
+            .join(provider_ranked_sq, provider_ranked_sq.c.provider_id == Subscriptions.provider_id)
+            .join(BestProvider, BestProvider.user_id == provider_ranked_sq.c.user_id)
             .join(Payments, Subscriptions.payment_id == Payments.id)
             .filter(
-                and_(
-                    func.date(Subscriptions.next_billing_date) == now.date(),
-                    Subscriptions.access_type == 1,
-                )
+                provider_ranked_sq.c.rn == 1,
+                func.date(Subscriptions.next_billing_date) == now.date(),
+                Subscriptions.access_type == 1,
             )
             .all()
         )

@@ -146,7 +146,7 @@ def build_preview_mp4_settings(input_key: str, output_key: str, usermeta: dict):
         "Tags": {"type": "preview", "app": "mij"},
     }
 
-def build_hls_abr4_settings(input_key: str, output_prefix: str, usermeta: dict):
+def build_hls_abr2_settings(input_key: str, output_prefix: str, usermeta: dict):
     """
     HLS ABR4ジョブ作成
     """
@@ -169,9 +169,9 @@ def build_hls_abr4_settings(input_key: str, output_prefix: str, usermeta: dict):
                     "H264Settings": {
                         "RateControlMode": "QVBR",
                         "MaxBitrate": max_br,
-                        "QvbrSettings": {"QvbrQualityLevel": 7},
+                        "QvbrSettings": {"QvbrQualityLevel": 8},
                         "GopSizeUnits": "SECONDS",
-                        "GopSize": 2.0,
+                        "GopSize": 3.0,
                         "NumberBFramesBetweenReferenceFrames": 2,
                         "AdaptiveQuantization": "HIGH",
                         "SceneChangeDetect": "TRANSITION_DETECTION",
@@ -190,7 +190,6 @@ def build_hls_abr4_settings(input_key: str, output_prefix: str, usermeta: dict):
                     "Codec": "AAC",
                     "AacSettings": {"Bitrate": a_br, "CodingMode": "CODING_MODE_2_0", "SampleRate": 48000}
                 },
-                "AudioNormalizationSettings": {"Algorithm": "ITU_BS_1770_4", "AlgorithmControl": "CORRECT_AUDIO"}
             }],
             "ContainerSettings": {"Container": "M3U8"},
             "NameModifier": name_suffix,           # 例: "_360p"
@@ -235,9 +234,7 @@ def build_hls_abr4_settings(input_key: str, output_prefix: str, usermeta: dict):
                     }
                 },
                 "Outputs": [
-                    stream(360,   640,   800_000,   96_000, "_360p"),
-                    stream(480,   854, 1_200_000,   96_000, "_480p"),
-                    stream(720,  1280, 2_500_000,  128_000, "_720p"),
+                    stream(480,   854, 1_200_000,   96_000, "_540p"),
                     stream(1080, 1920, 4_500_000,  128_000, "_1080p"),
                 ]
             }]

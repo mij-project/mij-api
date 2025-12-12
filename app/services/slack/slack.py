@@ -30,9 +30,13 @@ class SlackService:
             SlackService._logger.error("Missing SLACK_ADMIN_APPROVALS_ALERTS")
             return
 
+        env = os.getenv('ENV', 'dev')
+        if env not in ['dev', 'local']:
+            return
+
         try:
             message = (
-                f"環境：[{os.getenv('ENV', 'dev')}]\n"
+                f"環境：[{env}]\n"
                 f"<!channel>\n:fire::fire::fire:\n"
                 f"ユーザー：{user_profile_name}\n"
                 "身分証明書申請きましたぞ！！！"
@@ -47,6 +51,10 @@ class SlackService:
             SlackService._logger.error("Missing SLACK_ADMIN_APPROVALS_ALERTS")
             return
 
+        env = os.getenv('ENV', 'dev')
+        if env not in ['dev', 'local']:
+            return
+
         try:
             if image_type == 1:
                 kind = "プロフィールAvatar"
@@ -56,7 +64,7 @@ class SlackService:
                 kind = f"プロフィール(type={image_type})"
 
             message = (
-                f"環境：[{os.getenv('ENV', 'dev')}]\n"
+                f"環境：[{env}]\n"
                 f"<!channel>\n:fire::fire::fire:\n"
                 f"ユーザー：{user_profile_name}\n"
                 f"{kind}申請きましたぞ！！！"
@@ -71,9 +79,13 @@ class SlackService:
             SlackService._logger.error("Missing SLACK_ADMIN_APPROVALS_ALERTS")
             return
 
+        env = os.getenv('ENV', 'dev')
+        if env not in ['dev', 'local']:
+            return
+
         try:
             message = (
-                f"環境：[{os.getenv('ENV', 'dev')}]\n"
+                f"環境：[{env}]\n"
                 f"<!channel>\n:fire::fire::fire:\n"
                 f"ユーザー：{user_profile_name}\n"
                 "投稿申請がきましたぞ！！！"
@@ -87,10 +99,14 @@ class SlackService:
         if not admin_channel:
             SlackService._logger.error("Missing SLACK_ADMIN_APPROVALS_ALERTS")
             return
+        
+        env = os.getenv('ENV', 'dev')
+        if env not in ['dev', 'local']:
+            return
 
         try:
             message = (
-                f"環境：[{os.getenv('ENV', 'dev')}]\n"
+                f"環境：[{env}]\n"
                 f"<!channel>\n:fire::fire::fire:\n"
                 f"ユーザー：{user_profile_name}\n"
                 "投稿再申請がきましたぞ！！！"
@@ -105,9 +121,13 @@ class SlackService:
             SlackService._logger.error("Missing SLACK_ADMIN_APPROVALS_ALERTS")
             return
 
+        env = os.getenv('ENV', 'dev')
+        if env not in ['dev', 'local']:
+            return
+
         try:
             message = (
-                f"環境：[{os.getenv('ENV', 'dev')}]\n"
+                f"環境：[{env}]\n"
                 f"<!channel>\n:money_with_wings::money_with_wings::money_with_wings:\n"
                 f"ユーザー：{user_profile_name}\n"
                 "出金申請がきましたぞ！！！"
