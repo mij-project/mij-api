@@ -31,7 +31,7 @@ class SlackService:
             return
 
         env = os.getenv('ENV', 'dev')
-        if env not in ['dev', 'local']:
+        if env in ['dev', 'local']:
             return
 
         try:
@@ -52,7 +52,7 @@ class SlackService:
             return
 
         env = os.getenv('ENV', 'dev')
-        if env not in ['dev', 'local']:
+        if env in ['dev', 'local']:
             return
 
         try:
@@ -80,7 +80,7 @@ class SlackService:
             return
 
         env = os.getenv('ENV', 'dev')
-        if env not in ['dev', 'local']:
+        if env in ['dev', 'local']:
             return
 
         try:
@@ -101,7 +101,7 @@ class SlackService:
             return
         
         env = os.getenv('ENV', 'dev')
-        if env not in ['dev', 'local']:
+        if env in ['dev', 'local']:
             return
 
         try:
@@ -122,7 +122,7 @@ class SlackService:
             return
 
         env = os.getenv('ENV', 'dev')
-        if env not in ['dev', 'local']:
+        if env in ['dev', 'local']:
             return
 
         try:

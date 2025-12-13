@@ -84,7 +84,7 @@ def get_banner(
 async def create_banner(
     type: int = Form(..., description="1=クリエイター, 2=イベント"),
     title: str = Form(..., description="バナータイトル"),
-    alt_text: str = Form(..., description="画像の代替テキスト"),
+    alt_text: str = Form("", description="画像の代替テキスト"),
     cta_label: str = Form("", description="CTAラベル"),
     creator_id: Optional[str] = Form(None, description="クリエイターID"),
     external_url: Optional[str] = Form(None, description="外部URL"),
