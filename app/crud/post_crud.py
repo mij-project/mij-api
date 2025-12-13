@@ -791,7 +791,7 @@ def get_ranking_posts(db: Session, limit: int = 5):
     )
 
 
-def get_recent_posts(db: Session, limit: int = 5):
+def get_recent_posts(db: Session, limit: int = 5, offset: int = 0):
     """
     最新の投稿を取得（いいね数も含む）
     """
@@ -843,6 +843,7 @@ def get_recent_posts(db: Session, limit: int = 5):
         )
         .order_by(desc(Posts.created_at))
         .limit(limit)
+        .offset(offset)
         .all()
     )
 
