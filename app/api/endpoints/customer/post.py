@@ -8,6 +8,7 @@ from app.schemas.post import (
     PostCreateRequest,
     PostResponse,
     NewArrivalsResponse,
+    PaginatedNewArrivalsResponse,
     PostUpdateRequest,
     PostOGPResponse,
 )
@@ -225,11 +226,26 @@ async def get_post_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/new-arrivals", response_model=List[NewArrivalsResponse])
-async def get_new_arrivals(db: Session = Depends(get_db)):
+@router.get("/new-arrivals", response_model=PaginatedNewArrivalsResponse)
+async def get_new_arrivals(
+    page: int = Query(1, ge=1, description="ページ番号（1から開始）"),
+    per_page: int = Query(20, ge=1, le=100, description="1ページあたりの件数"),
+    db: Session = Depends(get_db)
+):
     try:
-        recent_posts = get_recent_posts(db, limit=50)
-        return [
+        # ページ番号からオフセットを計算
+        offset = (page - 1) * per_page
+
+        # 次のページがあるか確認するため、1件多く取得
+        recent_posts = get_recent_posts(db, limit=per_page + 1, offset=offset)
+
+        # has_nextの判定
+        has_next = len(recent_posts) > per_page
+
+        # 実際に返すのはper_page件まで
+        posts_to_return = recent_posts[:per_page]
+
+        posts = [
             NewArrivalsResponse(
                 id=str(post.Posts.id),
                 description=post.Posts.description,
@@ -246,8 +262,16 @@ async def get_new_arrivals(db: Session = Depends(get_db)):
                 else None,
                 likes_count=post.likes_count or 0,
             )
-            for post in recent_posts
+            for post in posts_to_return
         ]
+
+        return PaginatedNewArrivalsResponse(
+            posts=posts,
+            page=page,
+            per_page=per_page,
+            has_next=has_next,
+            has_previous=page > 1,
+        )
     except Exception as e:
         logger.error("新着投稿取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
