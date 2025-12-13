@@ -1,49 +1,67 @@
-from math import fabs
+from datetime import datetime, timezone
+import json
+import os
 from fastapi import APIRouter, HTTPException, Depends, Path
 from sqlalchemy.orm import Session
 from app.db.base import get_db
-from app.services.s3.media_covert import build_media_rendition_job_settings, build_hls_abr2_settings
-from app.crud.media_assets_crud import get_media_asset_by_post_id, update_media_asset, get_media_assets_by_ids
-from app.schemas.post_media import PoseMediaCovertRequest
-from app.services.s3.keygen import (
-    transcode_mc_hls_prefix, 
-    transcode_mc_ffmpeg_key
+from app.services.s3.ecs_task import run_ecs_task
+from app.services.s3.media_covert import build_hls_abr2_settings
+from app.crud.media_assets_crud import (
+    get_media_asset_by_post_id,
+    update_media_asset,
+    get_media_assets_by_ids,
 )
+from app.services.s3.keygen import transcode_mc_hls_prefix, transcode_mc_ffmpeg_key
 from app.services.s3.image_screening import (
-    _s3_download_bytes, 
+    _s3_download_bytes,
     _s3_put_bytes,
     _is_supported_magic,
     _sanitize_and_variants,
     _moderation_check,
     _make_variant_keys,
 )
-from app.services.s3.client import s3_client_for_mc, ENV, MEDIA_BUCKET_NAME, INGEST_BUCKET
+from app.services.s3.client import (
+    s3_client_for_mc,
+    ENV,
+    MEDIA_BUCKET_NAME,
+    INGEST_BUCKET,
+)
 from app.constants.enums import (
-    MediaRenditionJobKind, 
-    MediaRenditionJobBackend, 
+    MediaRenditionJobKind,
+    MediaRenditionJobBackend,
     MediaRenditionJobStatus,
-    MediaRenditionKind,
     PostStatus,
     PostType,
     MediaAssetStatus,
     AuthenticatedFlag,
 )
-from app.crud.media_rendition_jobs_crud import create_media_rendition_job, update_media_rendition_job
-from app.crud.media_rendition_crud import create_media_rendition
-from app.crud.media_assets_crud import update_media_asset, update_sub_media_assets_status, update_media_asset_rejected_comments 
-from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, update_post_status
-from app.crud.media_assets_crud import get_media_asset_by_id
+from app.crud.media_rendition_jobs_crud import (
+    create_media_rendition_job,
+    update_media_rendition_job,
+)
+from app.crud.media_assets_crud import (
+    update_sub_media_assets_status,
+    update_media_asset_rejected_comments,
+)
+from app.crud.post_crud import (
+    add_mail_notification_for_post,
+    add_notification_for_post,
+    update_post_status,
+)
 from app.schemas.transcode_mc import TranscodeMCUpdateRequest
-from app.crud.post_crud import get_post_by_id
 from app.constants.enums import MediaAssetKind
 import boto3
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 from app.core.logger import Logger
-from app.utils.trigger_batch_notification_newpost_arrival import trigger_batch_notification_newpost_arrival
+from app.utils.trigger_batch_notification_newpost_arrival import (
+    trigger_batch_notification_newpost_arrival,
+)
+
 logger = Logger.get_logger()
 S3 = boto3.client("s3", region_name="ap-northeast-1")
 
 router = APIRouter()
+
 
 def _create_media_convert_job(
     db: Session,
@@ -52,11 +70,11 @@ def _create_media_convert_job(
     job_kind: MediaRenditionJobKind,
     output_prefix: str,
     usermeta_type: str,
-    build_settings_func
+    build_settings_func,
 ) -> Any:
     """
     メディアコンバートジョブを作成する共通処理
-    
+
     Args:
         db: データベースセッション
         asset_row: メディアアセット行
@@ -65,7 +83,7 @@ def _create_media_convert_job(
         output_prefix: 出力プレフィックス
         usermeta_type: ユーザーメタタイプ
         build_settings_func: 設定ビルド関数
-    
+
     Returns:
         作成されたメディアレンディションジョブ
     """
@@ -82,28 +100,50 @@ def _create_media_convert_job(
 
     # ジョブ設定作成
     usermeta = {
-        "postId": str(post_id), 
-        "assetId": str(asset_row.id), 
+        "postId": str(post_id),
+        "assetId": str(asset_row.id),
         "renditionJobId": str(media_rendition_job.id),
         "type": usermeta_type,
         "env": ENV,
-    } 
-    settings = build_settings_func(
-        input_key=asset_row.storage_key,
-        output_prefix=output_prefix,
-        usermeta=usermeta,
-    )
+    }
+
+    # If using AWS MediaConvert, you can use the following code:
+    # settings = build_settings_func(
+    #     input_key=asset_row.storage_key,
+    #     output_prefix=output_prefix,
+    #     usermeta=usermeta,
+    # )
 
     # MediaConvertにジョブを送信
+    # try:
+    #     mediaconvert_client = s3_client_for_mc()
+    #     response = mediaconvert_client.create_job(**settings)
+
+    #     # ジョブIDを保存
+    #     update_data = {
+    #         "id": media_rendition_job.id,
+    #         "status": MediaRenditionJobStatus.PROGRESSING,
+    #         "job_id": response["Job"]["Id"],
+    #     }
+    # except Exception as e:
+    #     logger.error(f"Error creating MediaConvert job: {e}")
+    #     # エラーが発生した場合はステータスを更新
+    #     update_data = {
+    #         "id": media_rendition_job.id,
+    #         "status": MediaRenditionJobStatus.FAILED,
+    #     }
+
+    # If using ECS Batch, you can use the following code:
     try:
-        mediaconvert_client = s3_client_for_mc()
-        response = mediaconvert_client.create_job(**settings)
-        
-        # ジョブIDを保存
+        _trigger_ecs_media_convert_job(
+            metadata=usermeta,
+            input_key=asset_row.storage_key,
+            output_prefix=output_prefix,
+        )
         update_data = {
             "id": media_rendition_job.id,
             "status": MediaRenditionJobStatus.PROGRESSING,
-            "job_id": response['Job']['Id']
+            "job_id": f"ecs-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
         }
     except Exception as e:
         logger.error(f"Error creating MediaConvert job: {e}")
@@ -112,26 +152,21 @@ def _create_media_convert_job(
             "id": media_rendition_job.id,
             "status": MediaRenditionJobStatus.FAILED,
         }
-
     # ジョブ設定更新
     update_media_rendition_job(db, media_rendition_job.id, update_data)
     db.commit()
     return True
 
 
-def _process_image_asset(
-    db: Session,
-    asset_row: Any,
-    post_id: str
-) -> Optional[Any]:
+def _process_image_asset(db: Session, asset_row: Any, post_id: str) -> Optional[Any]:
     """
     画像アセットを処理する共通処理
-    
+
     Args:
         db: データベースセッション
         asset_row: メディアアセット行
         post_id: 投稿ID
-    
+
     Returns:
         作成されたメディアレンディション（最後のもの）
     """
@@ -147,7 +182,9 @@ def _process_image_asset(
     mod = _moderation_check(img_bytes, min_conf=80.0)
     if mod["flagged"]:
         # ここでDBをREJECTにする等の処理を行っても良い
-        raise HTTPException(status_code=400, detail=f"Image rejected by moderation: {mod['labels']}")
+        raise HTTPException(
+            status_code=400, detail=f"Image rejected by moderation: {mod['labels']}"
+        )
 
     # 4) 正規化＋派生生成
     variants = _sanitize_and_variants(img_bytes)
@@ -156,7 +193,7 @@ def _process_image_asset(
     base_output_key = transcode_mc_ffmpeg_key(
         creator_id=asset_row.creator_user_id,
         post_id=asset_row.post_id,
-        ext="jpg", 
+        ext="jpg",
     )
 
     # ベースキーから派生ファイルの最終保存キーを決定
@@ -186,16 +223,16 @@ def _process_image_asset(
 def transcode_mc_unified(
     post_id: str = Path(..., description="Post ID"),
     post_type: int = Path(..., description="Post Type"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     投稿メディアコンバート統合処理（HLS ABR4 + FFmpeg）
-    
+
     Args:
         post_id: str
         post_type: str
         db: Session
-    
+
     Returns:
         dict: メディアコンバート結果
     """
@@ -220,7 +257,6 @@ def transcode_mc_unified(
         if not assets:
             raise HTTPException(status_code=404, detail="Media asset not found")
 
-
         image_processing_result = False
         for row in assets:
             # HLS ABR4処理（ビデオの場合のみ）
@@ -238,20 +274,24 @@ def transcode_mc_unified(
                     job_kind=MediaRenditionJobKind.HLS_ABR4,
                     output_prefix=output_prefix,
                     usermeta_type="final-hls",
-                    build_settings_func=build_hls_abr2_settings
+                    build_settings_func=build_hls_abr2_settings,
                 )
 
             # FFmpeg処理（画像の場合のみ）
             if type == "image":
                 image_processing_result = _process_image_asset(db, row, post_id)
                 if not image_processing_result:
-                    raise HTTPException(status_code=500, detail="Image processing failed")
+                    raise HTTPException(
+                        status_code=500, detail="Image processing failed"
+                    )
 
         # 画像処理の場合のみ、最後のループ処理でステータス更新と通知を送信
         if type == "image" and image_processing_result:
             # 投稿ステータスの更新
-            post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
-            
+            post = update_post_status(
+                db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED
+            )
+
             db.commit()
             db.refresh(post)
 
@@ -261,7 +301,9 @@ def transcode_mc_unified(
             add_notification_for_post(db, post, post.creator_user_id, type="approved")
 
             # 新着投稿通知をトリガー
-            trigger_batch_notification_newpost_arrival(post_id=post_id, creator_user_id=str(post.creator_user_id))
+            trigger_batch_notification_newpost_arrival(
+                post_id=post_id, creator_user_id=str(post.creator_user_id)
+            )
 
         return {"status": True, "message": f"Media conversion completed for {type}"}
 
@@ -274,10 +316,10 @@ def transcode_mc_unified(
         logger.error(f"メディアコンバート処理にてエラーが発生しました。: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @router.put("/transcode_mc")
 def transcode_mc_update(
-    update_request: TranscodeMCUpdateRequest,
-    db: Session = Depends(get_db)
+    update_request: TranscodeMCUpdateRequest, db: Session = Depends(get_db)
 ):
     """
     再申請メディアアセットのコンバート処理
@@ -296,7 +338,9 @@ def transcode_mc_update(
 
         post = _update_post_status_for_convert(db, post_id, PostStatus.CONVERTING)
 
-        logger.info(f"MediaConvert処理対象アセット更新処理: post_id={post_id}, media_asset_ids={media_asset_ids}")
+        logger.info(
+            f"MediaConvert処理対象アセット更新処理: post_id={post_id}, media_asset_ids={media_asset_ids}"
+        )
 
         result = _update_media_asset_rejected_comments(db, post_id)
         if not result:
@@ -317,19 +361,28 @@ def transcode_mc_update(
         if not assets:
             raise HTTPException(status_code=404, detail="Media asset not found")
 
-        logger.info(f"MediaConvert処理対象アセット: post_id={post_id}, asset_ids={[a.id for a in assets]}, kinds={[a.kind for a in assets]}")
+        logger.info(
+            f"MediaConvert処理対象アセット: post_id={post_id}, asset_ids={[a.id for a in assets]}, kinds={[a.kind for a in assets]}"
+        )
 
         # 動画投稿の場合、メイン・サンプル動画のステータスをRESUBMITに更新
         # （どちらかが再提出された場合、両方を再変換するため）
         if type == "video":
             for asset in assets:
-                if asset.kind in [MediaAssetKind.MAIN_VIDEO, MediaAssetKind.SAMPLE_VIDEO]:
-                    video_update_data = {
-                        "status": MediaAssetStatus.RESUBMIT
-                    }
+                if asset.kind in [
+                    MediaAssetKind.MAIN_VIDEO,
+                    MediaAssetKind.SAMPLE_VIDEO,
+                ]:
+                    video_update_data = {"status": MediaAssetStatus.RESUBMIT}
                     update_media_asset(db, asset.id, video_update_data)
-                    kind_label = "メイン動画" if asset.kind == MediaAssetKind.MAIN_VIDEO else "サンプル動画"
-                    logger.info(f"{kind_label}のステータスをRESUBMITに更新: asset_id={asset.id}")
+                    kind_label = (
+                        "メイン動画"
+                        if asset.kind == MediaAssetKind.MAIN_VIDEO
+                        else "サンプル動画"
+                    )
+                    logger.info(
+                        f"{kind_label}のステータスをRESUBMITに更新: asset_id={asset.id}"
+                    )
 
         for asset in assets:
             if type == "video":
@@ -338,24 +391,40 @@ def transcode_mc_update(
                     post_id=asset.post_id,
                     asset_id=asset.id,
                 )
-                _create_media_convert_job(db, asset, post_id, MediaRenditionJobKind.HLS_ABR4, output_prefix, "final-hls", build_hls_abr2_settings)
+                _create_media_convert_job(
+                    db,
+                    asset,
+                    post_id,
+                    MediaRenditionJobKind.HLS_ABR4,
+                    output_prefix,
+                    "final-hls",
+                    build_hls_abr2_settings,
+                )
             if type == "image":
                 result = _process_image_asset(db, asset, post_id)
                 if not result:
-                    raise HTTPException(status_code=500, detail="Image processing failed")
+                    raise HTTPException(
+                        status_code=500, detail="Image processing failed"
+                    )
                 else:
                     # 投稿ステータスの更新
-                    post = update_post_status(db, post_id, PostStatus.APPROVED, AuthenticatedFlag.AUTHENTICATED)
+                    post = update_post_status(
+                        db,
+                        post_id,
+                        PostStatus.APPROVED,
+                        AuthenticatedFlag.AUTHENTICATED,
+                    )
                     db.commit()
                     db.refresh(post)
 
                     # Email通知を追加
                     add_mail_notification_for_post(db, post_id=post_id, type="approved")
                     # 投稿に対する通知を追加
-                    add_notification_for_post(db, post, asset.creator_user_id, type="approved")
+                    add_notification_for_post(
+                        db, post, asset.creator_user_id, type="approved"
+                    )
 
         return {"status": True, "message": f"Media conversion completed for {type}"}
-
 
     except HTTPException:
         db.rollback()
@@ -364,18 +433,25 @@ def transcode_mc_update(
         db.rollback()
         logger.error(f"メディアコンバート更新処理にてエラーが発生しました。: {e}")
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def update_sub_media_asset(db: Session, post_id: str) -> Optional[Any]:
     """
     サブメディアアセットを更新する
     """
     kind_list = [MediaAssetKind.THUMBNAIL, MediaAssetKind.OGP]
-    media_assets = update_sub_media_assets_status(db, post_id, kind_list, MediaAssetStatus.APPROVED)
+    media_assets = update_sub_media_assets_status(
+        db, post_id, kind_list, MediaAssetStatus.APPROVED
+    )
     return media_assets
 
-def _update_post_status_for_convert(db: Session, post_id: str, status: int) -> Optional[Any]:
+
+def _update_post_status_for_convert(
+    db: Session, post_id: str, status: int
+) -> Optional[Any]:
     """
     投稿ステータスを変換中に更新する
     """
@@ -384,9 +460,87 @@ def _update_post_status_for_convert(db: Session, post_id: str, status: int) -> O
     db.refresh(post)
     return post
 
+
 def _update_media_asset_rejected_comments(db: Session, post_id: str) -> bool:
     """
     メディアアセットを拒否して拒否理由を更新する
     """
     result = update_media_asset_rejected_comments(db, post_id)
     return True
+
+
+def _trigger_ecs_media_convert_job(
+    metadata: dict, input_key: str, output_prefix: str
+) -> bool:
+    """
+    ECSメディアコンバートジョブをトリガーする
+    """
+    ECS_SUBNETS = (
+        os.environ.get("ECS_SUBNETS", "").split(",")
+        if os.environ.get("ECS_SUBNETS")
+        else []
+    )
+    ECS_SECURITY_GROUPS = (
+        os.environ.get("ECS_SECURITY_GROUPS", "").split(",")
+        if os.environ.get("ECS_SECURITY_GROUPS")
+        else []
+    )
+    ECS_ASSIGN_PUBLIC_IP = os.environ.get("ECS_ASSIGN_PUBLIC_IP", "ENABLED")
+    network_configuration = {
+        "awsvpcConfiguration": {
+            "subnets": ECS_SUBNETS,
+            "securityGroups": ECS_SECURITY_GROUPS,
+            "assignPublicIp": ECS_ASSIGN_PUBLIC_IP,
+        }
+    }
+    env = os.environ.get("ENV")
+    if env == "stg":
+        task_definition_prefix = "stg"
+    elif env == "prd":
+        task_definition_prefix = "prd"
+    else:
+        task_definition_prefix = "stg"
+
+    run_ecs_task(
+        cluster=os.environ.get("ECS_VIDEO_BATCH"),
+        task_definition=f"{task_definition_prefix}-mijfans-batch-media-convert",
+        launch_type="FARGATE",
+        overrides={
+            "containerOverrides": [
+                {
+                    "name": os.environ.get("ECS_VODEO_CONTAINER"),
+                    "environment": [
+                        {
+                            "name": "USERMETA_JSON",
+                            "value": json.dumps(metadata),
+                        },
+                        {
+                            "name": "INPUT_KEY",
+                            "value": input_key,
+                        },
+                        {
+                            "name": "OUTPUT_PREFIX",
+                            "value": output_prefix,
+                        },
+                        {
+                            "name": "ENV",
+                            "value": env,
+                        },
+                        {
+                            "name": "INPUT_BUCKET",
+                            "value": os.environ.get("INGEST_BUCKET_NAME"),
+                        },
+                        {
+                            "name": "OUTPUT_BUCKET",
+                            "value": os.environ.get("MEDIA_BUCKET_NAME"),
+                        },
+                        {
+                            "name": "KMS_KEY_ARN",
+                            "value": os.environ.get("KMS_ALIAS_MEDIA"),
+                        },
+                    ],
+                }
+            ]
+        },
+        network_configuration=network_configuration,
+    )
