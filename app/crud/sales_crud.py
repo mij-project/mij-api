@@ -29,7 +29,7 @@ def get_sales_summary_by_creator(db: Session, user_id: UUID) -> dict:
     ユーザーの売上概要を取得
     """
     try:
-        fee_per_payment = func.ceil(
+        fee_per_payment = func.floor(
             Payments.payment_price * Payments.platform_fee / 100.0
         )
         net_per_payment = Payments.payment_price - fee_per_payment
@@ -104,8 +104,8 @@ def get_sales_period_by_creator(
         prev_end_naive = previous_end_date.replace(tzinfo=None)
 
         # 1. 定義: 1レコードあたりの手数料 & ネット売上
-        # fee_per_payment = ceil(payment_price * platform_fee / 100)
-        fee_per_payment = func.ceil(
+        # fee_per_payment = floor(payment_price * platform_fee / 100)
+        fee_per_payment = func.floor(
             Payments.payment_price * Payments.platform_fee / 100.0,
         )
         net_per_payment = Payments.payment_price - fee_per_payment
@@ -251,7 +251,7 @@ def get_sales_history_by_creator(
         rows = db.execute(payments_query).all()
         payments = []
         for row in rows:
-            fee_per_payment = math.ceil(
+            fee_per_payment = math.floor(
                 row.Payments.payment_price * row.Payments.platform_fee / 100.0
             )
             net_per_payment = row.Payments.payment_price - fee_per_payment
@@ -302,8 +302,8 @@ def get_creators_sales_by_period(
         )
 
         # ----- 1. per-payment: fee & net amount -----
-        # fee_per_payment = ceil(payment_price * platform_fee / 100)
-        fee_per_payment = func.ceil(
+        # fee_per_payment = floor(payment_price * platform_fee / 100)
+        fee_per_payment = func.floor(
             Payments.payment_price * Payments.platform_fee / 100.0
         )
         # net_per_payment = payment_price - fee
