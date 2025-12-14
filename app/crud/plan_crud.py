@@ -40,7 +40,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
         .filter(
             Subscriptions.user_id == user_id,
             Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,  # プラン購読
-            Subscriptions.status == SubscriptionStatus.ACTIVE  # active
+            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED])  # active
         )
         .all()
     )
