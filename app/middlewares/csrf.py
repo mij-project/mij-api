@@ -11,7 +11,7 @@ EXCLUDE_PATHS = {
     "/transcodes/transcode_mc", "/preregistrations", "/auth/email/resend", "/auth/email/resend/",
     "/auth/email/verify", "/auth/email/verify/", "/_debug/send-email",
     "/admin/conversations", "/admin/create-admin", "/users/register/company",
-    "/auth/password-reset/request", "/auth/password-reset/confirm",
+    "/auth/password-reset/request", "/auth/password-reset/confirm", "/payments/credix/session"
     "/tracking/track-access",  # 広告会社トラッキング（匿名アクセス許可）
 }
 
