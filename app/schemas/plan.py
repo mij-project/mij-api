@@ -100,7 +100,7 @@ class PlanSubscriberResponse(BaseModel):
     profile_name: str
     avatar_url: Optional[str] = None
     subscribed_at: datetime
-    current_period_end: datetime
+    current_period_end: Optional[datetime] = None
 
     class Config:
         from_attributes = True
