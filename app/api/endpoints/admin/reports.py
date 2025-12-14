@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.crud.admin_reports_curd import (
+    get_credix_income_period_report,
     get_gmv_overalltime_report,
     get_gmv_period_report,
-    get_payment_transactions_period_report,
+    get_credix_payment_transactions_period_report,
     get_revenue_period_report,
     get_untransferred_withdraws_period_report,
 )
@@ -95,28 +96,30 @@ async def get_revenue_report(
     return revenue_reports_period
 
 
-@router.get("/payment-transaction-fee")
-async def get_payment_transactions_report(
+@router.get("/credix-payment-transaction-fee")
+async def get_credix_payment_transactions_report(
     start_date: str,
     end_date: str,
     db: Session = Depends(get_db),
     current_admin: Admins = Depends(get_current_admin_user),
 ):
-    logger.info(f"Getting payment transactions reports for admin: {current_admin.id}")
+    logger.info(
+        f"Getting credix payment transactions reports for admin: {current_admin.id}"
+    )
     start_date = datetime.combine(
         datetime.strptime(start_date, "%Y-%m-%d"), time.min, tzinfo=timezone.utc
     ) - timedelta(hours=9)
     end_date = datetime.combine(
         datetime.strptime(end_date, "%Y-%m-%d"), time.max, tzinfo=timezone.utc
     ) - timedelta(hours=9)
-    payment_transactions_reports_period = get_payment_transactions_period_report(
-        db, start_date, end_date
+    credix_payment_transactions_reports_period = (
+        get_credix_payment_transactions_period_report(db, start_date, end_date)
     )
-    if payment_transactions_reports_period is None:
+    if credix_payment_transactions_reports_period is None:
         raise HTTPException(
-            status_code=500, detail="Error getting payment transactions reports"
+            status_code=500, detail="Error getting credix payment transactions reports"
         )
-    return payment_transactions_reports_period
+    return credix_payment_transactions_reports_period
 
 
 @router.get("/untransferred-withdraws")
@@ -170,20 +173,14 @@ async def get_credix_income_report(
     ) - timedelta(hours=9)
     end_date_of_previous_month = start_date_of_current_month - timedelta(microseconds=1)
 
-    revenue_reports_period = get_revenue_period_report(
+    credix_income_report = get_credix_income_period_report(
         db, start_date_of_previous_month, end_date_of_previous_month
     )
-
-    payment_transactions_reports_period = get_payment_transactions_period_report(
-        db, start_date_of_previous_month, end_date_of_previous_month
-    )
-
-    pevious_month_revenue = revenue_reports_period["total_platform_fee_gross"] or 0
-    pevious_month_payment_transactions = (
-        payment_transactions_reports_period["total_payment_transaction_fee"] or 0
-    )
-    total_income = max(pevious_month_revenue - pevious_month_payment_transactions, 0)
-
+    if credix_income_report is None:
+        raise HTTPException(
+            status_code=500, detail="Error getting credix income report"
+        )
+    total_income = credix_income_report["total_income"]
     return {
         "this_month": now_utc.month,
         "previous_month": prev_month,

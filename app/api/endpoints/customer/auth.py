@@ -47,6 +47,7 @@ from app.constants.event_code import EventCode
 from app.crud.user_events_crud import create_user_event
 from app.crud.events_crud import get_event_by_code
 from app.core.logger import Logger
+from app.crud import advertising_agencies_crud
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -121,10 +122,20 @@ def x_login(request: Request, company_code: str = None):
         if "oauth_token" not in tokens or "oauth_token_secret" not in tokens:
             raise HTTPException(400, f"invalid payload: {res.text}")
 
-        # セッション退避（既存のセッションデータをクリア）
-        request.session.clear()
+        # リファラルコードを保持したままOAuth情報を保存
+        # IMPORTANT: session.clear()は使わない（referral_codeなどが消えてしまうため）
+        referral_code = request.session.get("referral_code")  # 既存のリファラルコードを退避
+        session_id = request.session.get("session_id")  # 既存のセッションIDを退避
+
         request.session["oauth_token"] = tokens["oauth_token"]
         request.session["oauth_token_secret"] = tokens["oauth_token_secret"]
+
+        # 退避したデータを復元
+        if referral_code:
+            request.session["referral_code"] = referral_code
+            logger.info(f"X認証開始時: リファラルコードを保持 referral_code={referral_code}")
+        if session_id:
+            request.session["session_id"] = session_id
 
         # 企業コードもセッションに保存
         if company_code:
@@ -243,6 +254,17 @@ def x_callback(
             if preregistration:
                 _insert_user_event(db, user.id, EventCode.PRE_REGISTRATION)
 
+            # 広告会社経由の登録判定（セッションからリファラルコードを取得）
+            logger.info(f"X認証時のセッション内容: {dict(request.session)}")
+            referral_code = request.session.get("referral_code")
+            logger.info(f"セッションから取得したリファラルコード: {referral_code}")
+            if referral_code:
+                _insert_user_referral(db, referral_code, user.id)
+                # セッションからリファラルコードを削除
+                request.session.pop("referral_code", None)
+            else:
+                logger.warning("X認証時にセッションにリファラルコードが存在しませんでした")
+
             is_new_user = True
         else:
             # 既存ユーザーの場合、ユーザー情報を取得して更新
@@ -316,6 +338,7 @@ def me(user: Users = Depends(get_current_user_for_me), db: Session = Depends(get
             "is_identity_verified": user.is_identity_verified,
             "offical_flg": user.offical_flg,
             "user_updated_at": user_updated_at,
+            "user_created_at": user.created_at,
         }
 
     except HTTPException:
@@ -572,3 +595,36 @@ def _insert_user_event(db: Session, user_id: str, event_code: str) -> bool:
     if event:
         return create_user_event(db, user_id, event.id)
     return False
+
+
+def _insert_user_referral(db: Session, referral_code: str, user_id: str) -> bool:
+    """広告会社経由のユーザーリファラルを記録
+
+    Args:
+        db (Session): データベースセッション
+        referral_code (str): リファラルコード
+        user_id (str): ユーザーID
+
+    Returns:
+        bool: ユーザーリファラルの記録成功
+    """
+    try:
+        # リファラルコードから広告会社を検索
+        agency = advertising_agencies_crud.get_advertising_agency_by_code(db, referral_code)
+        if not agency:
+            logger.warning(f"リファラルコード '{referral_code}' に対応する広告会社が見つかりません")
+            return False
+
+        # user_referralsテーブルにレコードを追加
+        advertising_agencies_crud.create_user_referral(
+            db=db,
+            user_id=user_id,
+            agency_id=agency.id,
+            referral_code=referral_code,
+            landing_page=None  # X認証時点では landing_page は不明
+        )
+        logger.info(f"ユーザーリファラルを記録しました (X認証): user_id={user_id}, referral_code={referral_code}")
+        return True
+    except Exception as e:
+        logger.error(f"ユーザーリファラルの記録に失敗しました: {e}")
+        return False

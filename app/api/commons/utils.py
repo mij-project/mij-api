@@ -151,3 +151,12 @@ def generate_email_verification_url(token: str, code: Optional[UUID] = None) -> 
         return f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={token}&code={code}"
     else:
         return f"{os.getenv('FRONTEND_URL')}/auth/verify-email?token={token}"
+
+def generate_advertising_agency_code() -> str:
+    """
+    広告会社コードを生成ランダムな10桁の数字とアルファベット
+
+    Returns:
+        str: 広告会社コード
+    """
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))

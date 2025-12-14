@@ -180,7 +180,7 @@ def get_banners_paginated(
     results = query.offset(skip).limit(limit).all()
 
     # データ変換
-    type_labels = {1: "クリエイター", 2: "イベント"}
+    type_labels = {1: "クリエイター", 2: "バナー広告(外部URL)", 3: "バナー広告(画像のみ)"}
     status_labels = {0: "無効", 1: "有効", 2: "下書き"}
 
     banners = []
@@ -374,7 +374,7 @@ def get_banner_detail(
     username = result[1]
     profile_name = result[2]
 
-    type_labels = {BannerType.CREATOR: "クリエイター", BannerType.SPECIAL_EVENT: "イベント"}
+    type_labels = {BannerType.CREATOR: "クリエイター", BannerType.SPECIAL_EVENT: "バナー広告(外部URL)", BannerType.INTERNAL_EVENT: "バナー広告(画像のみ)"}
     status_labels = {BannerStatus.INACTIVE: "無効", BannerStatus.ACTIVE: "有効", BannerStatus.DRAFT: "下書き"}
 
     return {

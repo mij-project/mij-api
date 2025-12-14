@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from .user_banks import UserBanks
     from .withdraws import Withdraws
     from .bank_request_histories import BankRequestHistories
+    from .advertising_agencies import UserReferrals
 
 class Users(Base):
     __tablename__ = "users"
@@ -69,6 +70,7 @@ class Users(Base):
     company_users: Mapped[List["CompanyUsers"]] = relationship("CompanyUsers", back_populates="user")
     password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship("PasswordResetToken", back_populates="user")
     generation_media: Mapped[["GenerationMedia"]] = relationship("GenerationMedia", back_populates="user")
+    user_referrals: Mapped[List["UserReferrals"]] = relationship("UserReferrals", back_populates="user")
 
     # 決済システム関連
     subscriptions: Mapped[List["Subscriptions"]] = relationship("Subscriptions", back_populates="user", foreign_keys="Subscriptions.user_id")

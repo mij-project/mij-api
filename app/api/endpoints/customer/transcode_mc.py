@@ -2,7 +2,7 @@ from math import fabs
 from fastapi import APIRouter, HTTPException, Depends, Path
 from sqlalchemy.orm import Session
 from app.db.base import get_db
-from app.services.s3.media_covert import build_media_rendition_job_settings, build_hls_abr4_settings
+from app.services.s3.media_covert import build_media_rendition_job_settings, build_hls_abr2_settings
 from app.crud.media_assets_crud import get_media_asset_by_post_id, update_media_asset, get_media_assets_by_ids
 from app.schemas.post_media import PoseMediaCovertRequest
 from app.services.s3.keygen import (
@@ -39,6 +39,7 @@ from app.constants.enums import MediaAssetKind
 import boto3
 from typing import Dict, Any, Optional
 from app.core.logger import Logger
+from app.utils.trigger_batch_notification_newpost_arrival import trigger_batch_notification_newpost_arrival
 logger = Logger.get_logger()
 S3 = boto3.client("s3", region_name="ap-northeast-1")
 
@@ -237,7 +238,7 @@ def transcode_mc_unified(
                     job_kind=MediaRenditionJobKind.HLS_ABR4,
                     output_prefix=output_prefix,
                     usermeta_type="final-hls",
-                    build_settings_func=build_hls_abr4_settings
+                    build_settings_func=build_hls_abr2_settings
                 )
 
             # FFmpeg処理（画像の場合のみ）
@@ -258,6 +259,9 @@ def transcode_mc_unified(
             add_mail_notification_for_post(db, post_id=post_id, type="approved")
             # 投稿に対する通知を追加
             add_notification_for_post(db, post, post.creator_user_id, type="approved")
+
+            # 新着投稿通知をトリガー
+            trigger_batch_notification_newpost_arrival(post_id=post_id, creator_user_id=str(post.creator_user_id))
 
         return {"status": True, "message": f"Media conversion completed for {type}"}
 
@@ -334,7 +338,7 @@ def transcode_mc_update(
                     post_id=asset.post_id,
                     asset_id=asset.id,
                 )
-                _create_media_convert_job(db, asset, post_id, MediaRenditionJobKind.HLS_ABR4, output_prefix, "final-hls", build_hls_abr4_settings)
+                _create_media_convert_job(db, asset, post_id, MediaRenditionJobKind.HLS_ABR4, output_prefix, "final-hls", build_hls_abr2_settings)
             if type == "image":
                 result = _process_image_asset(db, asset, post_id)
                 if not result:

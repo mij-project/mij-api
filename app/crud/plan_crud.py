@@ -200,8 +200,8 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 .filter(
                     Subscriptions.order_id == str(plan.id),
                     Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-                    Subscriptions.status == 1,
-                    Subscriptions.canceled_at.is_(None)
+                    Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),
+                    # Subscriptions.canceled_at.is_(None)
                 )
                 .scalar() or 0
             )
@@ -215,7 +215,8 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 "display_order": plan.display_order,
                 "welcome_message": plan.welcome_message,
                 "post_count": post_count,
-                "subscriber_count": subscriber_count
+                "subscriber_count": subscriber_count,
+                "plan_status": plan.status
             })
 
     return plans_response
@@ -296,6 +297,16 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         .first() is not None
     )
 
+    subscriptions_count = (
+        db.query(func.count(Subscriptions.id))
+        .filter(
+            Subscriptions.order_id == str(plan_id),
+            Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
+            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),
+        )
+        .scalar() or 0
+    )
+
     return {
         "id": plan.id,
         "name": plan.name,
@@ -307,7 +318,8 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         "creator_avatar_url": f"{BASE_URL}/{creator_info.avatar_url}" if creator_info and creator_info.avatar_url else None,
         "creator_cover_url": f"{BASE_URL}/{creator_info.cover_url}" if creator_info and creator_info.cover_url else None,
         "post_count": post_count or 0,
-        "is_subscribed": is_subscribed
+        "is_subscribed": is_subscribed,
+        "subscriptions_count": subscriptions_count
     }
 
 def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, page: int = 1, per_page: int = 20):
@@ -442,6 +454,18 @@ def request_plan_deletion(db: Session, plan_id: UUID) -> Optional[Plans]:
     plan.status = PlanLifecycleStatus.DELETE_REQUESTED
     plan.updated_at = datetime.now(timezone.utc)
     db.flush()
+    subscriptions = (
+        db.query(Subscriptions)
+        .filter(
+            Subscriptions.order_id == str(plan_id),
+            Subscriptions.status == SubscriptionStatus.ACTIVE
+        ).all())
+    for subscription in subscriptions:
+        subscription.status = SubscriptionStatus.CANCELED
+        subscription.cancel_at_period_end = True
+        subscription.canceled_at = datetime.now(timezone.utc)
+        db.flush()
+    # プランに含まれている投稿を削除
     return plan
 
 def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, per_page: int = 20) -> dict:
@@ -456,8 +480,8 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
         .filter(
             Subscriptions.order_id == str(plan_id),
             Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-            Subscriptions.status == 1,
-            Subscriptions.canceled_at.is_(None)
+            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),
+            # Subscriptions.canceled_at.is_(None)
         )
         .scalar()
     )
@@ -470,15 +494,16 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
             Users.profile_name,
             Profiles.avatar_url,
             Subscriptions.created_at,
-            Subscriptions.current_period_end
+            # Subscriptions.cancel_at_period_end,
+            Subscriptions.access_end
         )
         .join(Subscriptions, Users.id == Subscriptions.user_id)
         .join(Profiles, Users.id == Profiles.user_id)
         .filter(
             Subscriptions.order_id == str(plan_id),
             Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-            Subscriptions.status == 1,
-            Subscriptions.canceled_at.is_(None)
+            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),
+            # Subscriptions.canceled_at.is_(None)
         )
         .order_by(Subscriptions.created_at.desc())
         .offset(offset)
@@ -487,14 +512,14 @@ def get_plan_subscribers_paginated(db: Session, plan_id: UUID, page: int = 1, pe
     )
     
     subscribers = []
-    for user_id, username, profile_name, avatar_url, subscribed_at, current_period_end in subscribers_query:
+    for user_id, username, profile_name, avatar_url, subscribed_at, access_end in subscribers_query:
         subscribers.append({
             "user_id": user_id,
             "username": username,
             "profile_name": profile_name,
             "avatar_url": f"{BASE_URL}/{avatar_url}" if avatar_url else None,
             "subscribed_at": subscribed_at,
-            "current_period_end": current_period_end
+            "current_period_end": access_end
         })
     
     has_next = (offset + per_page) < total
@@ -719,3 +744,16 @@ def get_plan_monthly_sales(db: Session, creator_user_id: UUID) -> int:
     )
 
     return int(total_sales) if total_sales else 0
+
+def delete_plan(db: Session, plan_id: UUID) -> Optional[Plans]:
+    """
+    プランを削除
+    """
+    plan = db.query(Plans).filter(Plans.id == plan_id, Plans.deleted_at.is_(None)).first()
+    if not plan:
+        return None
+    
+    plan.deleted_at = datetime.now(timezone.utc)
+    plan.status = PlanLifecycleStatus.DELETED
+    db.flush()
+    return plan

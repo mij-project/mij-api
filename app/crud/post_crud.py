@@ -2,10 +2,10 @@ import os
 from operator import or_
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import distinct, func, desc, and_, BigInteger, union_all, Text
+from sqlalchemy import cast, distinct, func, desc, and_, BigInteger, union_all, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.crud.subscriptions_crud import check_viewing_rights
-from app.models import UserSettings
+from app.models import Payments, UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
 from app.models.posts import Posts
@@ -14,6 +14,7 @@ from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from app.constants.enums import (
     AccountType,
+    PaymentStatus,
     PostStatus,
     MediaAssetKind,
     MediaAssetStatus,
@@ -272,15 +273,45 @@ def _build_post_status_query(
     投稿ステータス取得クエリの共通部分
     """
     VideoAsset = aliased(MediaAssets)
+    price_purchase_sq = (
+        db.query(
+            Prices.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("price_purchase_count"),
+        )
+        .join(
+            Payments,
+            (Payments.order_type == 1)
+            & (cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id),
+        )
+        .filter(Payments.status == PaymentStatus.SUCCEEDED)
+        .group_by(Prices.post_id)
+    ).subquery()
+
+    plan_purchase_sq = (
+        db.query(
+            PostPlans.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("plan_purchase_count"),
+        )
+        .join(
+            Payments,
+            (Payments.order_type == 2)
+            & (cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id),
+        )
+        .filter(Payments.status == PaymentStatus.SUCCEEDED)
+        .group_by(PostPlans.post_id)
+    ).subquery()
 
     return (
         db.query(
             Posts,
             func.count(func.distinct(Likes.user_id)).label("likes_count"),
             func.count(func.distinct(Comments.id)).label("comments_count"),
-            func.cast(0, BigInteger).label(
-                "purchase_count"
-            ),  # 仮の値: 決済処理未実装のため0を返す
+            (
+                func.coalesce(price_purchase_sq.c.price_purchase_count, 0)
+                + func.coalesce(plan_purchase_sq.c.plan_purchase_count, 0)
+            )
+            .cast(BigInteger)
+            .label("purchase_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
@@ -288,6 +319,7 @@ def _build_post_status_query(
             func.min(Prices.currency).label("post_currency"),
             MediaAssets.storage_key.label("thumbnail_key"),
             VideoAsset.duration_sec,
+            func.count(func.distinct(PostPlans.plan_id)).label("plan_count"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
@@ -304,6 +336,9 @@ def _build_post_status_query(
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
+        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
+        .outerjoin(price_purchase_sq, price_purchase_sq.c.post_id == Posts.id)
+        .outerjoin(plan_purchase_sq, plan_purchase_sq.c.post_id == Posts.id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status.in_(post_statuses))
@@ -314,6 +349,8 @@ def _build_post_status_query(
             Profiles.avatar_url,
             MediaAssets.storage_key,
             VideoAsset.duration_sec,
+            price_purchase_sq.c.price_purchase_count,
+            plan_purchase_sq.c.plan_purchase_count,
         )
         .order_by(desc(Posts.created_at))
     )
@@ -754,7 +791,7 @@ def get_ranking_posts(db: Session, limit: int = 5):
     )
 
 
-def get_recent_posts(db: Session, limit: int = 5):
+def get_recent_posts(db: Session, limit: int = 5, offset: int = 0):
     """
     最新の投稿を取得（いいね数も含む）
     """
@@ -806,6 +843,7 @@ def get_recent_posts(db: Session, limit: int = 5):
         )
         .order_by(desc(Posts.created_at))
         .limit(limit)
+        .offset(offset)
         .all()
     )
 
@@ -3050,8 +3088,8 @@ def add_notification_for_post(
                     .filter(UserSettings.user_id == post.creator_user_id)
                     .first()
                 )
-                if settings is not None and isinstance(settings[0], dict):
-                    post_approve_setting = settings[0].get("postApprove", True)
+                if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                    post_approve_setting = settings.settings.get("postApprove", True)
                     if post_approve_setting is False:
                         should_send_notification_post_approval = False
                 if not should_send_notification_post_approval:
@@ -3098,12 +3136,12 @@ def add_notification_for_post(
                 )
                 should_send_notification_post_approval = True
                 settings = (
-                    db.query(UserSettings.settings)
+                    db.query(UserSettings)
                     .filter(UserSettings.user_id == post.creator_user_id)
                     .first()
                 )
-                if settings is not None and isinstance(settings[0], dict):
-                    post_approve_setting = settings[0].get("postApprove", True)
+                if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                    post_approve_setting = settings.settings.get("postApprove", True)
                     if post_approve_setting is False:
                         should_send_notification_post_approval = False
                 if not should_send_notification_post_approval:
@@ -3141,8 +3179,8 @@ def add_notification_for_post(
                 .filter(UserSettings.user_id == post.creator_user_id)
                 .first()
             )
-            if settings is not None and isinstance(settings[0], dict):
-                post_like_setting = settings[0].get("postLike", True)
+            if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                post_like_setting = settings.settings.get("postLike", True)
                 if post_like_setting is False:
                     should_send_notification_post_like = False
             if not should_send_notification_post_like:

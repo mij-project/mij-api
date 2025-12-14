@@ -4,18 +4,18 @@ from uuid import UUID
 from datetime import datetime
 from fastapi import UploadFile
 
-BannerType = Literal[1, 2]  # 1=クリエイター, 2=イベント
+BannerType = Literal[1, 2, 3]  # 1=クリエイター, 2=バナー広告(外部URL), 3=バナー広告(画像のみ)
 BannerStatus = Literal[0, 1, 2]  # 0=無効, 1=有効, 2=下書き
 
 
 class BannerCreateRequest(BaseModel):
     """バナー作成リクエスト"""
-    type: BannerType = Field(..., description="1=クリエイター, 2=イベント")
+    type: BannerType = Field(..., description="1=クリエイター, 2=バナー広告(外部URL), 3=バナー広告(画像のみ)")
     title: str = Field(..., min_length=1, max_length=100, description="バナータイトル")
-    alt_text: str = Field(..., min_length=1, max_length=200, description="画像の代替テキスト")
+    alt_text: str = Field(default="", max_length=200, description="画像の代替テキスト")
     cta_label: str = Field(default="", max_length=50, description="CTAラベル")
     creator_id: Optional[UUID] = Field(None, description="クリエイターID (type=1の場合必須)")
-    external_url: Optional[str] = Field(None, max_length=500, description="外部URL (type=2の場合必須)")
+    external_url: Optional[str] = Field(None, max_length=500, description="外部URL (type=2の場合のみ)")
     status: BannerStatus = Field(default=2, description="0=無効, 1=有効, 2=下書き")
     start_at: Optional[datetime] = Field(None, description="表示開始日時")
     end_at: Optional[datetime] = Field(None, description="表示終了日時")
@@ -34,9 +34,8 @@ class BannerCreateRequest(BaseModel):
     @field_validator('external_url')
     @classmethod
     def validate_external_url(cls, v, info):
-        """type=2の場合、external_urlは必須"""
-        if info.data.get('type') == 2 and not v:
-            raise ValueError('type=2の場合、external_urlは必須です')
+        """type=2の場合のみexternal_urlを設定可能（必須ではない）"""
+        # type=2以外でexternal_urlが設定されている場合は警告（ただしエラーにはしない）
         return v
 
     @field_validator('end_at')
@@ -61,9 +60,9 @@ class BannerCreateRequest(BaseModel):
 
 class BannerUpdateRequest(BaseModel):
     """バナー更新リクエスト"""
-    type: Optional[BannerType] = Field(None, description="1=クリエイター, 2=イベント")
+    type: Optional[BannerType] = Field(None, description="1=クリエイター, 2=バナー広告(外部URL), 3=バナー広告(画像のみ)")
     title: Optional[str] = Field(None, min_length=1, max_length=100, description="バナータイトル")
-    alt_text: Optional[str] = Field(None, min_length=1, max_length=200, description="画像の代替テキスト")
+    alt_text: Optional[str] = Field(None, max_length=200, description="画像の代替テキスト")
     cta_label: Optional[str] = Field(None, max_length=50, description="CTAラベル")
     creator_id: Optional[UUID] = Field(None, description="クリエイターID")
     external_url: Optional[str] = Field(None, max_length=500, description="外部URL")

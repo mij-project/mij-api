@@ -1,8 +1,7 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, desc, asc
+from sqlalchemy import desc, asc
 from datetime import datetime, timezone
-from uuid import UUID
 
 from app.models.notifications import Notifications
 from app.models.user import Users
@@ -11,7 +10,6 @@ from app.models.identity import IdentityVerifications
 from app.models.posts import Posts
 from app.models.profiles import Profiles
 from app.models.media_assets import MediaAssets
-from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
 from app.models.profile_image_submissions import ProfileImageSubmissions
 from app.constants.enums import PostStatus, MediaAssetStatus
@@ -533,8 +531,11 @@ def update_post_status(db: Session, post_id: str, status: str) -> bool:
             "resubmit": PostStatus.RESUBMIT,
             "deleted": PostStatus.DELETED,
             "pending": PostStatus.PENDING,
+            "unpublished": PostStatus.UNPUBLISHED,
         }
         post.status = status_map.get(status, PostStatus.PENDING)
+        if status == "unpublished":
+            post.deleted_at = None
         post.updated_at = datetime.now(timezone.utc)
         
         db.commit()
