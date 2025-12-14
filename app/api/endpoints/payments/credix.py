@@ -25,6 +25,7 @@ from app.constants.enums import PaymentTransactionType, TransactionType
 from app.constants.messages import CredixMessage    
 from app.core.logger import Logger
 import os
+import math
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://mijfans.jp")
 
 logger = Logger.get_logger()
@@ -253,7 +254,8 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
             price = price_crud.get_price_by_id(db, request.price_id)
             if not price:
                 raise HTTPException(status_code=404, detail="Price not found")
-            money = int(price.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))  # 税込
+            # 手数料込みの金額を計算（切り上げで1円でも手数料が反映されるようにする）
+            money = math.ceil(price.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.price_id
             transaction_type = PaymentTransactionType.SINGLE
         else:  # subscription
@@ -263,8 +265,8 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
             if not plan:
                 raise HTTPException(status_code=404, detail="Plan not found")
 
-            # プラン価格取得
-            money = int(plan.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))  # 税込
+            # プラン価格取得（切り上げで1円でも手数料が反映されるようにする）
+            money = math.ceil(plan.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.plan_id
             transaction_type = PaymentTransactionType.SUBSCRIPTION
         return money, order_id, transaction_type
