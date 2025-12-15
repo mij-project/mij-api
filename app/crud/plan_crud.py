@@ -214,6 +214,7 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 "type": plan.type,
                 "display_order": plan.display_order,
                 "welcome_message": plan.welcome_message,
+                "updated_at": plan.updated_at,
                 "post_count": post_count,
                 "subscriber_count": subscriber_count,
                 "plan_status": plan.status
