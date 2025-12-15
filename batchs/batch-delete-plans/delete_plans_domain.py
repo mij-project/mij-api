@@ -35,6 +35,8 @@ class DeletePlansDomain:
         if subscriptions:
             self.logger.info(f"Plan {plan.id} has subscriptions skip delete")
             return
+        self._process_delete_plan(db, plan)
+        self.logger.info(f"Plan {plan.id} deleted")
 
     def _query_plan_subscriptions_status(self, db: Session, plan: Plans):
         return (
