@@ -68,6 +68,8 @@ class SubscribedPlanDetail(BaseModel):
     plan_description: Optional[str] = None
     price: int
     purchase_created_at: datetime
+    next_billing_date: Optional[datetime] = None
+    status: int
     creator_avatar_url: Optional[str] = None
     creator_username: Optional[str] = None
     creator_profile_name: Optional[str] = None

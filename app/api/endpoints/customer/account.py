@@ -643,6 +643,7 @@ def get_plans(current_user=Depends(get_current_user), db: Session = Depends(get_
                     "thumbnail_keys": [
                         f"{BASE_URL}/{key}" for key in plan.get("thumbnail_keys", [])
                     ],
+                    "status": plan.get("status", 0),
                 }
             )
 
