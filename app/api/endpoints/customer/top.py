@@ -58,10 +58,10 @@ def get_top_page_data(db: Session = Depends(get_db)) -> TopPageResponse:
                 name=c.profile_name,
                 username=c.username,
                 avatar=f"{BASE_URL}/{c.avatar_url}" if c.avatar_url else None,
-                followers=c.followers_count,
+                followers=c.followers_count or 0,
                 rank=idx + 1,
-                follower_ids=[str(x)for x in c.follower_ids],
-                likes=c.likes_count,
+                follower_ids=[str(x) for x in c.follower_ids if x is not None] if c.follower_ids else [],
+                likes=c.likes_count or 0,
                 official=c.Users.offical_flg if hasattr(c.Users, 'offical_flg') else False
             ) for idx, c in enumerate(top_creators)],
             new_creators=[CreatorResponse(

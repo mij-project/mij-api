@@ -390,52 +390,52 @@ def _get_ranking_creators_overall(db: Session) -> RankingCreatorsResponse:
         ranking_creators_weekly = get_ranking_creators_overall_weekly(db, limit=10)
         ranking_creators_monthly = get_ranking_creators_overall_monthly(db, limit=10)
         return RankingCreatorsResponse(
-            all_time=[RankingCreators( 
+            all_time=[RankingCreators(
                 id=str(creator.Users.id),
                 name=creator.Users.profile_name,
                 username=creator.username,
                 official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
                 avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
                 cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count,
-                likes=creator.likes_count,
-                follower_ids=creator.follower_ids,
+                followers=creator.followers_count or 0,
+                likes=creator.likes_count or 0,
+                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
                 rank=idx + 1
-            ) for idx, creator in enumerate(ranking_creators_all_time)], 
-            monthly=[RankingCreators( 
+            ) for idx, creator in enumerate(ranking_creators_all_time)],
+            monthly=[RankingCreators(
                 id=str(creator.Users.id),
                 name=creator.Users.profile_name,
                 username=creator.username,
                 official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
                 avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
                 cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count,
-                likes=creator.likes_count,
-                follower_ids=creator.follower_ids,
+                followers=creator.followers_count or 0,
+                likes=creator.likes_count or 0,
+                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
                 rank=idx + 1
             ) for idx, creator in enumerate(ranking_creators_monthly)],
-            weekly=[RankingCreators( 
+            weekly=[RankingCreators(
                 id=str(creator.Users.id),
                 name=creator.Users.profile_name,
                 username=creator.username,
                 official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
                 avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
                 cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count,
-                likes=creator.likes_count,
-                follower_ids=creator.follower_ids,
+                followers=creator.followers_count or 0,
+                likes=creator.likes_count or 0,
+                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
                 rank=idx + 1
             ) for idx, creator in enumerate(ranking_creators_weekly)],
-            daily=[RankingCreators( 
+            daily=[RankingCreators(
                 id=str(creator.Users.id),
                 name=creator.Users.profile_name,
                 username=creator.username,
                 official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
                 avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
                 cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count,
-                likes=creator.likes_count,
-                follower_ids=creator.follower_ids,
+                followers=creator.followers_count or 0,
+                likes=creator.likes_count or 0,
+                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
                 rank=idx + 1
             ) for idx, creator in enumerate(ranking_creators_daily)],
         )
@@ -477,9 +477,9 @@ def __arrange_ranking_creators_categories(ranking_creators_categories: list) -> 
             official=row.offical_flg if hasattr(row, 'offical_flg') else False,
             avatar=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
             cover=f"{BASE_URL}/{row.cover_url}" if row.cover_url else None,
-            followers=row.followers_count,
-            likes=row.likes_count,
-            follower_ids=row.follower_ids,
+            followers=row.followers_count or 0,
+            likes=row.likes_count or 0,
+            follower_ids=[str(x) for x in row.follower_ids if x is not None] if row.follower_ids else [],
             rank=0
         ))
     
@@ -523,9 +523,9 @@ def _get_ranking_creators_detail_overall(db: Session, term: str, page: int, per_
                 official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
                 avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
                 cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count,
-                likes=creator.likes_count,
-                follower_ids=creator.follower_ids,
+                followers=creator.followers_count or 0,
+                likes=creator.likes_count or 0,
+                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
                 rank=idx + ((page -1) * per_page) + 1
             ) for idx, creator in enumerate(result)],
             next_page=next_page,
@@ -552,9 +552,9 @@ def _get_ranking_creators_detail_categories(db: Session, category: str, term: st
                 official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
                 avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
                 cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count,
-                likes=creator.likes_count,
-                follower_ids=creator.follower_ids,
+                followers=creator.followers_count or 0,
+                likes=creator.likes_count or 0,
+                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
                 rank=idx + ((page -1) * per_page) + 1
             ) for idx, creator in enumerate(result)],
             next_page=next_page,
