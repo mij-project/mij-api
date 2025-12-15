@@ -67,7 +67,11 @@ def is_token_valid(token: PasswordResetToken) -> bool:
     """
     if token.used:
         return False
-    if datetime.now(timezone.utc) > token.expires_at:
+    # token.expires_atがタイムゾーン情報を持たない場合はUTCとして扱う
+    expires_at = token.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) > expires_at:
         return False
     return True
 
