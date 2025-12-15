@@ -237,7 +237,7 @@ async def get_new_arrivals(
         offset = (page - 1) * per_page
 
         # 次のページがあるか確認するため、1件多く取得
-        recent_posts = get_recent_posts(db, limit=per_page + 1, offset=offset)
+        recent_posts = get_recent_posts(db, limit=per_page + 1)
 
         # has_nextの判定
         has_next = len(recent_posts) > per_page
