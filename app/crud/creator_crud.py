@@ -186,7 +186,7 @@ def get_creators(db: Session, limit: int = 50):
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
-            func.coalesce(func.count(Follows.creator_user_id), 0).label(
+            func.coalesce(func.count(distinct(Follows.follower_user_id)), 0).label(
                 "followers_count"
             ),
         )
@@ -218,8 +218,8 @@ def get_top_creators(db: Session, limit: int = 5):
             Profiles.username,
             Users.offical_flg,
             Profiles.avatar_url,
-            func.count(Follows.creator_user_id).label("followers_count"),
-            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
         .join(Profiles, Users.id == Profiles.user_id)
@@ -273,8 +273,8 @@ def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label("followers_count"),
-            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
         .join(Profiles, Users.id == Profiles.user_id)
@@ -319,8 +319,8 @@ def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label("followers_count"),
-            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
         .join(Profiles, Users.id == Profiles.user_id)
@@ -362,8 +362,8 @@ def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label("followers_count"),
-            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
         .join(Profiles, Users.id == Profiles.user_id)
@@ -405,8 +405,8 @@ def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label("followers_count"),
-            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
         .join(Profiles, Users.id == Profiles.user_id)
@@ -465,8 +465,8 @@ def get_ranking_creators_overall_detail_overall(
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(Follows.creator_user_id).label("followers_count"),
-            func.array_agg(Follows.follower_user_id).label("follower_ids"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
         .join(Profiles, Users.id == Profiles.user_id)
