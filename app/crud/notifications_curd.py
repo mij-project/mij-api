@@ -251,6 +251,10 @@ def get_unread_count(db: Session, user: Users) -> int:
     admin_count = (
         db.query(func.count(Notifications.id))
         .filter(
+          or_(
+            Notifications.user_id == user.id,
+            Notifications.user_id.is_(None),
+          ),
           Notifications.type == NotificationType.ADMIN,
           Notifications.created_at >= user.created_at,
           ~cond_has_user,
