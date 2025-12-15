@@ -791,9 +791,9 @@ def get_ranking_posts(db: Session, limit: int = 5):
     )
 
 
-def get_recent_posts(db: Session, limit: int = 5, offset: int = 0):
+def get_recent_posts(db: Session, limit: int = 10):
     """
-    最新の投稿を取得（いいね数も含む）
+    ランダムで10件の投稿を取得（いいね数も含む）
     """
     now = func.now()
     active_post_cond = and_(
@@ -841,9 +841,8 @@ def get_recent_posts(db: Session, limit: int = 5, offset: int = 0):
             ThumbnailAssets.storage_key,
             VideoAssets.duration_sec,
         )
-        .order_by(desc(Posts.created_at))
+        .order_by(func.random())
         .limit(limit)
-        .offset(offset)
         .all()
     )
 
