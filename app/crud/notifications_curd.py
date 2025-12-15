@@ -107,7 +107,15 @@ def get_notifications_paginated(db: Session, user: Users, type: NotificationType
   try:  
     skip = (page - 1) * limit
     if type == NotificationType.ADMIN:
-      query = db.query(Notifications).filter(Notifications.type == type, Notifications.created_at >= user.created_at).order_by(desc(Notifications.created_at))
+      query = (
+        db.query(Notifications)
+        .filter(
+          or_(Notifications.user_id == user.id, Notifications.user_id.is_(None)),
+          Notifications.type == type,
+          Notifications.created_at >= user.created_at
+        )
+        .order_by(desc(Notifications.created_at))
+      )
     elif type == NotificationType.USERS:
       query = db.query(Notifications).filter(Notifications.user_id == user.id, Notifications.type == type, Notifications.created_at >= user.created_at).order_by(desc(Notifications.created_at))
     elif type == NotificationType.PAYMENTS:
