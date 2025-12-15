@@ -13,6 +13,7 @@ from app.models import (
     Creators,
     Notifications,
     Payments,
+    Posts,
     Profiles,
     UserBanks,
     Users,
@@ -92,7 +93,7 @@ def get_sales_summary_by_creator(db: Session, user_id: UUID) -> dict:
         )
 
         return {
-            "cumulative_sales": withdrawable_amount,
+            "cumulative_sales": cumulative_sales_after_platform_fee,
             "withdrawable_amount": withdrawable_amount,
         }
 
@@ -228,6 +229,7 @@ def get_sales_history_by_creator(
                 Payments,
                 Profiles.username.label("buyer_username"),
                 Prices.post_id.label("single_post_id"),
+                Posts.description.label("single_post_description"),
                 Plans.id.label("plan_id"),
                 Plans.name.label("plan_name"),
             )
@@ -237,6 +239,13 @@ def get_sales_history_by_creator(
                 and_(
                     Payments.order_type == 1,
                     cast(Payments.order_id, PG_UUID) == Prices.id,
+                ),
+            )
+            .outerjoin(
+                Posts,
+                and_(
+                    Payments.order_type == 1,
+                    Prices.post_id == Posts.id,
                 ),
             )
             .outerjoin(
@@ -286,8 +295,10 @@ def get_sales_history_by_creator(
                     "single_post_id": row.single_post_id,
                     "plan_id": row.plan_id,
                     "plan_name": row.plan_name,
+                    "single_post_description": row.single_post_description,
                 }
             )
+        
         return {
             "payments": payments,
             "total": total,

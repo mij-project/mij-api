@@ -535,6 +535,8 @@ def _format_sale_info(price: dict | None, plans: list | None):
                 "name": plan["name"] if plan and "name" in plan else None,
                 "description": plan.get("description") if plan else None,
                 "price": plan.get("price") if plan else None,
+                "type": plan.get("type") if plan else None,
+                "post_count": plan.get("post_count") if plan else None,
                 "plan_post": [
                     {
                         "description": post["description"],
