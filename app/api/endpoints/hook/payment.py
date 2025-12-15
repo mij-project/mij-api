@@ -736,7 +736,9 @@ def _add_payment_notifications_for_seller(
         else:
             title = f"{buyer_name}さんが{contents_name}プランに加入しました"
             subtitle = f"{buyer_name}さんが{contents_name}プランに加入しました"
-
+    elif is_batch_success:
+        title = f"{buyer_name}さんが{contents_name}プランを続き加入しました"
+        subtitle = f"{buyer_name}さんが{contents_name}プランを続き加入しました"
     # アバターURLの取得（buyer_userのprofileが存在するか確認）
     avatar_url = "https://logo.mijfans.jp/bimi/logo.svg"
 
@@ -765,7 +767,7 @@ def _add_payment_notifications_for_seller(
                     plan_name=contents_name,
                     plan_url=content_url,
                 )
-            elif is_frontend_success:
+            elif is_frontend_success or is_batch_success:
                 send_selling_info_email(
                     to=seller_email,
                     buyer_name=buyer_name,
