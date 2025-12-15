@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.models import (
     Banks,
     Creators,
+    Notifications,
     Payments,
     Posts,
     Profiles,
@@ -20,9 +21,29 @@ from app.models import (
     Prices,
     Plans,
 )
+from app.schemas.notification import NotificationType
 from app.schemas.withdraw import WithdrawalApplicationRequest
+from app.services.email.send_email import send_withdrawal_application_approved_email
 
 logger = Logger.get_logger()
+
+
+WITHDRAWAL_APPLICATION_APPROVED_MD = """## mijfans 振込完了のお知らせ
+
+--name-- 様
+
+振込完了のお知らせです。
+
+■ 振込金額：¥ --amount--
+
+■ 出金申請日：--requested_at--
+
+■ 振込実行日：--paid_at--
+
+■ 振込先：--bank_name--
+
+ご不明な点がございましたら、サポートまでお問い合わせください。
+"""
 
 
 def get_sales_summary_by_creator(db: Session, user_id: UUID) -> dict:
@@ -763,6 +784,8 @@ def update_withdrawal_application_status_by_admin(
         withdrawal_application.updated_at = now
         withdrawal_application.status = status
         db.commit()
+        if status == WithdrawStatus.COMPLETED:
+            _add_notification_for_withdrawal_application(db, application_id, status)
         return True
     except Exception as e:
         db.rollback()
@@ -856,3 +879,76 @@ def get_payments_by_user_id(
     except Exception as e:
         logger.exception(f"Get payments by user id error: {e}")
         return None
+
+
+def _add_notification_for_withdrawal_application(
+    db: Session,
+    application_id: str,
+    status: int,
+) -> bool:
+    """
+    出金申請に対する通知を追加
+    """
+    try:
+        application = (
+            db.query(
+                Withdraws,
+                Profiles.username.label("creator_username"),
+                Users.email.label("creator_email"),
+                UserBanks,
+                Banks.bank_name.label("bank_name"),
+            )
+            .join(Profiles, Profiles.user_id == Withdraws.user_id)
+            .join(Users, Users.id == Profiles.user_id)
+            .join(UserBanks, UserBanks.id == Withdraws.user_bank_id)
+            .join(Banks, UserBanks.bank_id == Banks.id)
+            .filter(Withdraws.id == application_id)
+            .first()
+        )
+        if not application:
+            return
+        requested_at = (
+            application.Withdraws.requested_at.replace(tzinfo=None) + timedelta(hours=9)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        paid_at = (
+            application.Withdraws.approved_at.replace(tzinfo=None) + timedelta(hours=9)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        # insert notification deposit for creator
+        message = (
+            WITHDRAWAL_APPLICATION_APPROVED_MD.replace(
+                "--amount--", str(application.Withdraws.transfer_amount)
+            )
+            .replace("--requested_at--", requested_at)
+            .replace("--paid_at--", paid_at)
+            .replace("--bank_name--", application.bank_name)
+            .replace("--name--", application.creator_username)
+        )
+        notification = Notifications(
+            user_id=application.Withdraws.user_id,
+            type=NotificationType.ADMIN,
+            payload={
+                "title": "振込完了のお知らせ",
+                "subtitle": "振込完了のお知らせ",
+                "message": message,
+                "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
+                "redirect_url": "/account/sale-withdraw",
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            is_read=False,
+            read_at=None,
+        )
+        db.add(notification)
+        db.commit()
+        # send mail to creator
+        send_withdrawal_application_approved_email(
+            application.creator_email,
+            application.creator_username,
+            application.Withdraws.transfer_amount,
+            requested_at,
+            paid_at,
+            application.bank_name,
+        )
+    except Exception as e:
+        logger.exception(f"Add notification for withdrawal application error: {e}")
+        pass

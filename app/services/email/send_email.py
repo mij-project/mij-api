@@ -532,6 +532,28 @@ def send_buyer_cancel_subscription_email(
         tags={"category": "buyer_cancel_subscription"},
     )
 
+def send_withdrawal_application_approved_email(to: str, display_name: str | None = None, amount: int | None = None, requested_at: str | None = None, paid_at: str | None = None, bank_name: str | None = None) -> None:
+    """出金申請承認通知メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】振込完了のお知らせ"
+    ctx = {
+        "brand": "mijfans",
+        "name": display_name or "",
+        "amount": amount,
+        "requested_at": requested_at,
+        "paid_at": paid_at,
+        "bank_name": bank_name,
+        "support_email": "support@mijfans.jp",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="transfer_complete.html",
+        ctx=ctx,
+        tags={"category": "withdrawal_application_approved"},
+    )
+
 # --------------------------
 # 実体：バックエンド切替
 # --------------------------
@@ -552,3 +574,5 @@ def _send_backend(to: str, subject: str, html: str, tags: dict[str, str] | None 
     except Exception as e:
         # 必要に応じて構造化ログへ
         logger.error(f"[email] send failed backend={backend} to={to} err={e}")
+
+

@@ -39,28 +39,32 @@ def get_subscriptions_summary(db: Session):
         )
 
         # New subscriptions this month
-        first_subq = (
+        S = Subscriptions
+
+        first_event_subq = (
             select(
-                Subscriptions.user_id.label("user_id"),
-                Subscriptions.order_id.label("order_id"),
-                func.min(Subscriptions.access_start).label("first_access_start"),
-                func.count().label("cnt"),
+                S.user_id.label("user_id"),
+                S.order_id.label("order_id"),
+                S.access_start.label("access_start"),
+                func.row_number()
+                .over(partition_by=S.user_id, order_by=S.access_start.asc())
+                .label("rn"),
             )
             .where(
-                Subscriptions.access_type == 1,
-                Subscriptions.status.in_([1, 2]),
+                S.access_type == 1,
+                S.status.in_([1, 2]),
             )
-            .group_by(Subscriptions.user_id, Subscriptions.order_id)
             .subquery()
         )
-        first_subscriptions_this_month_stmt = select(func.count()).where(
-            first_subq.c.first_access_start >= start_of_this_month,
-            first_subq.c.first_access_start <= end_of_this_month,
-            first_subq.c.cnt == 1,
+
+        # Đếm user lần đầu tiên subscribe nằm trong tháng
+        new_users_this_month_stmt = select(func.count()).where(
+            first_event_subq.c.rn == 1,
+            first_event_subq.c.access_start >= start_of_this_month,
+            first_event_subq.c.access_start < end_of_this_month,
         )
-        new_subscriptions_this_month_count = (
-            db.execute(first_subscriptions_this_month_stmt).scalar() or 0
-        )
+
+        new_users_this_month_count = db.execute(new_users_this_month_stmt).scalar() or 0
 
         # Total subscriptions failed
         total_subscriptions_failed_count_stmt = select(
@@ -75,7 +79,7 @@ def get_subscriptions_summary(db: Session):
 
         return {
             "total_subscriptions_active": total_subscriptions_active,
-            "new_subscriptions_this_month_count": new_subscriptions_this_month_count,
+            "new_subscriptions_this_month_count": new_users_this_month_count,
             "total_subscriptions_failed_count": total_subscriptions_failed_count,
         }
 
