@@ -1,4 +1,5 @@
 import os
+import time
 import requests as REQUESTS_UTILS
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -26,7 +27,9 @@ from app.schemas.user_banks import (
 from app.api.commons.base64helper import encode_b64, decode_b64
 
 BANKCODE_JP_API_URL = "https://apis.bankcode-jp.com/v3"
-BANKCODE_JP_API_KEY = os.environ.get("BANKCODE_JP_API_KEY", "rF4LJWVUtbK9QD5DbS67W8DIA6YgOn")
+BANKCODE_JP_API_KEY = os.environ.get(
+    "BANKCODE_JP_API_KEY", "rF4LJWVUtbK9QD5DbS67W8DIA6YgOn"
+)
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -91,8 +94,9 @@ def _get_banks_by_search(db: Session, user: Users, search: str):
         external_banks = __get_external_bankcode_api(search)
         if external_banks is None:
             return []
-        bank_code = search if search else None
-        create_bank_request_history(db, user.id, 1, bank_code, external_banks)
+        if external_banks:
+            bank_code = search if search else None
+            create_bank_request_history(db, user.id, 1, bank_code, external_banks)
         return external_banks
     else:
         return history.response_data or []
@@ -109,9 +113,10 @@ def _get_branches_by_search(
             )
             if external_branches is None:
                 return []
-            create_branch_request_history(
-                db, user.id, 2, bank_code, branch_code, external_branches
-            )
+            if external_branches:
+                create_branch_request_history(
+                    db, user.id, 2, bank_code, branch_code, external_branches
+                )
             return external_branches
         else:
             return history.response_data or []
@@ -134,20 +139,24 @@ def _get_branches_by_search(
 
 def __get_external_bankcode_api(search: str):
     try:
-        logger.info(f"Call BankCode JP API for Bank ->{search}")
-        if search:
-            url = f"{BANKCODE_JP_API_URL}/banks?filter=name=re={search},hiragana=re={search},code=={search}&limit=100"
-        else:
-            url = f"{BANKCODE_JP_API_URL}/banks?limit=100"
-        response = REQUESTS_UTILS.get(url, headers={"apiKey": BANKCODE_JP_API_KEY})
-        if response.status_code != 200:
-            logger.error(
-                f"Failed to get banks from external API: {response.status_code}"
-            )
-            return None
-        res = response.json()
-        banks = res["banks"]
-        return banks
+        done = False
+        while not done:
+            logger.info(f"Call BankCode JP API for Bank ->{search}")
+            if search:
+                url = f"{BANKCODE_JP_API_URL}/banks?filter=name=re={search},hiragana=re={search},code=={search}&limit=100"
+            else:
+                url = f"{BANKCODE_JP_API_URL}/banks?limit=100"
+            response = REQUESTS_UTILS.get(url, headers={"apiKey": BANKCODE_JP_API_KEY})
+            if response.status_code != 200:
+                logger.error(
+                    f"Failed to get banks from external API: {response.status_code}"
+                )
+                time.sleep(0.5)
+                continue
+            res = response.json()
+            banks = res["banks"]
+            done = True
+            return banks
     except Exception as e:
         logger.exception(f"Failed to get banks from external API: {e}")
         return None
@@ -155,22 +164,24 @@ def __get_external_bankcode_api(search: str):
 
 def __get_external_branchcode_api_with_search(bank_code: str, search: str):
     try:
-        logger.info(
-            f"Call BankCode JP API for Branch -> bankcode: {bank_code}, search: {search}"
-        )
-        if search:
-            url = f"{BANKCODE_JP_API_URL}/banks/{bank_code}/branches?filter=name=re={search},hiragana=re={search}&limit=100"
-        else:
-            url = f"{BANKCODE_JP_API_URL}/banks/{bank_code}/branches?limit=100"
-        response = REQUESTS_UTILS.get(url, headers={"apiKey": BANKCODE_JP_API_KEY})
-        if response.status_code != 200:
-            logger.error(
-                f"Failed to get branches from external API: {response.status_code}"
+        done = False
+        while not done:
+            logger.info(
+                f"Call BankCode JP API for Branch -> bankcode: {bank_code}, search: {search}"
             )
-            return None
-        res = response.json()
-        branches = res["branches"]
-        return branches
+            if search:
+                url = f"{BANKCODE_JP_API_URL}/banks/{bank_code}/branches?filter=name=re={search},hiragana=re={search}&limit=100"
+            else:
+                url = f"{BANKCODE_JP_API_URL}/banks/{bank_code}/branches?limit=100"
+            response = REQUESTS_UTILS.get(url, headers={"apiKey": BANKCODE_JP_API_KEY})
+            if response.status_code != 200:
+                logger.error(
+                    f"Failed to get branches from external API: {response.status_code}"
+                )
+                return None
+            res = response.json()
+            branches = res["branches"]
+            return branches
     except Exception as e:
         logger.exception(f"Failed to get branches from external API: {e}")
         return None
@@ -178,19 +189,22 @@ def __get_external_branchcode_api_with_search(bank_code: str, search: str):
 
 def __get_external_branchcode_api_with_code(bank_code: str, code: str):
     try:
-        logger.info(
-            f"Call BankCode JP API for Branch -> bankcode: {bank_code}, code: {code}"
-        )
-        url = f"{BANKCODE_JP_API_URL}/banks/{bank_code}/branches?filter=code=={code}&limit=100"
-        response = REQUESTS_UTILS.get(url, headers={"apiKey": BANKCODE_JP_API_KEY})
-        if response.status_code != 200:
-            logger.error(
-                f"Failed to get branches from external API: {response.status_code}"
+        done = False
+        while not done:
+            logger.info(
+                f"Call BankCode JP API for Branch -> bankcode: {bank_code}, code: {code}"
             )
-            return None
-        res = response.json()
-        branches = res["branches"]
-        return branches
+            url = f"{BANKCODE_JP_API_URL}/banks/{bank_code}/branches?filter=code=={code}&limit=100"
+            response = REQUESTS_UTILS.get(url, headers={"apiKey": BANKCODE_JP_API_KEY})
+            if response.status_code != 200:
+                logger.error(
+                    f"Failed to get branches from external API: {response.status_code}"
+                )
+                time.sleep(0.5)
+            res = response.json()
+            branches = res["branches"]
+            done = True
+            return branches
     except Exception as e:
         logger.exception(f"Failed to get branches from external API: {e}")
         return None
