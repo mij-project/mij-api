@@ -30,6 +30,7 @@ class PlanResponse(BaseModel):
     welcome_message: Optional[str] = None
     post_count: Optional[int] = 0
     subscriber_count: Optional[int] = 0
+    updated_at: datetime
     plan_status: int = 1
     class Config:
         from_attributes = True
