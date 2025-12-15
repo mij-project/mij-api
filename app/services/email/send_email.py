@@ -122,6 +122,23 @@ def _send_via_ses_simple(
     else:
         body["Text"] = {"Data": _html_to_text(html), "Charset": "UTF-8"}
 
+    
+    reply_to = getattr(settings, "REPLY_TO", None)
+    unsubscribe_email = reply_to or "support@mijfans.jp"
+
+    headers = [
+        {
+            "Name": "List-Unsubscribe",
+            # mailto 形式が一番無難
+            "Value": f"<mailto:{unsubscribe_email}>",
+        },
+        {
+            "Name": "List-Unsubscribe-Post",
+            # 1-click unsubscribe 対応クライアント向け
+            "Value": "List-Unsubscribe=One-Click",
+        },
+    ]
+
     params = {
         "FromEmailAddress": _from_header(),           # "Name <no-reply@...>"
         "Destination": {"ToAddresses": [to]},
@@ -129,6 +146,7 @@ def _send_via_ses_simple(
             "Simple": {
                 "Subject": {"Data": subject, "Charset": "UTF-8"},
                 "Body": body,
+                "Headers": headers,
             }
         },
         "EmailTags": _email_tags(tags),
