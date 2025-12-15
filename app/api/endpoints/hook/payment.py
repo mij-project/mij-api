@@ -692,12 +692,16 @@ def _add_payment_notifications_for_seller(
         result == RESULT_NG
         and transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
     )
+    is_batch_success = (
+        result == RESULT_OK
+        and transaction_origin == TransactionType.PAYMENT_ORIGIN_BATCH
+    )
     is_frontend_success = (
         result == RESULT_OK
         and transaction_origin == TransactionType.PAYMENT_ORIGIN_FRONT
     )
 
-    if not (is_batch_failure or is_frontend_success):
+    if not (is_batch_failure or is_frontend_success or is_batch_success):
         return
 
     buyer_user = user_crud.get_user_by_id(db, transaction.user_id)
