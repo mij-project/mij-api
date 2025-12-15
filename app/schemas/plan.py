@@ -76,6 +76,10 @@ class PlanPostResponse(BaseModel):
 class PlanPostsResponse(BaseModel):
     posts: List[PlanPostResponse] = []
 
+class PlanPostInfo(BaseModel):
+    description: str
+    thumbnail_url: str
+
 class PlanDetailResponse(BaseModel):
     id: UUID
     name: str
@@ -91,6 +95,7 @@ class PlanDetailResponse(BaseModel):
     type: int = 1
     welcome_message: Optional[str] = None
     subscriptions_count: int
+    plan_post: Optional[List[PlanPostInfo]] = []
 
     class Config:
         from_attributes = True
