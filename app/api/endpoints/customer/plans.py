@@ -97,6 +97,8 @@ def create_user_plan(
             welcome_message=plan.welcome_message,
             post_count=post_count,
             subscriber_count=0,
+            updated_at=plan.updated_at,
+            plan_status=plan.status,
         )
 
         return plan_response
@@ -344,6 +346,8 @@ def update_user_plan(
             welcome_message=updated_plan.welcome_message,
             post_count=post_count,
             subscriber_count=0,
+            updated_at=updated_plan.updated_at,
+            plan_status=updated_plan.status,
         )
     except HTTPException:
         raise

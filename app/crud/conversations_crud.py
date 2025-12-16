@@ -376,16 +376,30 @@ def get_new_conversations_unread(db: Session, user_id: UUID) -> int:
             .join(
                 ConversationMessages,
                 Conversations.last_message_id == ConversationMessages.id,
+                isouter=True,
             )
             .filter(ConversationParticipants.user_id == user_id)
             .first()
         )
-        if (participant.ConversationMessages.sender_admin_id is not None) and (
-            participant.ConversationParticipants.joined_at
-            < participant.ConversationMessages.created_at
+        if participant is None:
+            return False
+        
+        # タプルの場合、インデックスでアクセス
+        # participant[0] = ConversationParticipants
+        # participant[1] = last_message_at
+        # participant[2] = ConversationMessages
+        if len(participant) < 3 or participant[2] is None:
+            return False
+        
+        conversation_messages = participant[2]
+        conversation_participants = participant[0]
+        
+        if (conversation_messages.sender_admin_id is not None) and (
+            conversation_participants.joined_at
+            < conversation_messages.created_at
         ):
             return True
         return False
     except Exception as e:
-        logger.error(f"Get new conversations unread error: {e}")
+        logger.error(f"Get new conversations unread error: {e}", exc_info=True)
         return False

@@ -35,7 +35,7 @@ def create_payment(
         payment_amount=payment_amount,
         payment_price=payment_price,
         status=status,
-        paid_at=datetime.utcnow(),
+        paid_at=datetime.now(timezone.utc),
         platform_fee=platform_fee,
     )
     db.add(payment)

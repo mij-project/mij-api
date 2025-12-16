@@ -791,9 +791,9 @@ def get_ranking_posts(db: Session, limit: int = 5):
     )
 
 
-def get_recent_posts(db: Session, limit: int = 5):
+def get_recent_posts(db: Session, limit: int = 10):
     """
-    最新の投稿を取得（いいね数も含む）
+    ランダムで10件の投稿を取得（いいね数も含む）
     """
     now = func.now()
     active_post_cond = and_(
@@ -841,7 +841,7 @@ def get_recent_posts(db: Session, limit: int = 5):
             ThumbnailAssets.storage_key,
             VideoAssets.duration_sec,
         )
-        .order_by(desc(Posts.created_at))
+        .order_by(func.random())
         .limit(limit)
         .all()
     )
@@ -1225,12 +1225,26 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
             .all()
         )
 
+        # プランに紐づく投稿の総数を取得（post_plansテーブルから）
+        post_count = (
+            db.query(func.count(PostPlans.post_id))
+            .join(Posts, PostPlans.post_id == Posts.id)
+            .filter(
+                PostPlans.plan_id == plan.id,
+                Posts.deleted_at.is_(None),
+                Posts.status == PostStatus.APPROVED
+            )
+            .scalar() or 0
+        )
+
         plans_with_thumbnails.append(
             {
                 "id": plan.id,
                 "name": plan.name,
                 "description": plan.description,
                 "price": plan.price,
+                "type": plan.type,
+                "post_count": post_count,
                 "plan_post": [
                     {"description": post.description, "thumbnail_url": post.storage_key}
                     for post in plan_post_info

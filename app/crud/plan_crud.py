@@ -40,7 +40,7 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
         .filter(
             Subscriptions.user_id == user_id,
             Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,  # プラン購読
-            Subscriptions.status == SubscriptionStatus.ACTIVE  # active
+            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED])  # active
         )
         .all()
     )
@@ -127,6 +127,8 @@ def get_plan_by_user_id(db: Session, user_id: UUID) -> dict:
             "plan_description": plan.description,
             "price": plan_price,
             "purchase_created_at": subscription.created_at,
+            "next_billing_date": subscription.next_billing_date,
+            "status": subscription.status,
             "creator_avatar_url": creator_profile.avatar_url if creator_profile and creator_profile.avatar_url else None,
             "creator_username": creator_profile.username if creator_profile else None,
             "creator_profile_name": creator_profile.profile_name if creator_profile else None,
@@ -214,6 +216,7 @@ def get_user_plans(db: Session, user_id: UUID) -> List[dict]:
                 "type": plan.type,
                 "display_order": plan.display_order,
                 "welcome_message": plan.welcome_message,
+                "updated_at": plan.updated_at,
                 "post_count": post_count,
                 "subscriber_count": subscriber_count,
                 "plan_status": plan.status
@@ -307,11 +310,27 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         .scalar() or 0
     )
 
+    # プランに紐づく投稿のサムネイル画像を取得（最大3枚）
+    plan_post_info = (
+        db.query(MediaAssets.storage_key, Posts.description)
+        .join(Posts, MediaAssets.post_id == Posts.id)
+        .join(PostPlans, MediaAssets.post_id == PostPlans.post_id)
+        .filter(
+            PostPlans.plan_id == plan_id,
+            MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            Posts.deleted_at.is_(None),
+            Posts.status == PostStatus.APPROVED
+        )
+        .limit(3)
+        .all()
+    )
+
     return {
         "id": plan.id,
         "name": plan.name,
         "description": plan.description,
         "price": plan.price,
+        "type": plan.type,
         "creator_id": creator_info.id if creator_info else None,
         "creator_name": creator_info.profile_name if creator_info else "",
         "creator_username": creator_info.username if creator_info else "",
@@ -319,7 +338,11 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         "creator_cover_url": f"{BASE_URL}/{creator_info.cover_url}" if creator_info and creator_info.cover_url else None,
         "post_count": post_count or 0,
         "is_subscribed": is_subscribed,
-        "subscriptions_count": subscriptions_count
+        "subscriptions_count": subscriptions_count,
+        "plan_post": [
+            {"description": post.description, "thumbnail_url": f"{BASE_URL}/{post.storage_key}"}
+            for post in plan_post_info
+        ]
     }
 
 def get_plan_posts_paginated(db: Session, plan_id: UUID, current_user_id: UUID, page: int = 1, per_page: int = 20):

@@ -30,6 +30,7 @@ class PlanResponse(BaseModel):
     welcome_message: Optional[str] = None
     post_count: Optional[int] = 0
     subscriber_count: Optional[int] = 0
+    updated_at: datetime
     plan_status: int = 1
     class Config:
         from_attributes = True
@@ -75,6 +76,10 @@ class PlanPostResponse(BaseModel):
 class PlanPostsResponse(BaseModel):
     posts: List[PlanPostResponse] = []
 
+class PlanPostInfo(BaseModel):
+    description: str
+    thumbnail_url: str
+
 class PlanDetailResponse(BaseModel):
     id: UUID
     name: str
@@ -90,6 +95,7 @@ class PlanDetailResponse(BaseModel):
     type: int = 1
     welcome_message: Optional[str] = None
     subscriptions_count: int
+    plan_post: Optional[List[PlanPostInfo]] = []
 
     class Config:
         from_attributes = True
@@ -100,7 +106,7 @@ class PlanSubscriberResponse(BaseModel):
     profile_name: str
     avatar_url: Optional[str] = None
     subscribed_at: datetime
-    current_period_end: datetime
+    current_period_end: Optional[datetime] = None
 
     class Config:
         from_attributes = True
