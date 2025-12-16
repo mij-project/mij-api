@@ -19,6 +19,7 @@ from app.constants.enums import (
     MediaAssetKind,
     MediaAssetStatus,
 )
+from app.crud.user_crud import check_super_user
 from app.schemas.notification import NotificationType
 from app.models.post_categories import PostCategories
 from app.models.categories import Categories
@@ -717,7 +718,6 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.APPROVED)
         .group_by(
             Posts.id,
             Users.profile_name,
@@ -1261,6 +1261,11 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
 
     # 視聴権限をチェック
     is_entitlement = check_viewing_rights(db, post_id, user_id)
+
+    # スーパーユーザーかどうかをチェック
+    is_super_user = check_super_user(db, user_id)
+    if is_super_user:
+        is_entitlement = True
 
     # 視聴権限に応じてメディア種別とファイル名を設定
     set_media_kind = (
