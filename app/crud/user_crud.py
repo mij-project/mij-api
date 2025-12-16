@@ -300,6 +300,12 @@ def get_following_count(db: Session, user_id: UUID) -> int:
         .count()
     )
 
+def check_super_user(db: Session, user_id: UUID) -> bool:
+    """
+    スーパーユーザーかどうかをチェック
+    """
+    return db.query(Users).filter(Users.id == user_id, Users.role == AccountType.SUPER_USER).first() is not None
+
 def resend_email_verification(db: Session, email: str) -> Users:
     """
     メールアドレスによるユーザー取得
@@ -379,3 +385,19 @@ def create_user(db: Session, user_create: UserCreate) -> Users:
     db.add(db_user)
     db.flush()
     return db_user
+
+def create_super_user(db: Session, email: str, password: str, name: str) -> Users:
+    """
+    スーパーユーザーを作成
+    """
+    user = Users(
+        profile_name=name,
+        email=email,
+        password_hash=hash_password(password),
+        role=AccountType.SUPER_USER,
+        status=AccountStatus.ACTIVE,
+        is_email_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    return user

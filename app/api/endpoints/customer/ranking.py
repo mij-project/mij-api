@@ -84,10 +84,10 @@ def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
         Returns:
             RankingResponse: Ranking posts
     """
-    ranking_posts_all_time = get_ranking_posts_overall_all_time(db, limit=5)
-    ranking_posts_monthly = get_ranking_posts_overall_monthly(db, limit=5)
-    ranking_posts_weekly = get_ranking_posts_overall_weekly(db, limit=5)
-    ranking_posts_daily = get_ranking_posts_overall_daily(db, limit=5)
+    ranking_posts_all_time = get_ranking_posts_overall_all_time(db, limit=6)
+    ranking_posts_monthly = get_ranking_posts_overall_monthly(db, limit=6)
+    ranking_posts_weekly = get_ranking_posts_overall_weekly(db, limit=6)
+    ranking_posts_daily = get_ranking_posts_overall_daily(db, limit=6)
     
     return RankingOverallResponse(
         all_time=[RankingPostsAllTimeResponse(
@@ -149,10 +149,10 @@ def _get_ranking_posts_categories(db: Session) -> RankingCategoriesResponse:
         Returns:
             RankingCategoriesResponse: Ranking posts
     """
-    ranking_posts_categories_all_time = get_ranking_posts_categories_all_time(db, limit=5)
-    ranking_posts_categories_daily = get_ranking_posts_categories_daily(db, limit=5)
-    ranking_posts_categories_weekly = get_ranking_posts_categories_weekly(db, limit=5)
-    ranking_posts_categories_monthly = get_ranking_posts_categories_monthly(db, limit=5)
+    ranking_posts_categories_all_time = get_ranking_posts_categories_all_time(db, limit=6)
+    ranking_posts_categories_daily = get_ranking_posts_categories_daily(db, limit=6)
+    ranking_posts_categories_weekly = get_ranking_posts_categories_weekly(db, limit=6)
+    ranking_posts_categories_monthly = get_ranking_posts_categories_monthly(db, limit=6)
     
     response = {
         "all_time": __arrange_ranking_posts_categories(ranking_posts_categories_all_time),

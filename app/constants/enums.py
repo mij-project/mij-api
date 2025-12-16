@@ -4,6 +4,7 @@ class AccountType:
     GENERAL_USER = 1 # 一般ユーザー
     CREATOR = 2 # クリエイター
     ADMIN = 3 # 管理者
+    SUPER_USER = 4 # スーパーユーザー
 
 # アカウントステータス
 class AccountStatus:

@@ -44,7 +44,7 @@ class AdminUserResponse(BaseModel):
     @classmethod
     def from_orm(cls, user):
         # roleを数値から文字列に変換
-        role_map = {1: "user", 2: "creator", 3: "admin"}
+        role_map = {1: "user", 2: "creator", 3: "admin", 4: "super_user"}
         role_str = role_map.get(user.role, "user")
         
         data = {

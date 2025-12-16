@@ -136,54 +136,6 @@ def create_admin_user(
         logger.error("管理者作成エラー:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/create-test-admin")
-def create_test_admin(
-    db: Session = Depends(get_db)
-):
-    """テスト用管理者ユーザーを作成"""
-    
-    try:
-        # 既存の管理者ユーザーをチェック
-        existing_admin = db.query(Users).filter(Users.email == "admin@test.com").first()
-        if existing_admin:
-            return {"message": "テスト管理者は既に存在しています", "email": "admin@test.com"}
-        
-        # 管理者ユーザー作成
-        hashed_password = hash_password("admin123")
-        
-        test_admin = Users(
-            email="admin@test.com",
-            profile_name="test_admin",
-            password_hash=hashed_password,
-            role=3,  # admin
-            status=1,  # active
-            email_verified_at=datetime.now(timezone.utc)
-        )
-        
-        db.add(test_admin)
-        db.flush()
-        
-        # プロフィール作成
-        admin_profile = Profiles(
-            user_id=test_admin.id,
-            username="Test Admin",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
-        )
-        
-        db.add(admin_profile)
-        db.commit()
-        
-        return {
-            "message": "テスト管理者を作成しました", 
-            "email": "admin@test.com", 
-            "password": "admin123"
-        }
-        
-    except Exception as e:
-        db.rollback()
-        logger.error("管理者作成エラー:", e)
-        raise HTTPException(status_code=500, detail=str(e))
     
 
 @router.get("/creator-applications", response_model=PaginatedResponse[AdminCreatorApplicationResponse])
