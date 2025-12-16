@@ -81,15 +81,6 @@ class CredixClient:
         if failure_url:
             params["failure_url"] = failure_url
 
-        # メールアドレス
-        if email:
-            params["email"] = email
-
-        # メール送信フラグ
-        if send_email:
-            params["send_email"] = "yes"
-
-
         # フリーパラメータ
         if sendpoint:
             params["sendpoint"] = sendpoint
