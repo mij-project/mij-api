@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, exists
 from typing import Optional, List, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
@@ -295,7 +295,15 @@ def get_all_delusion_conversations_for_admin(
     """
     管理人用: すべての妄想メッセージ会話一覧を取得
     未読カウント、最後のメッセージなどを含む
+    一度でもユーザーからメッセージがあった会話を表示
     """
+    # サブクエリ: 会話内にユーザーからのメッセージが存在するかチェック
+    has_user_message = exists().where(
+        ConversationMessages.conversation_id == Conversations.id,
+        ConversationMessages.sender_user_id.isnot(None),
+        ConversationMessages.deleted_at.is_(None)
+    )
+
     # 妄想メッセージタイプの全会話を取得
     conversations = (
         db.query(
@@ -312,12 +320,11 @@ def get_all_delusion_conversations_for_admin(
             Conversations.id == ConversationParticipants.conversation_id,
         )
         .join(Users, ConversationParticipants.user_id == Users.id)
-        .join(ConversationMessages, Conversations.last_message_id == ConversationMessages.id)
         .join(Profiles, Users.id == Profiles.user_id)
         .filter(
             Conversations.type == ConversationType.DELUSION,
             Conversations.is_active == True,
-            ConversationMessages.sender_admin_id.is_(None),
+            has_user_message,  # 一度でもユーザーメッセージがある会話のみ
         )
         .order_by(desc(Conversations.last_message_at))
         .offset(skip)
