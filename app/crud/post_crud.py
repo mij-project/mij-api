@@ -3357,9 +3357,15 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
+            MediaAssets.storage_key.label("ogp_image_url"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.OGP),
+        )
         .filter(Posts.id == post_id)
         .filter(Posts.deleted_at.is_(None))
         .first()
@@ -3371,20 +3377,24 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
     # OGP画像URLを取得
     # 優先順位: generation_media (kind=2) → thumbnail → デフォルト画像
     ogp_image_url = None
-
-    # 1. generation_mediaからOGP画像を取得
-    generation_media = (
-        db.query(GenerationMedia)
-        .filter(
-            GenerationMedia.post_id == post_id,
-            GenerationMedia.kind == GenerationMediaKind.POST_IMAGE,
-        )
-        .first()
-    )
-
-    if generation_media:
-        ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
+    if result.ogp_image_url:
+        ogp_image_url = f"{CDN_BASE_URL}/{result.ogp_image_url}"
     else:
+        # 1. generation_mediaからOGP画像を取得
+        generation_media = (
+            db.query(GenerationMedia)
+            .filter(
+                GenerationMedia.post_id == post_id,
+                GenerationMedia.kind == GenerationMediaKind.POST_IMAGE,
+            )
+            .first()
+        )
+        if generation_media:
+            ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
+        else:
+            ogp_image_url = "https://logo.mijfans.jp/bimi/ogp-image.png"
+
+    if ogp_image_url is None:
         ogp_image_url = "https://logo.mijfans.jp/bimi/ogp-image.png"
 
     # タイトル生成（descriptionの最初の30文字）
