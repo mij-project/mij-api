@@ -210,15 +210,16 @@ def get_users_paginated(
         tuple[List[Users], int]: (ユーザーリスト, 総件数)
     """
     skip = (page - 1) * limit
-    
+
     query = db.query(Users).options(joinedload(Users.profile))
-    
+
     if search:
         query = query.join(Profiles).filter(
             (Profiles.username.ilike(f"%{search}%")) |
+            (Users.profile_name.ilike(f"%{search}%")) |
             (Users.email.ilike(f"%{search}%"))
         )
-    
+
     if role:
         role_map = {"user": 1, "creator": 2, "admin": 3}
         query = query.filter(Users.role == role_map.get(role))
@@ -374,12 +375,14 @@ def get_posts_paginated(
         tuple[List[Posts], int]: (投稿リスト, 総件数)
     """
     skip = (page - 1) * limit
-    
-    query = db.query(Posts).join(Users, Posts.creator_user_id == Users.id).options(joinedload(Posts.creator))
-    
+
+    query = db.query(Posts).join(Users, Posts.creator_user_id == Users.id).join(Profiles, Users.id == Profiles.user_id).options(joinedload(Posts.creator))
+
     if search:
         query = query.filter(
-            Posts.description.ilike(f"%{search}%")
+            (Posts.description.ilike(f"%{search}%")) |
+            (Users.profile_name.ilike(f"%{search}%")) |
+            (Profiles.username.ilike(f"%{search}%"))
         )
     
     if status:
