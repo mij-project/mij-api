@@ -1,5 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from app.models.plans import PostPlans
+from app.models.posts import Posts
+from app.constants.enums import PostStatus
+from sqlalchemy import func
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
@@ -307,6 +311,8 @@ def update_user_plan(
             update_data["type"] = plan_data.type
         if plan_data.welcome_message is not None:
             update_data["welcome_message"] = plan_data.welcome_message
+        if plan_data.open_dm_flg is not None:
+            update_data["open_dm_flg"] = plan_data.open_dm_flg
 
         # プランを更新
         updated_plan = update_plan(db, plan_id, update_data)
@@ -319,10 +325,6 @@ def update_user_plan(
         db.refresh(updated_plan)
 
         # 投稿数と加入者数を取得
-        from app.models.plans import PostPlans
-        from app.models.posts import Posts
-        from app.constants.enums import PostStatus
-        from sqlalchemy import func
 
         post_count = (
             db.query(func.count(PostPlans.post_id))
