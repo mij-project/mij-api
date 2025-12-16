@@ -1,4 +1,3 @@
-from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.api.commons.utils import get_video_duration

@@ -212,3 +212,7 @@ __marimo__/
 
 .vscode/
 .python-version
+/batchs/batch-media-convert/media/input
+/batchs/batch-media-convert/media/output/*
+/batchs/batch-media-convert/media/loud_in.txt
+/batchs/batch-media-convert/media/loud_out.txt

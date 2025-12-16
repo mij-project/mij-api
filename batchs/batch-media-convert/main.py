@@ -50,6 +50,26 @@ def ffprobe_duration_ms(path: str) -> int:
     return int(dur * 1000)
 
 
+def ffprobe_video_wh(path: str) -> tuple[int, int]:
+    cp = run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "json",
+            path,
+        ],
+        capture=True,
+    )
+    st = json.loads(cp.stdout)["streams"][0]
+    return int(st["width"]), int(st["height"])
+
+
 def upload_dir_sse_kms(
     local_dir: str, bucket: str, prefix: str, kms_key_arn: str
 ) -> None:
@@ -268,7 +288,7 @@ def build_ffmpeg_cmd(
             "-map",
             f"[{out_tags[i]}]",
             "-map",
-            "0:a:0",
+            "0:a:0?",
             *common_v,
             "-crf",
             str(crf),
@@ -359,7 +379,7 @@ def main() -> None:
     QUEUE_ARN = os.environ.get("QUEUE_ARN") or "arn:aws:ecs:queue/Default"
 
     media_dir = "media"
-    in_path = Path(__file__).parent / media_dir / "input" 
+    in_path = Path(__file__).parent / media_dir / "input"
     out_dir = Path(__file__).parent / media_dir / "output"
     shutil.rmtree(in_path, ignore_errors=True)
     shutil.rmtree(out_dir, ignore_errors=True)
@@ -379,14 +399,17 @@ def main() -> None:
 
         # 2) duration
         duration_ms = ffprobe_duration_ms(in_path)
-
+        in_w, in_h = ffprobe_video_wh(in_path)
+        if max(in_w, in_h) >= 3840 and min(in_w, in_h) >= 2160:
+            renditions.append(("2160p", 3840, 2160, 12000, 24000, 18, "192k"))
+            logger.info(f"Detected 4K input {in_w}x{in_h}, enable 2160p rendition")
         # 3) loudness series (input vs output)
         logs_dir = Path(__file__).parent / "media"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         in_txt = str(logs_dir / "loud_in.txt")
         out_txt = str(logs_dir / "loud_out.txt")
-        
+
         run_loudness_series(in_path, in_txt, apply_loudnorm=False)
         run_loudness_series(in_path, out_txt, apply_loudnorm=True)
         in_series = parse_ametadata_series(in_txt)
@@ -457,7 +480,7 @@ def main() -> None:
             "blackVideoDetected": 0,
             "warnings": [],
         }
-        logger.info(f"Sending success webhook: {detail}")
+        logger.info(detail)
         send_webhook(url=WEBHOOK_URL, secret=WEBHOOK_SECRET, detail=detail)
 
     except Exception as e:
@@ -476,7 +499,7 @@ def main() -> None:
                 "warnings": [],
                 "errorMessage": str(e),
             }
-            logger.info(f"Sending failure webhook: {detail}")
+            logger.info(detail)
             send_webhook(url=WEBHOOK_URL, secret=WEBHOOK_SECRET, detail=detail)
         except Exception:
             pass
