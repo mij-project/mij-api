@@ -199,7 +199,7 @@ def get_creators(db: Session, limit: int = 50):
     )
 
 
-def get_top_creators(db: Session, limit: int = 5):
+def get_top_creators(db: Session, limit: int = 5, current_user=None):
     """
     フォロワー数上位のクリエイターを取得
     """
@@ -210,29 +210,64 @@ def get_top_creators(db: Session, limit: int = 5):
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
-    return (
+
+    likes_agg = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(Likes.post_id).label("likes_count"),
+        )
+        .select_from(Posts)
+        .join(Likes, Likes.post_id == Posts.id)
+        .filter(active_post_cond)
+        .group_by(Posts.creator_user_id)
+        .subquery("likes_agg")
+    )
+
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
         db.query(
             Users,
             Users.profile_name,
             Profiles.username,
-            Users.offical_flg,
             Profiles.avatar_url,
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id))
-            .filter(Follows.follower_user_id.isnot(None))
-            .label("follower_ids"),
-            func.count(distinct(Likes.post_id)).label("likes_count"),
+            Profiles.cover_url,
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            is_following_col,
         )
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(Follows, Users.id == Follows.creator_user_id)
-        .outerjoin(Posts, and_(Posts.creator_user_id == Users.id, active_post_cond))
-        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
         .filter(Users.role == AccountType.CREATOR)
-        .group_by(Users.id, Users.profile_name, Profiles.username, Profiles.avatar_url)
-        .order_by(desc("likes_count"))
-        .limit(limit)
-        .all()
     )
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
+        )
+    return q.order_by(desc("likes_count")).limit(limit).all()
 
 
 def get_new_creators(db: Session, limit: int = 5):
