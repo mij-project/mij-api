@@ -36,7 +36,8 @@ def get_price_and_post_by_id(db: Session, price_id: UUID) -> tuple[Prices, Posts
 def delete_price_by_post_id(db: Session, post_id: UUID):
     """
     価格を削除
+    注意: この関数はコミットを行いません。呼び出し側でコミットを管理してください。
     """
     db.query(Prices).filter(Prices.post_id == post_id).delete()
-    db.commit()
+    db.flush()  # 変更をフラッシュするがコミットはしない
     return True

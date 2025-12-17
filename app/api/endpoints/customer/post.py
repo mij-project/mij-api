@@ -20,6 +20,7 @@ from app.crud.post_crud import (
     get_post_ogp_data,
 )
 from app.crud.price_crud import create_price, delete_price_by_post_id
+from app.models.prices import Prices
 from app.crud.post_plans_crud import create_post_plan, delete_plan_by_post_id
 from app.crud.tags_crud import exit_tag, create_tag
 from app.crud.post_tags_crud import create_post_tag, delete_post_tags_by_post_id
@@ -36,6 +37,7 @@ from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
 from app.core.logger import Logger
 from app.services.slack.slack import SlackService
+import time
 
 slack_alert = SlackService.initialize()
 logger = Logger.get_logger()
@@ -130,8 +132,10 @@ async def update_post_endpoint(
 
         # 単品販売の場合、価格をデリートインサート
         if request_data.single:
-            delete_price_by_post_id(db, request_data.post_id)
-            price = _create_price(db, request_data.post_id, request_data.price)
+            # 決済処理でロックがかかっている可能性があるので、ロックをかけてから削除・挿入する
+            # 10回リトライする
+            _delete_and_insert_price(db, request_data.post_id, request_data.price)
+           
 
         # プランの場合、プランをデリートインサート
         if request_data.plan:
@@ -374,32 +378,38 @@ def _update_post(
         if request_data.expiration
         else None,
         "visibility": visibility,
-        "status": PostStatus.RESUBMIT,
+        "status": request_data.status if request_data.status else PostStatus.RESUBMIT,
         "reject_comments": "",
     }
     return update_post(db, post_data)
 
 
-# def _delete_post_categories(db: Session, post_id: str):
-#     """投稿に紐づくカテゴリを削除する"""
-#     delete_post_category(db, post_id)
-#     return True
-
-# def _delete_post_tags(db: Session, post_id: str):
-#     """投稿に紐づくタグを削除する"""
-#     delete_post_tag(db, post_id)
-#     return True
-
-# def _delete_post_plans(db: Session, post_id: str):
-#     """投稿に紐づくプランを削除する"""
-#     delete_post_plans(db, post_id)
-#     return True
-
-# def _delete_post_price(db: Session, post_id: str):
-#     """投稿に紐づく価格を削除する"""
-#     delete_price(db, post_id)
-#     return True
-
+def _delete_and_insert_price(db: Session, post_id: str, price: int):
+    """投稿に価格をデリートインサートする"""
+    for retry_count in range(10):
+        try:
+            # 既存の価格レコードに対してロックをかける（存在する場合）
+            existing_prices = db.query(Prices).filter(
+                Prices.post_id == post_id
+            ).with_for_update().all()
+            
+            # 既存の価格を削除
+            if existing_prices:
+                for existing_price in existing_prices:
+                    db.delete(existing_price)
+                db.flush()  # 削除をフラッシュ
+            
+            # 新しい価格を挿入
+            price = _create_price(db, post_id, price)
+            break  # 成功したらループを抜ける
+        except Exception as e:
+            db.rollback()  # エラー時はロールバック
+            logger.warning(f"価格デリートインサートエラー（リトライ {retry_count + 1}/10）: {e}")
+            if retry_count < 9:  # 最後のリトライでない場合のみ待機
+                time.sleep(0.5)  # 500ms待機
+            else:
+                logger.error("価格デリートインサートが10回失敗しました", e)
+                raise
 
 def _refresh_related_objects(
     db: Session, post, price=None, plan_posts=None, category_posts=None, tag_posts=None
