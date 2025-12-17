@@ -75,6 +75,7 @@ class PostUpdateRequest(BaseModel):
 	price: Optional[int] = None
 	post_type: str
 	reject_comments: Optional[str] = None
+	status: Optional[int] = None
 
 class PostOGPCreatorResponse(BaseModel):
 	"""投稿OGP用のクリエイター情報"""

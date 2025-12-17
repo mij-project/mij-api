@@ -171,45 +171,6 @@ def create_free_subscription_endpoint(
 
         db.commit()
 
-        # 3. プラン加入時のみクリエイターに通知とメール送信
-        if is_plan:
-            seller_user = get_user_by_id(db, seller_user_id)
-            if seller_user:
-                # 通知を追加
-                buyer_avatar_url = "https://logo.mijfans.jp/bimi/logo.svg"
-                if hasattr(current_user, 'profile') and current_user.profile and current_user.profile.avatar_url:
-                    buyer_avatar_url = f"{BASE_URL}/{current_user.profile.avatar_url}"
-
-                title = f"{current_user.profile_name}さんが{content_name}プランに加入しました"
-                payload = {
-                    "title": title,
-                    "subtitle": title,
-                    "avatar": buyer_avatar_url,
-                    "redirect_url": f"/account/sale",
-                }
-
-                notification = {
-                    "user_id": seller_user.id,
-                    "type": NotificationType.PAYMENTS,
-                    "payload": payload,
-                }
-                add_notification_for_selling_info(db=db, notification=notification)
-
-                # メール送信
-                try:
-                    dashboard_url = f"{FRONTEND_URL}/account/sale"
-                    send_selling_info_email(
-                        to=seller_user.email,
-                        buyer_name=current_user.profile_name,
-                        contents_name=content_name,
-                        seller_name=seller_user.profile_name,
-                        content_url=content_url,
-                        contents_type=PaymentTransactionType.SUBSCRIPTION,
-                        dashboard_url=dashboard_url,
-                    )
-                except Exception as e:
-                    logger.error(f"メール送信エラー: {e}")
-
         return FreeSubscriptionResponse(
             result=True,
             subscription_id=subscription.id,
