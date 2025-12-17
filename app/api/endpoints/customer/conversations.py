@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+from uuid import UUID
 
 from app.db.base import get_db
 from app.deps.auth import get_current_user
@@ -205,3 +206,127 @@ def get_user_conversations(
         "skip": skip,
         "limit": limit,
     }
+
+
+# ========== 個別会話のメッセージAPI ==========
+
+
+@router.get("/{conversation_id}/messages", response_model=List[MessageResponse])
+def get_conversation_messages(
+    conversation_id: UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    個別会話のメッセージ一覧を取得
+    - ユーザーが参加している会話のみ取得可能
+    - 古い順にソート
+    """
+    # ユーザーがこの会話に参加しているか確認
+    if not conversations_crud.is_user_in_conversation(db, conversation_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied to this conversation")
+
+    # メッセージ一覧を取得
+    messages = conversations_crud.get_messages_by_conversation(
+        db, conversation_id, skip, limit
+    )
+
+    # レスポンスを構築
+    response = []
+    for message, sender, profile, admin in messages:
+        # 送信者情報の判定
+        sender_username = None
+        sender_avatar = None
+        sender_profile_name = None
+
+        if sender and profile:
+            # ユーザーメッセージの場合
+            sender_username = sender.profile_name
+            sender_avatar = (
+                f"{BASE_URL}/{profile.avatar_url}" if profile.avatar_url else None
+            )
+            sender_profile_name = sender.profile_name
+        elif admin:
+            # 管理者メッセージの場合
+            sender_username = "運営"
+            sender_avatar = None
+            sender_profile_name = "運営"
+
+        response.append(
+            MessageResponse(
+                id=message.id,
+                conversation_id=message.conversation_id,
+                sender_user_id=message.sender_user_id,
+                sender_admin_id=message.sender_admin_id,
+                type=message.type,
+                body_text=message.body_text,
+                created_at=message.created_at,
+                updated_at=message.updated_at,
+                sender_username=sender_username,
+                sender_avatar=sender_avatar,
+                sender_profile_name=sender_profile_name,
+            )
+        )
+
+    return response
+
+
+@router.post("/{conversation_id}/messages", response_model=MessageResponse)
+def send_conversation_message(
+    conversation_id: UUID,
+    message_data: MessageCreate,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    個別会話にメッセージを送信
+    - ユーザーが参加している会話のみ送信可能
+    """
+    # ユーザーがこの会話に参加しているか確認
+    if not conversations_crud.is_user_in_conversation(db, conversation_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied to this conversation")
+
+    # メッセージを作成
+    message = conversations_crud.create_message(
+        db=db,
+        conversation_id=conversation_id,
+        sender_user_id=current_user.id,
+        body_text=message_data.body_text,
+    )
+
+    return MessageResponse(
+        id=message.id,
+        conversation_id=message.conversation_id,
+        sender_user_id=message.sender_user_id,
+        sender_admin_id=message.sender_admin_id,
+        type=message.type,
+        body_text=message.body_text,
+        created_at=message.created_at,
+        updated_at=message.updated_at,
+        sender_username=current_user.profile_name,
+        sender_avatar=None,  # TODO: プロフィールから取得
+        sender_profile_name=current_user.profile_name,
+    )
+
+
+@router.post("/{conversation_id}/messages/{message_id}/read")
+def mark_conversation_message_as_read(
+    conversation_id: UUID,
+    message_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    メッセージを既読にする
+    - ユーザーが参加している会話のみ既読可能
+    """
+    # ユーザーがこの会話に参加しているか確認
+    if not conversations_crud.is_user_in_conversation(db, conversation_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied to this conversation")
+
+    # 既読にする
+    conversations_crud.mark_as_read(db, conversation_id, current_user.id, message_id)
+
+    return {"status": "ok", "message": "Message marked as read"}

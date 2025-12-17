@@ -22,6 +22,7 @@ from app.crud import (
     plan_crud,
     user_crud,
     notifications_crud,
+    conversations_crud,
 )
 from app.constants.enums import (
     PaymentTransactionStatus,
@@ -31,6 +32,8 @@ from app.constants.enums import (
     SubscriptionStatus,
     TransactionType,
     ItemType,
+    ConversationType,
+    ParticipantType,
 )
 from app.services.email.send_email import (
     send_payment_succuces_email,
@@ -42,6 +45,8 @@ from app.services.email.send_email import (
 from app.models.payment_transactions import PaymentTransactions
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
+from app.models.conversations import Conversations
+from app.models.conversation_participants import ConversationParticipants
 import os
 
 CDN_BASE_URL = os.environ.get("CDN_BASE_URL")
@@ -792,6 +797,51 @@ def _add_payment_notifications_for_seller(
     )
 
 
+def _send_dm_notification(
+    db: Session,
+    transaction: PaymentTransactions,
+) -> None:
+    """プラン加入時のDMの通知を送信"""
+    plan = plan_crud.get_plan_by_id(db, transaction.order_id)
+    if not plan:
+        return
+
+    # welcome_messageがない場合は通知を送信しない
+    if plan.welcome_message is None or plan.welcome_message == "":
+        return
+
+    creator_user = user_crud.get_user_by_id(db, plan.creator_user_id)
+    if not creator_user:
+        return
+
+    buyer_user_id = transaction.user_id
+    creator_user_id = plan.creator_user_id
+
+    try:
+        # DM会話を取得または作成
+        conversation = conversations_crud.get_or_create_dm_conversation(
+            db=db, user_id_1=creator_user_id, user_id_2=buyer_user_id
+        )
+
+        # ウェルカムメッセージを送信（クリエイターから購入者へ）
+        message = conversations_crud.create_message(
+            db=db,
+            conversation_id=conversation.id,
+            sender_user_id=creator_user_id,
+            body_text=plan.welcome_message,
+        )
+
+        logger.info(
+            f"Sent welcome message: {message.id} from creator={creator_user_id} to buyer={buyer_user_id} in conversation={conversation.id}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to send DM notification: {e}", exc_info=True)
+        # エラーが発生しても決済処理は継続するため、例外は握りつぶす
+        return
+
+
+
+
 @router.get("/payment")
 async def payment_webhook(
     clientip: Optional[str] = Query(None, alias="clientip"),
@@ -873,6 +923,11 @@ async def payment_webhook(
                 yuko,
                 transaction_origin,
             )
+
+            # プラン加入時のDMの通知を送信
+            if transaction.type == PaymentTransactionType.SUBSCRIPTION:
+                _send_dm_notification(db, transaction)
+            
         else:
             payment = _handle_failed_payment(
                 db, transaction, payment_amount, transaction_origin

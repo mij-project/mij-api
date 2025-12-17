@@ -103,7 +103,6 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
 
     return conversation
 
-
 def get_conversation_by_id(
     db: Session, conversation_id: UUID
 ) -> Optional[Conversations]:
@@ -453,7 +452,7 @@ def get_user_conversations(
         )
         .filter(
             ConversationParticipants.user_id == user_id,
-            Conversations.type == 2,  # type=2: クリエイターとユーザーのDM
+            Conversations.type == ConversationType.DM,  # type=2: クリエイターとユーザーのDM
             Conversations.is_active == True,
             Conversations.deleted_at.is_(None),
         )
@@ -560,3 +559,91 @@ def get_user_conversations(
         })
 
     return result, total
+
+
+def get_or_create_dm_conversation(
+    db: Session, user_id_1: UUID, user_id_2: UUID
+) -> Conversations:
+    """
+    2人のユーザー間のDM会話を取得または作成する
+
+    Args:
+        db: データベースセッション
+        user_id_1: ユーザー1のID
+        user_id_2: ユーザー2のID
+
+    Returns:
+        Conversations: 既存または新規作成されたDM会話
+    """
+    # 既存のDM会話を検索（type=2のconversationで、両方のユーザーが参加している）
+    # サブクエリで2人目のユーザーが参加しているか確認
+    from sqlalchemy import exists as sql_exists
+    from sqlalchemy.orm import aliased
+
+    # サブクエリ内で使用するためにエイリアスを作成
+    Participant2 = aliased(ConversationParticipants)
+
+    existing_conversation = (
+        db.query(Conversations)
+        .join(
+            ConversationParticipants,
+            ConversationParticipants.conversation_id == Conversations.id,
+        )
+        .filter(
+            Conversations.type == ConversationType.DM,
+            Conversations.is_active == True,
+            Conversations.deleted_at.is_(None),
+            ConversationParticipants.user_id == user_id_1,
+        )
+        .filter(
+            sql_exists().where(
+                Participant2.conversation_id == Conversations.id,
+                Participant2.user_id == user_id_2,
+            )
+        )
+        .first()
+    )
+
+    if existing_conversation:
+        logger.info(
+            f"Found existing DM conversation: {existing_conversation.id} between user1={user_id_1} and user2={user_id_2}"
+        )
+        return existing_conversation
+
+    # 新規会話を作成
+    conversation = Conversations(
+        type=ConversationType.DM,
+        is_active=True,
+    )
+    db.add(conversation)
+    db.flush()
+
+    # ユーザー1を参加者として追加
+    participant_1 = ConversationParticipants(
+        conversation_id=conversation.id,
+        user_id=user_id_1,
+        participant_id=user_id_1,
+        participant_type=ParticipantType.USER,
+        role=1,  # 通常ユーザー
+    )
+    db.add(participant_1)
+
+    # ユーザー2を参加者として追加
+    participant_2 = ConversationParticipants(
+        conversation_id=conversation.id,
+        user_id=user_id_2,
+        participant_id=user_id_2,
+        participant_type=ParticipantType.USER,
+        role=1,  # 通常ユーザー
+    )
+    db.add(participant_2)
+    db.flush()
+
+    logger.info(
+        f"Created new DM conversation: {conversation.id} between user1={user_id_1} and user2={user_id_2}"
+    )
+
+    db.commit()
+    db.refresh(conversation)
+
+    return conversation
