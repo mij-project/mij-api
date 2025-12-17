@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import distinct, exists, or_, select, func, and_, case
+from sqlalchemy import distinct, literal, or_, select, func, and_
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
 from app.models import Categories, PostCategories
@@ -9,7 +9,6 @@ from app.models.posts import Posts
 from app.models.user import Users
 from app.models.identity import IdentityVerifications, IdentityDocuments
 from app.schemas.creator import (
-    CreatorCreate,
     CreatorUpdate,
     IdentityVerificationCreate,
     IdentityDocumentCreate,
@@ -219,7 +218,9 @@ def get_top_creators(db: Session, limit: int = 5):
             Users.offical_flg,
             Profiles.avatar_url,
             func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
+            func.array_agg(distinct(Follows.follower_user_id))
+            .filter(Follows.follower_user_id.isnot(None))
+            .label("follower_ids"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
         .join(Profiles, Users.id == Profiles.user_id)
@@ -254,7 +255,9 @@ def get_new_creators(db: Session, limit: int = 5):
     )
 
 
-def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
+def get_ranking_creators_overall_all_time(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator overalltime
     """
@@ -266,45 +269,74 @@ def get_ranking_creators_overall_all_time(db: Session, limit: int = 500):
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    return (
+    likes_agg = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(Likes.post_id).label("likes_count"),
+        )
+        .select_from(Posts)
+        .join(Likes, Likes.post_id == Posts.id)
+        .filter(active_post_cond)
+        .group_by(Posts.creator_user_id)
+        .subquery("likes_agg")
+    )
+
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
         db.query(
             Users,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
-            func.count(distinct(Likes.post_id)).label("likes_count"),
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            is_following_col,
         )
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(Follows, Users.id == Follows.creator_user_id)
-        .outerjoin(
-            Posts,
-            and_(Posts.creator_user_id == Users.id, active_post_cond),
-        )
-        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
         .filter(Users.role == AccountType.CREATOR)
-        .group_by(
-            Users.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .order_by(desc("likes_count"))
-        .limit(limit)
-        .all()
     )
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
+        )
+    return q.order_by(desc("likes_count")).limit(limit).all()
 
 
-def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
+def get_ranking_creators_overall_daily(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator daily
     """
     one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-
     now = func.now()
+
     active_post_cond = and_(
         Posts.status == PostStatus.APPROVED,
         Posts.deleted_at.is_(None),
@@ -312,124 +344,244 @@ def get_ranking_creators_overall_daily(db: Session, limit: int = 500):
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    return (
+    # 1) likes_agg: creator -> likes_count (daily)
+    likes_agg = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(Likes.post_id).label("likes_count"),
+        )
+        .select_from(Posts)
+        .join(Likes, and_(Likes.post_id == Posts.id, Likes.created_at >= one_day_ago))
+        .filter(active_post_cond)
+        .group_by(Posts.creator_user_id)
+        .subquery("likes_agg")
+    )
+
+    # 2) followers_agg: creator -> followers_count (all time)
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+
+    # 3) viewer_follow_map: creator -> True (only if current_user_id)
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
         db.query(
             Users,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
-            func.count(distinct(Likes.post_id)).label("likes_count"),
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            is_following_col,
         )
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(Follows, Users.id == Follows.creator_user_id)
-        .outerjoin(Posts, and_(Posts.creator_user_id == Users.id, active_post_cond))
-        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
         .filter(Users.role == AccountType.CREATOR)
-        .filter(Likes.created_at >= one_day_ago)
-        .group_by(
-            Users.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .order_by(desc("likes_count"))
-        .limit(limit)
-        .all()
+        .filter(func.coalesce(likes_agg.c.likes_count, 0) > 0)
     )
 
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
+        )
 
-def get_ranking_creators_overall_weekly(db: Session, limit: int = 500):
+    return q.order_by(desc("likes_count")).limit(limit).all()
+
+
+def get_ranking_creators_overall_weekly(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator weekly
     """
     one_week_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
     now = func.now()
+
     active_post_cond = and_(
         Posts.status == PostStatus.APPROVED,
         Posts.deleted_at.is_(None),
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
-    return (
+
+    # 1) likes_agg: creator -> likes_count (weekly)
+    likes_agg = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(Likes.post_id).label("likes_count"),
+        )
+        .select_from(Posts)
+        .join(Likes, and_(Likes.post_id == Posts.id, Likes.created_at >= one_week_ago))
+        .filter(active_post_cond)
+        .group_by(Posts.creator_user_id)
+        .subquery("likes_agg")
+    )
+
+    # 2) followers_agg: creator -> followers_count (all time)
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+
+    # 3) viewer_follow_map: creator -> True (only if current_user_id)
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
         db.query(
             Users,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
-            func.count(distinct(Likes.post_id)).label("likes_count"),
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            is_following_col,
         )
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(Follows, Users.id == Follows.creator_user_id)
-        .outerjoin(Posts, and_(Posts.creator_user_id == Users.id, active_post_cond))
-        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
         .filter(Users.role == AccountType.CREATOR)
-        .filter(Likes.created_at >= one_week_ago)
-        .group_by(
-            Users.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .order_by(desc("likes_count"))
-        .limit(limit)
-        .all()
+        .filter(func.coalesce(likes_agg.c.likes_count, 0) > 0)
     )
 
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
+        )
 
-def get_ranking_creators_overall_monthly(db: Session, limit: int = 500):
+    return q.order_by(desc("likes_count")).limit(limit).all()
+
+
+def get_ranking_creators_overall_monthly(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator monthly
     """
     one_month_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
     now = func.now()
+
     active_post_cond = and_(
         Posts.status == PostStatus.APPROVED,
         Posts.deleted_at.is_(None),
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
-    return (
+
+    # 1) likes_agg: creator -> likes_count (monthly)
+    likes_agg = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(Likes.post_id).label("likes_count"),
+        )
+        .select_from(Posts)
+        .join(Likes, and_(Likes.post_id == Posts.id, Likes.created_at >= one_month_ago))
+        .filter(active_post_cond)
+        .group_by(Posts.creator_user_id)
+        .subquery("likes_agg")
+    )
+
+    # 2) followers_agg: creator -> followers_count (all time)
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+
+    # 3) viewer_follow_map: creator -> True (only if current_user_id)
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
         db.query(
             Users,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
-            func.count(distinct(Likes.post_id)).label("likes_count"),
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            is_following_col,
         )
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(Follows, Users.id == Follows.creator_user_id)
-        .outerjoin(Posts, and_(Posts.creator_user_id == Users.id, active_post_cond))
-        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
         .filter(Users.role == AccountType.CREATOR)
-        .filter(Likes.created_at >= one_month_ago)
-        .group_by(
-            Users.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .order_by(desc("likes_count"))
-        .limit(limit)
-        .all()
+        .filter(func.coalesce(likes_agg.c.likes_count, 0) > 0)
     )
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
+        )
+
+    return q.order_by(desc("likes_count")).limit(limit).all()
 
 
 def get_ranking_creators_overall_detail_overall(
-    db: Session, page: int = 1, limit: int = 500, term: str = "all_time"
+    db: Session,
+    page: int = 1,
+    limit: int = 500,
+    term: str = "all_time",
+    current_user=None,
 ):
     """
     いいね数が多いCreator overalltime
@@ -458,38 +610,70 @@ def get_ranking_creators_overall_detail_overall(
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
-    query = (
+    likes_join_cond = Likes.post_id == Posts.id
+    if filter_date_condition is not None:
+        likes_join_cond = and_(
+            likes_join_cond, Likes.created_at >= filter_date_condition
+        )
+    likes_agg = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Likes.post_id)).label("likes_count"),
+        )
+        .select_from(Posts)
+        .outerjoin(Likes, likes_join_cond)
+        .filter(active_post_cond)
+        .group_by(Posts.creator_user_id)
+        .subquery("likes_agg")
+    )
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+    q = (
         db.query(
             Users,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).filter(Follows.follower_user_id.isnot(None)).label("follower_ids"),
-            func.count(distinct(Likes.post_id)).label("likes_count"),
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            is_following_col,
         )
         .join(Profiles, Users.id == Profiles.user_id)
-        .outerjoin(Follows, Users.id == Follows.creator_user_id)
-        .outerjoin(Posts, and_(Posts.creator_user_id == Users.id, active_post_cond))
-        .outerjoin(Likes, Likes.post_id == Posts.id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
         .filter(Users.role == AccountType.CREATOR)
     )
-    if filter_date_condition is not None:
-        query = query.filter(filter_date_condition)
-    return (
-        query.group_by(
-            Users.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
         )
-        .order_by(desc("likes_count"))
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    if filter_date_condition is not None:
+        q = q.filter(func.coalesce(likes_agg.c.likes_count, 0) > 0)
+
+    return q.order_by(desc("likes_count")).offset(offset).limit(limit).all()
 
 
 def get_ranking_creators_categories_all_time(db: Session, limit: int = 500):
@@ -603,7 +787,9 @@ def get_ranking_creators_categories_all_time(db: Session, limit: int = 500):
     return result
 
 
-def get_ranking_creators_categories_overall_all_time(db: Session, limit: int = 500):
+def get_ranking_creators_categories_overall_all_time(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator categories overall alltime
     """
@@ -617,92 +803,102 @@ def get_ranking_creators_categories_overall_all_time(db: Session, limit: int = 5
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    creator_like_counts_subq = (
+    likes_agg = (
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-            Users.id.label("creator_user_id"),
-            Users.profile_name.label("profile_name"),
-            Users.offical_flg.label("offical_flg"),
-            Profiles.username.label("username"),
-            Profiles.avatar_url.label("avatar_url"),
-            Profiles.cover_url.label("cover_url"),
+            Posts.creator_user_id.label("creator_user_id"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).label("follower_ids"),
         )
         .select_from(Categories)
         .join(PostCategories, PostCategories.category_id == Categories.id)
-        .join(
-            Posts,
-            and_(
-                Posts.id == PostCategories.post_id,
-                active_post_cond,
-            ),
-        )
-        .join(Users, Users.id == Posts.creator_user_id)
-        .join(Profiles, Profiles.user_id == Users.id)
+        .join(Posts, and_(Posts.id == PostCategories.post_id, active_post_cond))
         .outerjoin(Likes, Likes.post_id == Posts.id)
-        .outerjoin(Follows, Follows.creator_user_id == Users.id)
-        .filter(Users.role == AccountType.CREATOR)
-        .group_by(
-            Categories.id,
-            Categories.name,
-            Users.id,
-            Users.profile_name,
-            Users.offical_flg,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .subquery("creator_like_counts")
+        .group_by(Categories.id, Categories.name, Posts.creator_user_id)
+        .subquery("likes_agg")
     )
 
     top_categories_subq = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            func.sum(creator_like_counts_subq.c.likes_count).label(
-                "category_total_likes"
-            ),
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            func.sum(likes_agg.c.likes_count).label("category_total_likes"),
         )
-        .select_from(creator_like_counts_subq)
-        .group_by(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-        )
+        .select_from(likes_agg)
+        .group_by(likes_agg.c.category_id, likes_agg.c.category_name)
         .order_by(desc("category_total_likes"))
         .limit(10)
         .subquery("top_categories")
     )
 
-    ranked_creators_subq = (
+    followers_count_agg = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            creator_like_counts_subq.c.creator_user_id,
-            creator_like_counts_subq.c.profile_name,
-            creator_like_counts_subq.c.username,
-            creator_like_counts_subq.c.offical_flg,
-            creator_like_counts_subq.c.avatar_url,
-            creator_like_counts_subq.c.cover_url,
-            creator_like_counts_subq.c.likes_count,
-            creator_like_counts_subq.c.followers_count,
-            creator_like_counts_subq.c.follower_ids,
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_count_agg")
+    )
+
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
+        db.query(
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            likes_agg.c.creator_user_id,
+            Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            Profiles.cover_url.label("cover_url"),
+            likes_agg.c.likes_count.label("likes_count"),
+            func.coalesce(followers_count_agg.c.followers_count, 0).label(
+                "followers_count"
+            ),
+            is_following_col,
             func.row_number()
             .over(
-                partition_by=creator_like_counts_subq.c.category_id,
-                order_by=creator_like_counts_subq.c.likes_count.desc(),
+                partition_by=likes_agg.c.category_id,
+                order_by=likes_agg.c.likes_count.desc(),
             )
             .label("rn"),
         )
-        .select_from(creator_like_counts_subq)
+        .select_from(likes_agg)
         .join(
             top_categories_subq,
-            top_categories_subq.c.category_id == creator_like_counts_subq.c.category_id,
+            top_categories_subq.c.category_id == likes_agg.c.category_id,
         )
-        .subquery("ranked_creators")
+        .join(Users, Users.id == likes_agg.c.creator_user_id)
+        .join(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            followers_count_agg,
+            followers_count_agg.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+        .filter(Users.role == AccountType.CREATOR)
     )
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map,
+            viewer_follow_map.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+
+    ranked_creators_subq = q.subquery("ranked_creators")
 
     result = (
         db.query(ranked_creators_subq)
@@ -717,7 +913,9 @@ def get_ranking_creators_categories_overall_all_time(db: Session, limit: int = 5
     return result
 
 
-def get_ranking_creators_categories_overall_daily(db: Session, limit: int = 500):
+def get_ranking_creators_categories_overall_daily(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator categories overall daily
     """
@@ -732,93 +930,104 @@ def get_ranking_creators_categories_overall_daily(db: Session, limit: int = 500)
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    creator_like_counts_subq = (
+    likes_agg = (
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-            Users.id.label("creator_user_id"),
-            Users.profile_name.label("profile_name"),
-            Users.offical_flg.label("offical_flg"),
-            Profiles.username.label("username"),
-            Profiles.avatar_url.label("avatar_url"),
-            Profiles.cover_url.label("cover_url"),
+            Posts.creator_user_id.label("creator_user_id"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).label("follower_ids"),
         )
         .select_from(Categories)
         .join(PostCategories, PostCategories.category_id == Categories.id)
-        .join(
-            Posts,
-            and_(
-                Posts.id == PostCategories.post_id,
-                active_post_cond,
-            ),
+        .join(Posts, and_(Posts.id == PostCategories.post_id, active_post_cond))
+        .outerjoin(
+            Likes, and_(Likes.post_id == Posts.id, Likes.created_at >= one_day_ago)
         )
-        .join(Users, Users.id == Posts.creator_user_id)
-        .join(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(Likes, Likes.post_id == Posts.id)
-        .outerjoin(Follows, Follows.creator_user_id == Users.id)
-        .filter(Users.role == AccountType.CREATOR)
-        .filter(Likes.created_at >= one_day_ago)
-        .group_by(
-            Categories.id,
-            Categories.name,
-            Users.id,
-            Users.profile_name,
-            Users.offical_flg,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .subquery("creator_like_counts")
+        .group_by(Categories.id, Categories.name, Posts.creator_user_id)
+        .subquery("likes_agg")
     )
 
     top_categories_subq = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            func.sum(creator_like_counts_subq.c.likes_count).label(
-                "category_total_likes"
-            ),
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            func.sum(likes_agg.c.likes_count).label("category_total_likes"),
         )
-        .select_from(creator_like_counts_subq)
-        .group_by(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-        )
+        .select_from(likes_agg)
+        .group_by(likes_agg.c.category_id, likes_agg.c.category_name)
         .order_by(desc("category_total_likes"))
         .limit(10)
         .subquery("top_categories")
     )
 
-    ranked_creators_subq = (
+    followers_count_agg = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            creator_like_counts_subq.c.creator_user_id,
-            creator_like_counts_subq.c.profile_name,
-            creator_like_counts_subq.c.username,
-            creator_like_counts_subq.c.offical_flg,
-            creator_like_counts_subq.c.avatar_url,
-            creator_like_counts_subq.c.cover_url,
-            creator_like_counts_subq.c.likes_count,
-            creator_like_counts_subq.c.followers_count,
-            creator_like_counts_subq.c.follower_ids,
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_count_agg")
+    )
+
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
+        db.query(
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            likes_agg.c.creator_user_id,
+            Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            Profiles.cover_url.label("cover_url"),
+            likes_agg.c.likes_count.label("likes_count"),
+            func.coalesce(followers_count_agg.c.followers_count, 0).label(
+                "followers_count"
+            ),
+            is_following_col,
             func.row_number()
             .over(
-                partition_by=creator_like_counts_subq.c.category_id,
-                order_by=creator_like_counts_subq.c.likes_count.desc(),
+                partition_by=likes_agg.c.category_id,
+                order_by=likes_agg.c.likes_count.desc(),
             )
             .label("rn"),
         )
-        .select_from(creator_like_counts_subq)
+        .select_from(likes_agg)
         .join(
             top_categories_subq,
-            top_categories_subq.c.category_id == creator_like_counts_subq.c.category_id,
+            top_categories_subq.c.category_id == likes_agg.c.category_id,
         )
-        .subquery("ranked_creators")
+        .join(Users, Users.id == likes_agg.c.creator_user_id)
+        .join(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            followers_count_agg,
+            followers_count_agg.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+        .filter(Users.role == AccountType.CREATOR)
     )
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map,
+            viewer_follow_map.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+
+    ranked_creators_subq = q.subquery("ranked_creators")
 
     result = (
         db.query(ranked_creators_subq)
@@ -833,7 +1042,9 @@ def get_ranking_creators_categories_overall_daily(db: Session, limit: int = 500)
     return result
 
 
-def get_ranking_creators_categories_overall_weekly(db: Session, limit: int = 500):
+def get_ranking_creators_categories_overall_weekly(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator categories overall weekly
     """
@@ -847,93 +1058,104 @@ def get_ranking_creators_categories_overall_weekly(db: Session, limit: int = 500
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    creator_like_counts_subq = (
+    likes_agg = (
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-            Users.id.label("creator_user_id"),
-            Users.profile_name.label("profile_name"),
-            Users.offical_flg.label("offical_flg"),
-            Profiles.username.label("username"),
-            Profiles.avatar_url.label("avatar_url"),
-            Profiles.cover_url.label("cover_url"),
+            Posts.creator_user_id.label("creator_user_id"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).label("follower_ids"),
         )
         .select_from(Categories)
         .join(PostCategories, PostCategories.category_id == Categories.id)
-        .join(
-            Posts,
-            and_(
-                Posts.id == PostCategories.post_id,
-                active_post_cond,
-            ),
+        .join(Posts, and_(Posts.id == PostCategories.post_id, active_post_cond))
+        .outerjoin(
+            Likes, and_(Likes.post_id == Posts.id, Likes.created_at >= one_week_ago)
         )
-        .join(Users, Users.id == Posts.creator_user_id)
-        .join(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(Likes, Likes.post_id == Posts.id)
-        .outerjoin(Follows, Follows.creator_user_id == Users.id)
-        .filter(Users.role == AccountType.CREATOR)
-        .filter(Likes.created_at >= one_week_ago)
-        .group_by(
-            Categories.id,
-            Categories.name,
-            Users.id,
-            Users.profile_name,
-            Users.offical_flg,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .subquery("creator_like_counts")
+        .group_by(Categories.id, Categories.name, Posts.creator_user_id)
+        .subquery("likes_agg")
     )
 
     top_categories_subq = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            func.sum(creator_like_counts_subq.c.likes_count).label(
-                "category_total_likes"
-            ),
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            func.sum(likes_agg.c.likes_count).label("category_total_likes"),
         )
-        .select_from(creator_like_counts_subq)
-        .group_by(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-        )
+        .select_from(likes_agg)
+        .group_by(likes_agg.c.category_id, likes_agg.c.category_name)
         .order_by(desc("category_total_likes"))
         .limit(10)
         .subquery("top_categories")
     )
 
-    ranked_creators_subq = (
+    followers_count_agg = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            creator_like_counts_subq.c.creator_user_id,
-            creator_like_counts_subq.c.profile_name,
-            creator_like_counts_subq.c.username,
-            creator_like_counts_subq.c.offical_flg,
-            creator_like_counts_subq.c.avatar_url,
-            creator_like_counts_subq.c.cover_url,
-            creator_like_counts_subq.c.likes_count,
-            creator_like_counts_subq.c.followers_count,
-            creator_like_counts_subq.c.follower_ids,
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_count_agg")
+    )
+
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
+        db.query(
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            likes_agg.c.creator_user_id,
+            Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            Profiles.cover_url.label("cover_url"),
+            likes_agg.c.likes_count.label("likes_count"),
+            func.coalesce(followers_count_agg.c.followers_count, 0).label(
+                "followers_count"
+            ),
+            is_following_col,
             func.row_number()
             .over(
-                partition_by=creator_like_counts_subq.c.category_id,
-                order_by=creator_like_counts_subq.c.likes_count.desc(),
+                partition_by=likes_agg.c.category_id,
+                order_by=likes_agg.c.likes_count.desc(),
             )
             .label("rn"),
         )
-        .select_from(creator_like_counts_subq)
+        .select_from(likes_agg)
         .join(
             top_categories_subq,
-            top_categories_subq.c.category_id == creator_like_counts_subq.c.category_id,
+            top_categories_subq.c.category_id == likes_agg.c.category_id,
         )
-        .subquery("ranked_creators")
+        .join(Users, Users.id == likes_agg.c.creator_user_id)
+        .join(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            followers_count_agg,
+            followers_count_agg.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+        .filter(Users.role == AccountType.CREATOR)
     )
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map,
+            viewer_follow_map.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+
+    ranked_creators_subq = q.subquery("ranked_creators")
 
     result = (
         db.query(ranked_creators_subq)
@@ -948,7 +1170,9 @@ def get_ranking_creators_categories_overall_weekly(db: Session, limit: int = 500
     return result
 
 
-def get_ranking_creators_categories_overall_monthly(db: Session, limit: int = 500):
+def get_ranking_creators_categories_overall_monthly(
+    db: Session, limit: int = 500, current_user=None
+):
     """
     いいね数が多いCreator categories overall monthly
     """
@@ -962,93 +1186,104 @@ def get_ranking_creators_categories_overall_monthly(db: Session, limit: int = 50
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    creator_like_counts_subq = (
+    likes_agg = (
         db.query(
             Categories.id.label("category_id"),
             Categories.name.label("category_name"),
-            Users.id.label("creator_user_id"),
-            Users.profile_name.label("profile_name"),
-            Users.offical_flg.label("offical_flg"),
-            Profiles.username.label("username"),
-            Profiles.avatar_url.label("avatar_url"),
-            Profiles.cover_url.label("cover_url"),
+            Posts.creator_user_id.label("creator_user_id"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).label("follower_ids"),
         )
         .select_from(Categories)
         .join(PostCategories, PostCategories.category_id == Categories.id)
-        .join(
-            Posts,
-            and_(
-                Posts.id == PostCategories.post_id,
-                active_post_cond,
-            ),
+        .join(Posts, and_(Posts.id == PostCategories.post_id, active_post_cond))
+        .outerjoin(
+            Likes, and_(Likes.post_id == Posts.id, Likes.created_at >= one_month_ago)
         )
-        .join(Users, Users.id == Posts.creator_user_id)
-        .join(Profiles, Profiles.user_id == Users.id)
-        .outerjoin(Likes, Likes.post_id == Posts.id)
-        .outerjoin(Follows, Follows.creator_user_id == Users.id)
-        .filter(Users.role == AccountType.CREATOR)
-        .filter(Likes.created_at >= one_month_ago)
-        .group_by(
-            Categories.id,
-            Categories.name,
-            Users.id,
-            Users.profile_name,
-            Users.offical_flg,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-        )
-        .subquery("creator_like_counts")
+        .group_by(Categories.id, Categories.name, Posts.creator_user_id)
+        .subquery("likes_agg")
     )
 
     top_categories_subq = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            func.sum(creator_like_counts_subq.c.likes_count).label(
-                "category_total_likes"
-            ),
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            func.sum(likes_agg.c.likes_count).label("category_total_likes"),
         )
-        .select_from(creator_like_counts_subq)
-        .group_by(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-        )
+        .select_from(likes_agg)
+        .group_by(likes_agg.c.category_id, likes_agg.c.category_name)
         .order_by(desc("category_total_likes"))
         .limit(10)
         .subquery("top_categories")
     )
 
-    ranked_creators_subq = (
+    followers_count_agg = (
         db.query(
-            creator_like_counts_subq.c.category_id,
-            creator_like_counts_subq.c.category_name,
-            creator_like_counts_subq.c.creator_user_id,
-            creator_like_counts_subq.c.profile_name,
-            creator_like_counts_subq.c.username,
-            creator_like_counts_subq.c.offical_flg,
-            creator_like_counts_subq.c.avatar_url,
-            creator_like_counts_subq.c.cover_url,
-            creator_like_counts_subq.c.likes_count,
-            creator_like_counts_subq.c.followers_count,
-            creator_like_counts_subq.c.follower_ids,
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_count_agg")
+    )
+
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
+        db.query(
+            likes_agg.c.category_id,
+            likes_agg.c.category_name,
+            likes_agg.c.creator_user_id,
+            Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            Profiles.cover_url.label("cover_url"),
+            likes_agg.c.likes_count.label("likes_count"),
+            func.coalesce(followers_count_agg.c.followers_count, 0).label(
+                "followers_count"
+            ),
+            is_following_col,
             func.row_number()
             .over(
-                partition_by=creator_like_counts_subq.c.category_id,
-                order_by=creator_like_counts_subq.c.likes_count.desc(),
+                partition_by=likes_agg.c.category_id,
+                order_by=likes_agg.c.likes_count.desc(),
             )
             .label("rn"),
         )
-        .select_from(creator_like_counts_subq)
+        .select_from(likes_agg)
         .join(
             top_categories_subq,
-            top_categories_subq.c.category_id == creator_like_counts_subq.c.category_id,
+            top_categories_subq.c.category_id == likes_agg.c.category_id,
         )
-        .subquery("ranked_creators")
+        .join(Users, Users.id == likes_agg.c.creator_user_id)
+        .join(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            followers_count_agg,
+            followers_count_agg.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+        .filter(Users.role == AccountType.CREATOR)
     )
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map,
+            viewer_follow_map.c.creator_user_id == likes_agg.c.creator_user_id,
+        )
+
+    ranked_creators_subq = q.subquery("ranked_creators")
 
     result = (
         db.query(ranked_creators_subq)
@@ -1064,7 +1299,12 @@ def get_ranking_creators_categories_overall_monthly(db: Session, limit: int = 50
 
 
 def get_ranking_creators_categories_detail(
-    db: Session, category: str, page: int = 1, limit: int = 500, term: str = "all_time"
+    db: Session,
+    category: str,
+    page: int = 1,
+    limit: int = 500,
+    term: str = "all_time",
+    current_user=None,
 ):
     """
     いいね数が多いCreator overalltime
@@ -1093,32 +1333,19 @@ def get_ranking_creators_categories_detail(
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
+
     likes_join_cond = Likes.post_id == Posts.id
     if filter_date_condition is not None:
-        likes_join_cond = and_(likes_join_cond, filter_date_condition)
+        likes_join_cond = and_(
+            likes_join_cond, Likes.created_at >= filter_date_condition
+        )
 
-    query = (
+    likes_agg = (
         db.query(
-            Users,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            Profiles.cover_url,
-            # follower
-            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
-            func.array_agg(distinct(Follows.follower_user_id)).label("follower_ids"),
-            # likes
+            Posts.creator_user_id.label("creator_user_id"),
             func.count(distinct(Likes.post_id)).label("likes_count"),
         )
-        .select_from(Users)
-        .join(Profiles, Users.id == Profiles.user_id)
-        .join(
-            Posts,
-            and_(
-                Posts.creator_user_id == Users.id,
-                active_post_cond,
-            ),
-        )
+        .select_from(Posts)
         .join(
             PostCategories,
             and_(
@@ -1126,21 +1353,62 @@ def get_ranking_creators_categories_detail(
                 PostCategories.category_id == category,
             ),
         )
-        .outerjoin(Follows, Follows.creator_user_id == Users.id)
         .outerjoin(Likes, likes_join_cond)
-        .filter(Users.role == AccountType.CREATOR)
-        .group_by(
-            Users.id,
+        .filter(active_post_cond)
+        .group_by(Posts.creator_user_id)
+        .subquery("likes_agg")
+    )
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    q = (
+        db.query(
+            Users,
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
             Profiles.cover_url,
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            is_following_col,
         )
-        .order_by(desc("likes_count"))
-        .offset(offset)
-        .limit(limit)
+        .select_from(Users)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
+        .filter(Users.role == AccountType.CREATOR)
     )
-    return query.all()
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
+        )
+
+    q = q.filter(likes_agg.c.creator_user_id.isnot(None))
+    if filter_date_condition is not None:
+        q = q.filter(func.coalesce(likes_agg.c.likes_count, 0) > 0)
+
+    return q.order_by(desc("likes_count")).offset(offset).limit(limit).all()
 
 
 def update_creator_platform_fee_by_admin(
