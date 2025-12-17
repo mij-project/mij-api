@@ -251,24 +251,30 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
         if request.purchase_type == PurchaseType.SINGLE:
             if not request.price_id:
                 raise HTTPException(status_code=400, detail="Price ID is required for single purchase")
-            price = price_crud.get_price_by_id(db, request.price_id)
+            # 対象のレコードに対してロックをかける（select_for_update）
+            price = db.query(Prices).filter(Prices.id == request.price_id).with_for_update().first()
             if not price:
                 raise HTTPException(status_code=404, detail="Price not found")
-            # 手数料込みの金額を計算（切り上げで1円でも手数料が反映されるようにする）
+            price.price = math.ceil(price.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             money = math.ceil(price.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.price_id
             transaction_type = PaymentTransactionType.SINGLE
+            db.flush()  # 変更をフラッシュ（トランザクションは呼び出し側でコミット）
         else:  # subscription
             if not request.plan_id:
                 raise HTTPException(status_code=400, detail="Plan ID is required for subscription")
-            plan = plan_crud.get_plan_by_id(db, request.plan_id)
+
+            # 対象のレコードに対してロックをかける（select_for_update）
+            plan = db.query(Plans).filter(Plans.id == request.plan_id).with_for_update().first()
             if not plan:
                 raise HTTPException(status_code=404, detail="Plan not found")
+            plan.price = math.ceil(plan.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
 
-            # プラン価格取得（切り上げで1円でも手数料が反映されるようにする）
             money = math.ceil(plan.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.plan_id
             transaction_type = PaymentTransactionType.SUBSCRIPTION
+            db.flush()  # 変更をフラッシュ（トランザクションは呼び出し側でコミット）
+
         return money, order_id, transaction_type
     except HTTPException:
         raise
