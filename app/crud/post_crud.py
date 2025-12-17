@@ -755,26 +755,24 @@ def get_ranking_posts(db: Session, limit: int = 5):
             Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            MediaAssets.storage_key.label("thumbnail_key"),
             VideoAssets.duration_sec.label("duration_sec"),
         )
-        .outerjoin(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        # post_plansテーブルとの結合
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        # サムネイル用のMediaAssets（kind=2）
         .outerjoin(
-            ThumbnailAssets,
-            (Posts.id == ThumbnailAssets.post_id)
-            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
         )
-        # メインビデオ用のMediaAssets（kind=4）
         .outerjoin(
             VideoAssets,
             (Posts.id == VideoAssets.post_id)
             & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
         )
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
+        .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
         .filter(active_post_cond)
         .group_by(
             Posts.id,
@@ -782,7 +780,7 @@ def get_ranking_posts(db: Session, limit: int = 5):
             Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
-            ThumbnailAssets.storage_key,
+            MediaAssets.storage_key,
             VideoAssets.duration_sec,
         )
         .order_by(desc("likes_count"))
@@ -796,13 +794,42 @@ def get_recent_posts(db: Session, limit: int = 10):
     ランダムで10件の投稿を取得（いいね数も含む）
     """
     now = func.now()
+
     active_post_cond = and_(
         Posts.status == PostStatus.APPROVED,
         Posts.deleted_at.is_(None),
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
-    return (
+
+    # 1) likes_count subquery
+    likes_sq = (
+        db.query(
+            Likes.post_id.label("post_id"),
+            func.count(Likes.post_id).label("likes_count"),
+        )
+        .group_by(Likes.post_id)
+        .subquery()
+    )
+
+    # 2) Rank post
+    ranked_sq = (
+        db.query(
+            Posts.id.label("post_id"),
+            func.row_number()
+            .over(
+                partition_by=Profiles.user_id,    
+                order_by=func.random(),          
+            )
+            .label("rn"),
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .filter(active_post_cond)
+        .subquery()
+    )
+
+    rows = (
         db.query(
             Posts,
             Users.profile_name,
@@ -810,41 +837,30 @@ def get_recent_posts(db: Session, limit: int = 10):
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
-            func.count(Likes.post_id).label("likes_count"),
+            func.coalesce(likes_sq.c.likes_count, 0).label("likes_count"),
             VideoAssets.duration_sec.label("duration_sec"),
         )
+        .join(ranked_sq, Posts.id == ranked_sq.c.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
-        # post_plansテーブルとの結合
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        # サムネイル用のMediaAssets（kind=2）
         .outerjoin(
             ThumbnailAssets,
             (Posts.id == ThumbnailAssets.post_id)
             & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
         )
-        # メインビデオ用のMediaAssets（kind=4）
         .outerjoin(
             VideoAssets,
             (Posts.id == VideoAssets.post_id)
             & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
         )
-        # いいね数を取得するためのLikesテーブル
-        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .outerjoin(likes_sq, Posts.id == likes_sq.c.post_id)
         .filter(active_post_cond)
-        .group_by(
-            Posts.id,
-            Users.profile_name,
-            Users.offical_flg,
-            Profiles.username,
-            Profiles.avatar_url,
-            ThumbnailAssets.storage_key,
-            VideoAssets.duration_sec,
-        )
-        .order_by(func.random())
+        .filter(ranked_sq.c.rn <= 2)
+        .order_by(func.random())   
         .limit(limit)
         .all()
     )
+    return rows
 
 
 # ========== ランキング用 集合==========
@@ -1232,9 +1248,10 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
             .filter(
                 PostPlans.plan_id == plan.id,
                 Posts.deleted_at.is_(None),
-                Posts.status == PostStatus.APPROVED
+                Posts.status == PostStatus.APPROVED,
             )
-            .scalar() or 0
+            .scalar()
+            or 0
         )
 
         plans_with_thumbnails.append(
@@ -3106,7 +3123,11 @@ def add_notification_for_post(
                     .filter(UserSettings.user_id == post.creator_user_id)
                     .first()
                 )
-                if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                if (
+                    settings is not None
+                    and settings.settings
+                    and isinstance(settings.settings, dict)
+                ):
                     post_approve_setting = settings.settings.get("postApprove", True)
                     if post_approve_setting is False:
                         should_send_notification_post_approval = False
@@ -3158,7 +3179,11 @@ def add_notification_for_post(
                     .filter(UserSettings.user_id == post.creator_user_id)
                     .first()
                 )
-                if settings is not None and settings.settings and isinstance(settings.settings, dict):
+                if (
+                    settings is not None
+                    and settings.settings
+                    and isinstance(settings.settings, dict)
+                ):
                     post_approve_setting = settings.settings.get("postApprove", True)
                     if post_approve_setting is False:
                         should_send_notification_post_approval = False
@@ -3197,7 +3222,11 @@ def add_notification_for_post(
                 .filter(UserSettings.user_id == post.creator_user_id)
                 .first()
             )
-            if settings is not None and settings.settings and isinstance(settings.settings, dict):
+            if (
+                settings is not None
+                and settings.settings
+                and isinstance(settings.settings, dict)
+            ):
                 post_like_setting = settings.settings.get("postLike", True)
                 if post_like_setting is False:
                     should_send_notification_post_like = False
@@ -3357,9 +3386,15 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
+            MediaAssets.storage_key.label("ogp_image_url"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.OGP),
+        )
         .filter(Posts.id == post_id)
         .filter(Posts.deleted_at.is_(None))
         .first()
@@ -3371,20 +3406,24 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
     # OGP画像URLを取得
     # 優先順位: generation_media (kind=2) → thumbnail → デフォルト画像
     ogp_image_url = None
-
-    # 1. generation_mediaからOGP画像を取得
-    generation_media = (
-        db.query(GenerationMedia)
-        .filter(
-            GenerationMedia.post_id == post_id,
-            GenerationMedia.kind == GenerationMediaKind.POST_IMAGE,
-        )
-        .first()
-    )
-
-    if generation_media:
-        ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
+    if result.ogp_image_url:
+        ogp_image_url = f"{CDN_BASE_URL}/{result.ogp_image_url}"
     else:
+        # 1. generation_mediaからOGP画像を取得
+        generation_media = (
+            db.query(GenerationMedia)
+            .filter(
+                GenerationMedia.post_id == post_id,
+                GenerationMedia.kind == GenerationMediaKind.POST_IMAGE,
+            )
+            .first()
+        )
+        if generation_media:
+            ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
+        else:
+            ogp_image_url = "https://logo.mijfans.jp/bimi/ogp-image.png"
+
+    if ogp_image_url is None:
         ogp_image_url = "https://logo.mijfans.jp/bimi/ogp-image.png"
 
     # タイトル生成（descriptionの最初の30文字）

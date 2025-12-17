@@ -1,4 +1,3 @@
-from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.api.commons.utils import get_video_duration
@@ -15,7 +14,6 @@ from app.crud.creator_crud import (
     get_ranking_creators_overall_detail_overall,
     get_ranking_creators_overall_monthly,
     get_ranking_creators_overall_weekly,
-
 )
 from app.crud.post_crud import (
     get_ranking_posts_categories_all_time,
@@ -33,8 +31,10 @@ from app.crud.post_crud import (
     get_ranking_posts_overall_all_time,
     get_ranking_posts_overall_monthly,
     get_ranking_posts_overall_weekly,
-    get_ranking_posts_overall_daily
+    get_ranking_posts_overall_daily,
 )
+from app.deps.auth import get_current_user_optional
+from app.models import Users
 from app.schemas.ranking import (
     RankingCategoriesResponse,
     RankingCreatorsCategories,
@@ -60,7 +60,8 @@ BASE_URL = getenv("CDN_BASE_URL")
 
 router = APIRouter()
 
-@router.get("/posts")   
+
+@router.get("/posts")
 async def get_ranking_posts(
     type: str = Query(..., description="Type, allowed values: overall, categories"),
     db: Session = Depends(get_db),
@@ -72,90 +73,132 @@ async def get_ranking_posts(
             return _get_ranking_posts_categories(db)
 
     except Exception as e:
-        logger.error('エラーが発生しました', e)
+        logger.error("エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
     """
-        Get overall ranking posts
+    Get overall ranking posts
 
-        Args:
-            db: Database session
-        Returns:
-            RankingResponse: Ranking posts
+    Args:
+        db: Database session
+    Returns:
+        RankingResponse: Ranking posts
     """
     ranking_posts_all_time = get_ranking_posts_overall_all_time(db, limit=6)
     ranking_posts_monthly = get_ranking_posts_overall_monthly(db, limit=6)
     ranking_posts_weekly = get_ranking_posts_overall_weekly(db, limit=6)
     ranking_posts_daily = get_ranking_posts_overall_daily(db, limit=6)
-    
+
     return RankingOverallResponse(
-        all_time=[RankingPostsAllTimeResponse(
-            id=str(post.Posts.id),  # UUIDを文字列に変換
-            description=post.Posts.description,
-            thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}" if post.thumbnail_key else None,
-            likes_count=post.likes_count,
-            creator_name=post.profile_name,
-            official=post.offical_flg if hasattr(post, 'offical_flg') else False,
-            username=post.username,
-            creator_avatar_url=f"{BASE_URL}/{post.avatar_url}" if post.avatar_url else None,
-            rank=idx + 1,
-            duration=get_video_duration(post.duration_sec) if post.Posts.post_type == PostType.VIDEO and post.duration_sec else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
-        ) for idx, post in enumerate(ranking_posts_all_time)],
-        monthly=[RankingPostsMonthlyResponse(
-            id=str(post.Posts.id),  # UUIDを文字列に変換
-            description=post.Posts.description,
-            thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}" if post.thumbnail_key else None,
-            likes_count=post.likes_count,
-            creator_name=post.profile_name,
-            official=post.offical_flg if hasattr(post, 'offical_flg') else False,
-            username=post.username,
-            creator_avatar_url=f"{BASE_URL}/{post.avatar_url}" if post.avatar_url else None,
-            rank=idx + 1,
-            duration=get_video_duration(post.duration_sec) if post.Posts.post_type == PostType.VIDEO and post.duration_sec else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
-        ) for idx, post in enumerate(ranking_posts_monthly)],
-        weekly=[RankingPostsWeeklyResponse(
-            id=str(post.Posts.id),  # UUIDを文字列に変換
-            description=post.Posts.description,
-            thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}" if post.thumbnail_key else None,
-            likes_count=post.likes_count,
-            creator_name=post.profile_name,
-            official=post.offical_flg if hasattr(post, 'offical_flg') else False,
-            username=post.username,
-            creator_avatar_url=f"{BASE_URL}/{post.avatar_url}" if post.avatar_url else None,
-            rank=idx + 1,
-            duration=get_video_duration(post.duration_sec) if post.Posts.post_type == PostType.VIDEO and post.duration_sec else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
-        ) for idx, post in enumerate(ranking_posts_weekly)],
-        daily=[RankingPostsDailyResponse(
-            id=str(post.Posts.id),  # UUIDを文字列に変換
-            description=post.Posts.description,
-            thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}" if post.thumbnail_key else None,
-            likes_count=post.likes_count,
-            creator_name=post.profile_name,
-            official=post.offical_flg if hasattr(post, 'offical_flg') else False,
-            username=post.username,
-            creator_avatar_url=f"{BASE_URL}/{post.avatar_url}" if post.avatar_url else None,
-            rank=idx + 1,
-            duration=get_video_duration(post.duration_sec) if post.Posts.post_type == PostType.VIDEO and post.duration_sec else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
-        ) for idx, post in enumerate(ranking_posts_daily)],
+        all_time=[
+            RankingPostsAllTimeResponse(
+                id=str(post.Posts.id),  # UUIDを文字列に変換
+                description=post.Posts.description,
+                thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}"
+                if post.thumbnail_key
+                else None,
+                likes_count=post.likes_count,
+                creator_name=post.profile_name,
+                official=post.offical_flg if hasattr(post, "offical_flg") else False,
+                username=post.username,
+                creator_avatar_url=f"{BASE_URL}/{post.avatar_url}"
+                if post.avatar_url
+                else None,
+                rank=idx + 1,
+                duration=get_video_duration(post.duration_sec)
+                if post.Posts.post_type == PostType.VIDEO and post.duration_sec
+                else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+            )
+            for idx, post in enumerate(ranking_posts_all_time)
+        ],
+        monthly=[
+            RankingPostsMonthlyResponse(
+                id=str(post.Posts.id),  # UUIDを文字列に変換
+                description=post.Posts.description,
+                thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}"
+                if post.thumbnail_key
+                else None,
+                likes_count=post.likes_count,
+                creator_name=post.profile_name,
+                official=post.offical_flg if hasattr(post, "offical_flg") else False,
+                username=post.username,
+                creator_avatar_url=f"{BASE_URL}/{post.avatar_url}"
+                if post.avatar_url
+                else None,
+                rank=idx + 1,
+                duration=get_video_duration(post.duration_sec)
+                if post.Posts.post_type == PostType.VIDEO and post.duration_sec
+                else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+            )
+            for idx, post in enumerate(ranking_posts_monthly)
+        ],
+        weekly=[
+            RankingPostsWeeklyResponse(
+                id=str(post.Posts.id),  # UUIDを文字列に変換
+                description=post.Posts.description,
+                thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}"
+                if post.thumbnail_key
+                else None,
+                likes_count=post.likes_count,
+                creator_name=post.profile_name,
+                official=post.offical_flg if hasattr(post, "offical_flg") else False,
+                username=post.username,
+                creator_avatar_url=f"{BASE_URL}/{post.avatar_url}"
+                if post.avatar_url
+                else None,
+                rank=idx + 1,
+                duration=get_video_duration(post.duration_sec)
+                if post.Posts.post_type == PostType.VIDEO and post.duration_sec
+                else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+            )
+            for idx, post in enumerate(ranking_posts_weekly)
+        ],
+        daily=[
+            RankingPostsDailyResponse(
+                id=str(post.Posts.id),  # UUIDを文字列に変換
+                description=post.Posts.description,
+                thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}"
+                if post.thumbnail_key
+                else None,
+                likes_count=post.likes_count,
+                creator_name=post.profile_name,
+                official=post.offical_flg if hasattr(post, "offical_flg") else False,
+                username=post.username,
+                creator_avatar_url=f"{BASE_URL}/{post.avatar_url}"
+                if post.avatar_url
+                else None,
+                rank=idx + 1,
+                duration=get_video_duration(post.duration_sec)
+                if post.Posts.post_type == PostType.VIDEO and post.duration_sec
+                else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+            )
+            for idx, post in enumerate(ranking_posts_daily)
+        ],
     )
+
 
 def _get_ranking_posts_categories(db: Session) -> RankingCategoriesResponse:
     """
-        Get categories ranking posts
+    Get categories ranking posts
 
-        Args:
-            db: Database session
-        Returns:
-            RankingCategoriesResponse: Ranking posts
+    Args:
+        db: Database session
+    Returns:
+        RankingCategoriesResponse: Ranking posts
     """
-    ranking_posts_categories_all_time = get_ranking_posts_categories_all_time(db, limit=6)
+    ranking_posts_categories_all_time = get_ranking_posts_categories_all_time(
+        db, limit=6
+    )
     ranking_posts_categories_daily = get_ranking_posts_categories_daily(db, limit=6)
     ranking_posts_categories_weekly = get_ranking_posts_categories_weekly(db, limit=6)
     ranking_posts_categories_monthly = get_ranking_posts_categories_monthly(db, limit=6)
-    
+
     response = {
-        "all_time": __arrange_ranking_posts_categories(ranking_posts_categories_all_time),
+        "all_time": __arrange_ranking_posts_categories(
+            ranking_posts_categories_all_time
+        ),
         "daily": __arrange_ranking_posts_categories(ranking_posts_categories_daily),
         "weekly": __arrange_ranking_posts_categories(ranking_posts_categories_weekly),
         "monthly": __arrange_ranking_posts_categories(ranking_posts_categories_monthly),
@@ -167,6 +210,7 @@ def _get_ranking_posts_categories(db: Session) -> RankingCategoriesResponse:
         monthly=response["monthly"],
     )
 
+
 def __arrange_ranking_posts_categories(ranking_posts_categories: list) -> dict:
     grouped: dict[str, RankingPostsCategoriesResponse] = {}
 
@@ -174,7 +218,7 @@ def __arrange_ranking_posts_categories(ranking_posts_categories: list) -> dict:
         if not row.profile_name:
             continue
 
-        category_id = str(row.category_id)      
+        category_id = str(row.category_id)
         category_name = str(row.category_name)
 
         if category_id not in grouped:
@@ -188,168 +232,219 @@ def __arrange_ranking_posts_categories(ranking_posts_categories: list) -> dict:
             RankingPostsCategoriesDetailResponse(
                 id=str(row.post_id),
                 description=row.description,
-                thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}" if row.thumbnail_key else None,
+                thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                if row.thumbnail_key
+                else None,
                 likes_count=row.likes_count,
                 creator_name=row.profile_name,
-                official=row.offical_flg if hasattr(row, 'offical_flg') else False,
+                official=row.offical_flg if hasattr(row, "offical_flg") else False,
                 username=row.username,
-                creator_avatar_url=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
+                creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                if row.avatar_url
+                else None,
                 rank=0,
-                duration=get_video_duration(row.duration_sec) if row.post_type == PostType.VIDEO and row.duration_sec else ("画像" if row.post_type == PostType.IMAGE else ""),
+                duration=get_video_duration(row.duration_sec)
+                if row.post_type == PostType.VIDEO and row.duration_sec
+                else ("画像" if row.post_type == PostType.IMAGE else ""),
             )
         )
 
     # sort + set rank
     categories = list[RankingPostsCategoriesResponse](grouped.values())
     for category in categories:
-        category.posts = sorted(category.posts, key=lambda x: x.likes_count or 0, reverse=True)
+        category.posts = sorted(
+            category.posts, key=lambda x: x.likes_count or 0, reverse=True
+        )
         for idx, post in enumerate(category.posts):
             post.rank = idx + 1
 
     return categories
 
 
-@router.get("/posts/detail")   
+@router.get("/posts/detail")
 async def get_ranking_posts_detail(
     category: str = Query(..., description="Type is categories"),
-    term: str = Query(..., description="Terms is terms example is 'all_time', 'monthly', 'weekly', 'daily'"),
+    term: str = Query(
+        ...,
+        description="Terms is terms example is 'all_time', 'monthly', 'weekly', 'daily'",
+    ),
     page: int = 1,
     per_page: int = 100,
     db: Session = Depends(get_db),
 ):
     """
-        Get ranking posts detail
+    Get ranking posts detail
 
-        Args:
-            db: Database session
-            page: Page number
-            per_page: Number of items per page
-            term: Term is term example is 'all_time', 'monthly', 'weekly', 'daily'
-        Returns:
-            RankingOverallResponse: Ranking posts
+    Args:
+        db: Database session
+        page: Page number
+        per_page: Number of items per page
+        term: Term is term example is 'all_time', 'monthly', 'weekly', 'daily'
+    Returns:
+        RankingOverallResponse: Ranking posts
     """
     if page < 1:
-        raise HTTPException(status_code=400, detail="ページ番号は1以上である必要があります")
+        raise HTTPException(
+            status_code=400, detail="ページ番号は1以上である必要があります"
+        )
     if per_page < 1 or per_page > 100:
-        raise HTTPException(status_code=400, detail="1ページあたりの件数は1〜100である必要があります")
+        raise HTTPException(
+            status_code=400, detail="1ページあたりの件数は1〜100である必要があります"
+        )
     try:
         if category == "overall":
             return _get_ranking_posts_overall_detail(db, page, per_page, term)
         else:
-            return _get_ranking_posts_categories_detail(db, category, page, per_page, term)
+            return _get_ranking_posts_categories_detail(
+                db, category, page, per_page, term
+            )
     except Exception as e:
         logger.error("エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-def _get_ranking_posts_overall_detail(db: Session, page: int, per_page: int, term: str) -> RankingOverallResponse | HTTPException:
-    """
-        Get overall ranking posts detail
 
-        Args:
-            db: Database session
-            page: Page number
-            per_page: Number of items per page
-            terms: Terms is terms example is 'all_time', 'monthly', 'weekly', 'daily'
-        Returns:
-            RankingOverallResponse: Ranking posts
+def _get_ranking_posts_overall_detail(
+    db: Session, page: int, per_page: int, term: str
+) -> RankingOverallResponse | HTTPException:
+    """
+    Get overall ranking posts detail
+
+    Args:
+        db: Database session
+        page: Page number
+        per_page: Number of items per page
+        terms: Terms is terms example is 'all_time', 'monthly', 'weekly', 'daily'
+    Returns:
+        RankingOverallResponse: Ranking posts
     """
     if term == "all_time":
         result = get_ranking_posts_detail_overall_all_time(db, page, per_page)
     elif term == "monthly":
-        result =  get_ranking_posts_detail_overall_monthly(db, page, per_page)
+        result = get_ranking_posts_detail_overall_monthly(db, page, per_page)
     elif term == "weekly":
-        result =  get_ranking_posts_detail_overall_weekly(db, page, per_page)
+        result = get_ranking_posts_detail_overall_weekly(db, page, per_page)
     elif term == "daily":
-        result =  get_ranking_posts_detail_overall_daily(db, page, per_page)
+        result = get_ranking_posts_detail_overall_daily(db, page, per_page)
     else:
         raise HTTPException(status_code=400, detail="Invalid terms")
 
-    next_page, previous_page, has_next, has_previous = __process_pagination(result, page, per_page)
+    next_page, previous_page, has_next, has_previous = __process_pagination(
+        result, page, per_page
+    )
 
     return RankingPostsDetailResponse(
-        posts=[RankingPostsDetailDailyResponse(
-            id=str(post.Posts.id),
-            description=post.Posts.description,
-            thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}" if post.thumbnail_key else None,
-            likes_count=post.likes_count,
-            creator_name=post.profile_name,
-            official=post.offical_flg if hasattr(post, 'offical_flg') else False,
-            username=post.username,
-            creator_avatar_url=f"{BASE_URL}/{post.avatar_url}" if post.avatar_url else None,
-            rank=idx + ((page -1) * per_page) + 1,
-            duration=get_video_duration(post.duration_sec) if post.Posts.post_type == PostType.VIDEO and post.duration_sec else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
-        ) for idx, post in enumerate(result)],
+        posts=[
+            RankingPostsDetailDailyResponse(
+                id=str(post.Posts.id),
+                description=post.Posts.description,
+                thumbnail_url=f"{BASE_URL}/{post.thumbnail_key}"
+                if post.thumbnail_key
+                else None,
+                likes_count=post.likes_count,
+                creator_name=post.profile_name,
+                official=post.offical_flg if hasattr(post, "offical_flg") else False,
+                username=post.username,
+                creator_avatar_url=f"{BASE_URL}/{post.avatar_url}"
+                if post.avatar_url
+                else None,
+                rank=idx + ((page - 1) * per_page) + 1,
+                duration=get_video_duration(post.duration_sec)
+                if post.Posts.post_type == PostType.VIDEO and post.duration_sec
+                else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+            )
+            for idx, post in enumerate(result)
+        ],
         next_page=next_page,
         previous_page=previous_page,
         has_next=has_next,
-        has_previous=has_previous
+        has_previous=has_previous,
     )
 
-def _get_ranking_posts_categories_detail(db: Session, category: str, page: int, per_page: int, term: str) -> RankingCategoriesResponse | HTTPException:
-    """
-        Get categories ranking posts detail
 
-        Args:
-            db: Database session
-            category: Category is category_id
-            page: Page number
-            per_page: Number of items per page
-            term: Term is term example is 'all_time', 'monthly', 'weekly', 'daily'
-        Returns:
-            RankingCategoriesResponse: Ranking posts
+def _get_ranking_posts_categories_detail(
+    db: Session, category: str, page: int, per_page: int, term: str
+) -> RankingCategoriesResponse | HTTPException:
+    """
+    Get categories ranking posts detail
+
+    Args:
+        db: Database session
+        category: Category is category_id
+        page: Page number
+        per_page: Number of items per page
+        term: Term is term example is 'all_time', 'monthly', 'weekly', 'daily'
+    Returns:
+        RankingCategoriesResponse: Ranking posts
     """
     if term == "all_time":
-        result = get_ranking_posts_detail_categories_all_time(db, category, page, per_page)
+        result = get_ranking_posts_detail_categories_all_time(
+            db, category, page, per_page
+        )
     elif term == "monthly":
-        result = get_ranking_posts_detail_categories_monthly(db, category, page, per_page)
+        result = get_ranking_posts_detail_categories_monthly(
+            db, category, page, per_page
+        )
     elif term == "weekly":
-        result = get_ranking_posts_detail_categories_weekly(db, category, page, per_page)
+        result = get_ranking_posts_detail_categories_weekly(
+            db, category, page, per_page
+        )
     elif term == "daily":
         result = get_ranking_posts_detail_categories_daily(db, category, page, per_page)
     else:
         raise HTTPException(status_code=400, detail="Invalid terms")
-    
-    next_page, previous_page, has_next, has_previous = __process_pagination(result, page, per_page)
+
+    next_page, previous_page, has_next, has_previous = __process_pagination(
+        result, page, per_page
+    )
 
     responsePosts = []
     for idx, row in enumerate(result):
         if not row.profile_name or not row.username:
             continue
-        responsePosts.append(RankingPostsDetailDailyResponse(
-            id=str(row.post_id),
-            description=row.description,
-            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}" if row.thumbnail_key else None,
-            likes_count=row.likes_count,
-            creator_name=row.profile_name,
-            official=row.offical_flg if hasattr(row, 'offical_flg') else False,
-            username=row.username,
-            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
-            rank=0,
-            duration=get_video_duration(row.duration_sec) if row.post_type == PostType.VIDEO and row.duration_sec else ("画像" if row.post_type == PostType.IMAGE else ""),
-        ))
+        responsePosts.append(
+            RankingPostsDetailDailyResponse(
+                id=str(row.post_id),
+                description=row.description,
+                thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                if row.thumbnail_key
+                else None,
+                likes_count=row.likes_count,
+                creator_name=row.profile_name,
+                official=row.offical_flg if hasattr(row, "offical_flg") else False,
+                username=row.username,
+                creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                if row.avatar_url
+                else None,
+                rank=0,
+                duration=get_video_duration(row.duration_sec)
+                if row.post_type == PostType.VIDEO and row.duration_sec
+                else ("画像" if row.post_type == PostType.IMAGE else ""),
+            )
+        )
     responsePosts = sorted(responsePosts, key=lambda x: x.likes_count, reverse=True)
-    
+
     for idx, post in enumerate(responsePosts):
-        post.rank = idx + ((page -1) * per_page) + 1
+        post.rank = idx + ((page - 1) * per_page) + 1
 
     return RankingPostsDetailResponse(
         posts=responsePosts,
         next_page=next_page,
         previous_page=previous_page,
         has_next=has_next,
-        has_previous=has_previous
+        has_previous=has_previous,
     )
+
 
 def __process_pagination(result: list, page: int, per_page: int) -> dict:
     """
-        Process pagination
+    Process pagination
 
-        Args:
-            result: Result is result
-            page: Page number
-            per_page: Number of items per page
-        Returns:
-            next_page: int | None, previous_page: int | None, has_next: bool, has_previous: bool
+    Args:
+        result: Result is result
+        page: Page number
+        per_page: Number of items per page
+    Returns:
+        next_page: int | None, previous_page: int | None, has_next: bool, has_previous: bool
     """
 
     if len(result) == per_page:
@@ -371,98 +466,174 @@ def __process_pagination(result: list, page: int, per_page: int) -> dict:
 @router.get("/creators")
 async def get_ranking_creators(
     type: str = Query(..., description="Type, allowed values: overall, categories"),
+    current_user: Users = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     if type == "overall":
-        return _get_ranking_creators_overall(db)
+        return _get_ranking_creators_overall(db, current_user)
     elif type == "categories":
-        return _get_ranking_creators_categories(db)
+        return _get_ranking_creators_categories(db, current_user)
     else:
         raise HTTPException(status_code=400, detail="Invalid type")
 
-def _get_ranking_creators_overall(db: Session) -> RankingCreatorsResponse:
+
+def _get_ranking_creators_overall(
+    db: Session, current_user: Users | None
+) -> RankingCreatorsResponse:
     """
-        Get ranking creators
+    Get ranking creators
     """
     try:
-        ranking_creators_all_time = get_ranking_creators_overall_all_time(db, limit=10)
-        ranking_creators_daily = get_ranking_creators_overall_daily(db, limit=10)
-        ranking_creators_weekly = get_ranking_creators_overall_weekly(db, limit=10)
-        ranking_creators_monthly = get_ranking_creators_overall_monthly(db, limit=10)
+        ranking_creators_all_time = get_ranking_creators_overall_all_time(
+            db, limit=10, current_user=current_user
+        )
+        ranking_creators_daily = get_ranking_creators_overall_daily(
+            db, limit=10, current_user=current_user
+        )
+        ranking_creators_weekly = get_ranking_creators_overall_weekly(
+            db, limit=10, current_user=current_user
+        )
+        ranking_creators_monthly = get_ranking_creators_overall_monthly(
+            db, limit=10, current_user=current_user
+        )
         return RankingCreatorsResponse(
-            all_time=[RankingCreators(
-                id=str(creator.Users.id),
-                name=creator.Users.profile_name,
-                username=creator.username,
-                official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
-                avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
-                cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count or 0,
-                likes=creator.likes_count or 0,
-                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
-                rank=idx + 1
-            ) for idx, creator in enumerate(ranking_creators_all_time)],
-            monthly=[RankingCreators(
-                id=str(creator.Users.id),
-                name=creator.Users.profile_name,
-                username=creator.username,
-                official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
-                avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
-                cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count or 0,
-                likes=creator.likes_count or 0,
-                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
-                rank=idx + 1
-            ) for idx, creator in enumerate(ranking_creators_monthly)],
-            weekly=[RankingCreators(
-                id=str(creator.Users.id),
-                name=creator.Users.profile_name,
-                username=creator.username,
-                official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
-                avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
-                cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count or 0,
-                likes=creator.likes_count or 0,
-                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
-                rank=idx + 1
-            ) for idx, creator in enumerate(ranking_creators_weekly)],
-            daily=[RankingCreators(
-                id=str(creator.Users.id),
-                name=creator.Users.profile_name,
-                username=creator.username,
-                official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
-                avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
-                cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count or 0,
-                likes=creator.likes_count or 0,
-                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
-                rank=idx + 1
-            ) for idx, creator in enumerate(ranking_creators_daily)],
+            all_time=[
+                RankingCreators(
+                    id=str(creator.Users.id),
+                    name=creator.Users.profile_name,
+                    username=creator.username,
+                    official=creator.Users.offical_flg
+                    if hasattr(creator.Users, "offical_flg")
+                    else False,
+                    avatar=f"{BASE_URL}/{creator.avatar_url}"
+                    if creator.avatar_url
+                    else None,
+                    cover=f"{BASE_URL}/{creator.cover_url}"
+                    if creator.cover_url
+                    else None,
+                    followers=creator.followers_count or 0,
+                    likes=creator.likes_count or 0,
+                    follower_ids=[str(current_user.id)]
+                    if current_user and creator.is_following
+                    else [],
+                    rank=idx + 1,
+                )
+                for idx, creator in enumerate(ranking_creators_all_time)
+            ],
+            monthly=[
+                RankingCreators(
+                    id=str(creator.Users.id),
+                    name=creator.Users.profile_name,
+                    username=creator.username,
+                    official=creator.Users.offical_flg
+                    if hasattr(creator.Users, "offical_flg")
+                    else False,
+                    avatar=f"{BASE_URL}/{creator.avatar_url}"
+                    if creator.avatar_url
+                    else None,
+                    cover=f"{BASE_URL}/{creator.cover_url}"
+                    if creator.cover_url
+                    else None,
+                    followers=creator.followers_count or 0,
+                    likes=creator.likes_count or 0,
+                    follower_ids=[str(current_user.id)]
+                    if current_user and creator.is_following
+                    else [],
+                    rank=idx + 1,
+                )
+                for idx, creator in enumerate(ranking_creators_monthly)
+            ],
+            weekly=[
+                RankingCreators(
+                    id=str(creator.Users.id),
+                    name=creator.Users.profile_name,
+                    username=creator.username,
+                    official=creator.Users.offical_flg
+                    if hasattr(creator.Users, "offical_flg")
+                    else False,
+                    avatar=f"{BASE_URL}/{creator.avatar_url}"
+                    if creator.avatar_url
+                    else None,
+                    cover=f"{BASE_URL}/{creator.cover_url}"
+                    if creator.cover_url
+                    else None,
+                    followers=creator.followers_count or 0,
+                    likes=creator.likes_count or 0,
+                    follower_ids=[str(current_user.id)]
+                    if current_user and creator.is_following
+                    else [],
+                    rank=idx + 1,
+                )
+                for idx, creator in enumerate(ranking_creators_weekly)
+            ],
+            daily=[
+                RankingCreators(
+                    id=str(creator.Users.id),
+                    name=creator.Users.profile_name,
+                    username=creator.username,
+                    official=creator.Users.offical_flg
+                    if hasattr(creator.Users, "offical_flg")
+                    else False,
+                    avatar=f"{BASE_URL}/{creator.avatar_url}"
+                    if creator.avatar_url
+                    else None,
+                    cover=f"{BASE_URL}/{creator.cover_url}"
+                    if creator.cover_url
+                    else None,
+                    followers=creator.followers_count or 0,
+                    likes=creator.likes_count or 0,
+                    follower_ids=[str(current_user.id)]
+                    if current_user and creator.is_following
+                    else [],
+                    rank=idx + 1,
+                )
+                for idx, creator in enumerate(ranking_creators_daily)
+            ],
         )
     except Exception as e:
         logger.error("エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-def _get_ranking_creators_categories(db: Session):
-    """
-        Get ranking creators categories
-    """
-    ranking_creators_all_time = get_ranking_creators_categories_overall_all_time(db, limit=10)
-    ranking_creators_daily = get_ranking_creators_categories_overall_daily(db, limit=10)
-    ranking_creators_weekly = get_ranking_creators_categories_overall_weekly(db, limit=10)
-    ranking_creators_monthly = get_ranking_creators_categories_overall_monthly(db, limit=10)
 
-    return RankingCreatorsCategoriesResponse(
-        all_time=__arrange_ranking_creators_categories(ranking_creators_all_time),
-        daily=__arrange_ranking_creators_categories(ranking_creators_daily),
-        weekly=__arrange_ranking_creators_categories(ranking_creators_weekly),
-        monthly=__arrange_ranking_creators_categories(ranking_creators_monthly),
+def _get_ranking_creators_categories(db: Session, current_user: Users | None):
+    """
+    Get ranking creators categories
+    """
+    ranking_creators_all_time = get_ranking_creators_categories_overall_all_time(
+        db, limit=10, current_user=current_user
+    )
+    ranking_creators_daily = get_ranking_creators_categories_overall_daily(
+        db, limit=10, current_user=current_user
+    )
+    ranking_creators_weekly = get_ranking_creators_categories_overall_weekly(
+        db, limit=10, current_user=current_user
+    )
+    ranking_creators_monthly = get_ranking_creators_categories_overall_monthly(
+        db, limit=10, current_user=current_user
     )
 
-def __arrange_ranking_creators_categories(ranking_creators_categories: list) -> dict:
+    return RankingCreatorsCategoriesResponse(
+        all_time=__arrange_ranking_creators_categories(
+            ranking_creators_all_time, current_user
+        ),
+        daily=__arrange_ranking_creators_categories(
+            ranking_creators_daily, current_user
+        ),
+        weekly=__arrange_ranking_creators_categories(
+            ranking_creators_weekly, current_user
+        ),
+        monthly=__arrange_ranking_creators_categories(
+            ranking_creators_monthly, current_user
+        ),
+    )
+
+
+def __arrange_ranking_creators_categories(
+    ranking_creators_categories: list, current_user: Users | None
+) -> dict:
     grouped: dict[str, RankingCreatorsCategories] = {}
     for row in ranking_creators_categories:
-        category_id = str(row.category_id)      
+        category_id = str(row.category_id)
         category_name = str(row.category_name)
         if category_id not in grouped:
             grouped[category_id] = RankingCreatorsCategories(
@@ -470,97 +641,157 @@ def __arrange_ranking_creators_categories(ranking_creators_categories: list) -> 
                 category_name=category_name,
                 creators=[],
             )
-        grouped[category_id].creators.append(RankingCreators(
-            id=str(row.creator_user_id),
-            name=row.profile_name,
-            username=row.username,
-            official=row.offical_flg if hasattr(row, 'offical_flg') else False,
-            avatar=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
-            cover=f"{BASE_URL}/{row.cover_url}" if row.cover_url else None,
-            followers=row.followers_count or 0,
-            likes=row.likes_count or 0,
-            follower_ids=[str(x) for x in row.follower_ids if x is not None] if row.follower_ids else [],
-            rank=0
-        ))
-    
+        grouped[category_id].creators.append(
+            RankingCreators(
+                id=str(row.creator_user_id),
+                name=row.profile_name,
+                username=row.username,
+                official=row.offical_flg if hasattr(row, "offical_flg") else False,
+                avatar=f"{BASE_URL}/{row.avatar_url}" if row.avatar_url else None,
+                cover=f"{BASE_URL}/{row.cover_url}" if row.cover_url else None,
+                followers=row.followers_count or 0,
+                likes=row.likes_count or 0,
+                follower_ids=[str(current_user.id)]
+                if current_user and row.is_following
+                else [],
+                rank=0,
+            )
+        )
+
     categories = list[RankingCreatorsCategories](grouped.values())
     for category in categories:
-        category.creators = sorted(category.creators, key=lambda x: x.likes, reverse=True)
+        category.creators = sorted(
+            category.creators, key=lambda x: x.likes, reverse=True
+        )
         for idx, creator in enumerate(category.creators):
             creator.rank = idx + 1
 
     return categories
 
+
 @router.get("/creators/detail")
 async def get_ranking_creators_detail(
     category: str = Query(..., description="Type is categories"),
-    term: str = Query(..., description="Terms is terms example is 'all_time', 'monthly', 'weekly', 'daily'"),
+    term: str = Query(
+        ...,
+        description="Terms is terms example is 'all_time', 'monthly', 'weekly', 'daily'",
+    ),
     page: int = 1,
     per_page: int = 100,
     db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user_optional),
 ):
     if page < 1:
-        raise HTTPException(status_code=400, detail="ページ番号は1以上である必要があります")
+        raise HTTPException(
+            status_code=400, detail="ページ番号は1以上である必要があります"
+        )
     if per_page < 1 or per_page > 100:
-        raise HTTPException(status_code=400, detail="1ページあたりの件数は1〜100である必要があります")
+        raise HTTPException(
+            status_code=400, detail="1ページあたりの件数は1〜100である必要があります"
+        )
     if category == "overall":
-        return _get_ranking_creators_detail_overall(db, term, page, per_page)
+        return _get_ranking_creators_detail_overall(
+            db, term, page, per_page, current_user
+        )
     else:
-        return _get_ranking_creators_detail_categories(db, category, term, page, per_page)
+        return _get_ranking_creators_detail_categories(
+            db, category, term, page, per_page, current_user
+        )
 
-def _get_ranking_creators_detail_overall(db: Session, term: str, page: int, per_page: int) -> RankingCreatorsDetailResponse:
+
+def _get_ranking_creators_detail_overall(
+    db: Session, term: str, page: int, per_page: int, current_user: Users | None
+) -> RankingCreatorsDetailResponse:
     """
-        Get ranking creators detail overall
+    Get ranking creators detail overall
     """
     try:
-        result = get_ranking_creators_overall_detail_overall(db, page, per_page, term)
-        next_page, previous_page, has_next, has_previous = __process_pagination(result, page, per_page)
+        result = get_ranking_creators_overall_detail_overall(
+            db, page, per_page, term, current_user
+        )
+        next_page, previous_page, has_next, has_previous = __process_pagination(
+            result, page, per_page
+        )
         return RankingCreatorsDetailResponse(
-            creators=[RankingCreators(
-                id=str(creator.Users.id),
-                name=creator.Users.profile_name,
-                username=creator.username,
-                official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
-                avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
-                cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count or 0,
-                likes=creator.likes_count or 0,
-                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
-                rank=idx + ((page -1) * per_page) + 1
-            ) for idx, creator in enumerate(result)],
+            creators=[
+                RankingCreators(
+                    id=str(creator.Users.id),
+                    name=creator.Users.profile_name,
+                    username=creator.username,
+                    official=creator.Users.offical_flg
+                    if hasattr(creator.Users, "offical_flg")
+                    else False,
+                    avatar=f"{BASE_URL}/{creator.avatar_url}"
+                    if creator.avatar_url
+                    else None,
+                    cover=f"{BASE_URL}/{creator.cover_url}"
+                    if creator.cover_url
+                    else None,
+                    followers=creator.followers_count or 0,
+                    likes=creator.likes_count or 0,
+                    follower_ids=[str(current_user.id)]
+                    if current_user and creator.is_following
+                    else [],
+                    rank=idx + ((page - 1) * per_page) + 1,
+                )
+                for idx, creator in enumerate(result)
+            ],
             next_page=next_page,
             previous_page=previous_page,
             has_next=has_next,
-            has_previous=has_previous
+            has_previous=has_previous,
         )
     except Exception as e:
-        logger.error('エラーが発生しました', e)
+        logger.error("エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-def _get_ranking_creators_detail_categories(db: Session, category: str, term: str, page: int, per_page: int) -> RankingCreatorsDetailResponse:
+
+def _get_ranking_creators_detail_categories(
+    db: Session,
+    category: str,
+    term: str,
+    page: int,
+    per_page: int,
+    current_user: Users | None,
+) -> RankingCreatorsDetailResponse:
     """
-        Get ranking creators detail categories
+    Get ranking creators detail categories
     """
     try:
-        result = get_ranking_creators_categories_detail(db, category, page, per_page, term)
-        next_page, previous_page, has_next, has_previous = __process_pagination(result, page, per_page)
+        result = get_ranking_creators_categories_detail(
+            db, category, page, per_page, term, current_user=current_user
+        )
+        next_page, previous_page, has_next, has_previous = __process_pagination(
+            result, page, per_page
+        )
         return RankingCreatorsDetailResponse(
-            creators=[RankingCreators(
-                id=str(creator.Users.id),
-                name=creator.Users.profile_name,
-                username=creator.username,
-                official=creator.Users.offical_flg if hasattr(creator.Users, 'offical_flg') else False,
-                avatar=f"{BASE_URL}/{creator.avatar_url}" if creator.avatar_url else None,
-                cover=f"{BASE_URL}/{creator.cover_url}" if creator.cover_url else None,
-                followers=creator.followers_count or 0,
-                likes=creator.likes_count or 0,
-                follower_ids=[str(x) for x in creator.follower_ids if x is not None] if creator.follower_ids else [],
-                rank=idx + ((page -1) * per_page) + 1
-            ) for idx, creator in enumerate(result)],
+            creators=[
+                RankingCreators(
+                    id=str(creator.Users.id),
+                    name=creator.Users.profile_name,
+                    username=creator.username,
+                    official=creator.Users.offical_flg
+                    if hasattr(creator.Users, "offical_flg")
+                    else False,
+                    avatar=f"{BASE_URL}/{creator.avatar_url}"
+                    if creator.avatar_url
+                    else None,
+                    cover=f"{BASE_URL}/{creator.cover_url}"
+                    if creator.cover_url
+                    else None,
+                    followers=creator.followers_count or 0,
+                    likes=creator.likes_count or 0,
+                    follower_ids=[str(current_user.id)]
+                    if current_user and creator.is_following
+                    else [],
+                    rank=idx + ((page - 1) * per_page) + 1,
+                )
+                for idx, creator in enumerate(result)
+            ],
             next_page=next_page,
             previous_page=previous_page,
             has_next=has_next,
-            has_previous=has_previous
+            has_previous=has_previous,
         )
     except Exception as e:
         logger.error("エラーが発生しました", e)
