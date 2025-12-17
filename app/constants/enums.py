@@ -4,6 +4,7 @@ class AccountType:
     GENERAL_USER = 1 # 一般ユーザー
     CREATOR = 2 # クリエイター
     ADMIN = 3 # 管理者
+    SUPER_USER = 4 # スーパーユーザー
 
 # アカウントステータス
 class AccountStatus:
@@ -224,7 +225,8 @@ class SMSPurpose:
 # バナーの種類
 class BannerType:
     CREATOR = 1 # クリエイター
-    SPECIAL_EVENT = 2 # お知らせ
+    SPECIAL_EVENT = 2 # お知らせ(外部URL)
+    INTERNAL_EVENT = 3 # お知らせ(画像のみ)
 
 # バナーのステータス
 class BannerStatus:
@@ -245,3 +247,52 @@ class EventStatus:
 class GenerationMediaKind:
     PROFILE_IMAGE = 1 # プロフィール画像
     POST_IMAGE = 2 # 投稿画像
+
+class PaymentTransactionType:
+    SINGLE = 1 # 単品購入
+    SUBSCRIPTION = 2 # プラン購読
+    FREE = 3 # 0円決済（無料）
+
+
+class PaymentTransactionStatus:
+    PENDING = 1 # 未承認
+    COMPLETED = 2 # 承認済み
+    FAILED = 3 # 拒否
+
+class SubscriptionType:
+    PLAN = 1 # プラン
+    SINGLE = 2 # 単品
+
+class SubscriptionStatus:
+    ACTIVE = 1 # 有効
+    CANCELED = 2 # 期末まで視聴可
+    EXPIRED = 3 # キャンセル
+
+class TransactionType:
+    PAYMENT_ORIGIN_BATCH = "B" # バッチからのリクエスト 
+    PAYMENT_ORIGIN_FRONT = "F" # フロントエンドからのリクエスト
+    PAYMENT_ORIGIN_FREE = "G" # 0円決済（無料）
+
+class PaymentStatus:
+    PENDING = 1 # 保留
+    SUCCEEDED = 2 # 成功
+    FAILED = 3 # 失敗
+    REFUNDED = 4 # 返金
+    PARTIALLY_REFUNDED = 5 # 一部返金
+
+class WithdrawStatus:
+    PENDING = 1 # 保留
+    PROCESSING = 2 # 処理中
+    COMPLETED = 3 # 完了
+    FAILED = 4 # 失敗
+    CANCELLED = 5 # キャンセル
+    #1=pending, 2=processing, 3=completed, 4=failed, 5=cancelled
+
+class PaymentType:
+    PLAN = 2 # サブスクリプション
+    SINGLE = 1 # 単品購入
+
+class UserBankAccountType:
+    NORMAL = 1 # 普通
+    CURRENT = 2 # 当座
+    SAVINGS = 3 # 貯蓄

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, exists
 from typing import Optional, List, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
@@ -13,6 +13,8 @@ from app.models.admins import Admins
 from app.constants.enums import ConversationType, ParticipantType
 from app.models.profiles import Profiles
 from app.constants.messages import WelcomeMessage
+import os
+BASE_URL = os.getenv("CDN_BASE_URL")
 
 logger = Logger.get_logger()
 # ========== 会話管理 ==========
@@ -37,6 +39,9 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
     )
 
     if participant:
+        participant.joined_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(participant)
         return participant.conversation
 
     # 新規作成
@@ -290,7 +295,15 @@ def get_all_delusion_conversations_for_admin(
     """
     管理人用: すべての妄想メッセージ会話一覧を取得
     未読カウント、最後のメッセージなどを含む
+    一度でもユーザーからメッセージがあった会話を表示
     """
+    # サブクエリ: 会話内にユーザーからのメッセージが存在するかチェック
+    has_user_message = exists().where(
+        ConversationMessages.conversation_id == Conversations.id,
+        ConversationMessages.sender_user_id.isnot(None),
+        ConversationMessages.deleted_at.is_(None)
+    )
+
     # 妄想メッセージタイプの全会話を取得
     conversations = (
         db.query(
@@ -311,6 +324,7 @@ def get_all_delusion_conversations_for_admin(
         .filter(
             Conversations.type == ConversationType.DELUSION,
             Conversations.is_active == True,
+            has_user_message,  # 一度でもユーザーメッセージがある会話のみ
         )
         .order_by(desc(Conversations.last_message_at))
         .offset(skip)
@@ -338,9 +352,9 @@ def get_all_delusion_conversations_for_admin(
             {
                 "id": conv.id,
                 "user_id": conv.user_id,
-                "user_username": conv.profile_name,
+                "user_username": conv.username,
                 "user_profile_name": conv.profile_name,
-                "user_avatar": conv.avatar_url,
+                "user_avatar": f"{BASE_URL}/{conv.avatar_url}" if conv.avatar_url else None,
                 "last_message_text": last_message,
                 "last_message_at": conv.last_message_at,
                 "unread_count": 0,  # 後で実装可能
@@ -360,7 +374,7 @@ def get_new_conversations_unread(db: Session, user_id: UUID) -> int:
             db.query(
                 ConversationParticipants,
                 Conversations.last_message_at.label("last_message_at"),
-                ConversationMessages
+                ConversationMessages,
             )
             .join(
                 Conversations,
@@ -369,13 +383,30 @@ def get_new_conversations_unread(db: Session, user_id: UUID) -> int:
             .join(
                 ConversationMessages,
                 Conversations.last_message_id == ConversationMessages.id,
+                isouter=True,
             )
             .filter(ConversationParticipants.user_id == user_id)
             .first()
         )
-        if participant.ConversationMessages.sender_admin_id is not None:
+        if participant is None:
+            return False
+        
+        # タプルの場合、インデックスでアクセス
+        # participant[0] = ConversationParticipants
+        # participant[1] = last_message_at
+        # participant[2] = ConversationMessages
+        if len(participant) < 3 or participant[2] is None:
+            return False
+        
+        conversation_messages = participant[2]
+        conversation_participants = participant[0]
+        
+        if (conversation_messages.sender_admin_id is not None) and (
+            conversation_participants.joined_at
+            < conversation_messages.created_at
+        ):
             return True
         return False
     except Exception as e:
-        logger.error(f"Get new conversations unread error: {e}")
+        logger.error(f"Get new conversations unread error: {e}", exc_info=True)
         return False

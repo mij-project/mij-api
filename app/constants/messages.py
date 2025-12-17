@@ -45,3 +45,8 @@ class IdentityVerificationMessage:
 
 ※ このメールは自動送信されています。返信はできません。
 """
+
+
+class CredixMessage:
+    SUCCESS_MESSAGE = "決済が完了しました。"
+    FAILURE_MESSAGE = "決済が失敗しました。"

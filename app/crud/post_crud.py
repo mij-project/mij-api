@@ -2,8 +2,10 @@ import os
 from operator import or_
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import distinct, func, desc, and_, BigInteger
-from app.models import UserSettings
+from sqlalchemy import cast, distinct, func, desc, and_, BigInteger, union_all, Text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from app.crud.subscriptions_crud import check_viewing_rights
+from app.models import Payments, UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
 from app.models.posts import Posts
@@ -12,10 +14,12 @@ from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from app.constants.enums import (
     AccountType,
+    PaymentStatus,
     PostStatus,
     MediaAssetKind,
     MediaAssetStatus,
 )
+from app.crud.user_crud import check_super_user
 from app.schemas.notification import NotificationType
 from app.models.post_categories import PostCategories
 from app.models.categories import Categories
@@ -26,6 +30,7 @@ from app.models.media_assets import MediaAssets
 from app.models.plans import Plans, PostPlans
 from app.models.prices import Prices
 from app.models.media_rendition_jobs import MediaRenditionJobs
+from app.models.subscriptions import Subscriptions
 from app.constants.enums import PostType
 from app.schemas.user_settings import UserSettingsType
 from app.services.email.send_email import (
@@ -194,6 +199,7 @@ def get_posts_by_category_slug(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -233,6 +239,7 @@ def get_posts_by_category_slug(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -267,15 +274,45 @@ def _build_post_status_query(
     投稿ステータス取得クエリの共通部分
     """
     VideoAsset = aliased(MediaAssets)
+    price_purchase_sq = (
+        db.query(
+            Prices.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("price_purchase_count"),
+        )
+        .join(
+            Payments,
+            (Payments.order_type == 1)
+            & (cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id),
+        )
+        .filter(Payments.status == PaymentStatus.SUCCEEDED)
+        .group_by(Prices.post_id)
+    ).subquery()
+
+    plan_purchase_sq = (
+        db.query(
+            PostPlans.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("plan_purchase_count"),
+        )
+        .join(
+            Payments,
+            (Payments.order_type == 2)
+            & (cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id),
+        )
+        .filter(Payments.status == PaymentStatus.SUCCEEDED)
+        .group_by(PostPlans.post_id)
+    ).subquery()
 
     return (
         db.query(
             Posts,
             func.count(func.distinct(Likes.user_id)).label("likes_count"),
             func.count(func.distinct(Comments.id)).label("comments_count"),
-            func.cast(0, BigInteger).label(
-                "purchase_count"
-            ),  # 仮の値: 決済処理未実装のため0を返す
+            (
+                func.coalesce(price_purchase_sq.c.price_purchase_count, 0)
+                + func.coalesce(plan_purchase_sq.c.plan_purchase_count, 0)
+            )
+            .cast(BigInteger)
+            .label("purchase_count"),
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
@@ -283,6 +320,7 @@ def _build_post_status_query(
             func.min(Prices.currency).label("post_currency"),
             MediaAssets.storage_key.label("thumbnail_key"),
             VideoAsset.duration_sec,
+            func.count(func.distinct(PostPlans.plan_id)).label("plan_count"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
@@ -299,6 +337,9 @@ def _build_post_status_query(
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .outerjoin(Prices, Posts.id == Prices.post_id)
+        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
+        .outerjoin(price_purchase_sq, price_purchase_sq.c.post_id == Posts.id)
+        .outerjoin(plan_purchase_sq, plan_purchase_sq.c.post_id == Posts.id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status.in_(post_statuses))
@@ -309,6 +350,8 @@ def _build_post_status_query(
             Profiles.avatar_url,
             MediaAssets.storage_key,
             VideoAsset.duration_sec,
+            price_purchase_sq.c.price_purchase_count,
+            plan_purchase_sq.c.plan_purchase_count,
         )
         .order_by(desc(Posts.created_at))
     )
@@ -392,7 +435,6 @@ def get_posts_by_plan_id(db: Session, plan_id: UUID, user_id: UUID) -> List[tupl
     プランに紐づく投稿一覧を取得
     ユーザーがそのプランを購入しているか確認してから返す
     """
-
     ThumbnailAssets = aliased(MediaAssets)
 
     # ユーザーがこのプランを購入しているか確認
@@ -502,6 +544,7 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         db.query(
             Posts,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
@@ -529,6 +572,7 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
@@ -548,6 +592,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         db.query(
             Posts,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
@@ -574,6 +619,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
@@ -587,22 +633,81 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
 
 def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     """
-    ユーザーが購入した投稿を取得
-    """
-    # サブクエリで投稿ごとの最新購入日時を取得（投稿IDのみでグループ化）
+    ユーザーが購入した投稿を取得（有効なsubscription経由）
 
+    購読中のプランまたは単品購入した投稿を取得します。
+    - order_type=1: order_id は prices.id → prices.post_id 経由で投稿を取得
+    - order_type=2: order_id は plans.id → post_plans 経由で投稿を取得
+
+    有効なsubscriptionのみ対象（access_end がNULLまたは現在日時より後、かつstatus=1）
+    """
+    now = datetime.now(timezone.utc)
+
+    # 有効なsubscriptionの条件
+    valid_subscription_filter = and_(
+        Subscriptions.user_id == user_id,
+        Subscriptions.status == 1,  # active
+        or_(Subscriptions.access_end.is_(None), Subscriptions.access_end > now),
+    )
+
+    # order_type=1: subscriptions → prices → posts の経路でpost_idとplan_nameを取得
+    price_posts_subquery = (
+        db.query(
+            Prices.post_id.label("post_id"),
+            func.cast(None, Text).label("plan_name"),  # 単品購入はplan_name=NULL
+        )
+        .select_from(Subscriptions)
+        .join(
+            Prices,
+            Prices.id == func.cast(Subscriptions.order_id, PG_UUID(as_uuid=True)),
+        )
+        .filter(valid_subscription_filter)
+        .filter(Subscriptions.order_type == 1)
+    )
+
+    # order_type=2: subscriptions → plans → post_plans → posts の経路でpost_idとplan_nameを取得
+    plan_posts_subquery = (
+        db.query(
+            PostPlans.post_id.label("post_id"),
+            Plans.name.label("plan_name"),  # プラン名を取得
+        )
+        .select_from(Subscriptions)
+        .join(
+            Plans, Plans.id == func.cast(Subscriptions.order_id, PG_UUID(as_uuid=True))
+        )
+        .join(PostPlans, PostPlans.plan_id == Plans.id)
+        .filter(valid_subscription_filter)
+        .filter(Subscriptions.order_type == 2)
+    )
+
+    # 両方をUNION ALLして（重複は後でGROUP BYで処理）
+    purchased_post_ids_subquery = union_all(
+        price_posts_subquery, plan_posts_subquery
+    ).subquery()
+
+    # メインクエリ: 購入済み投稿の詳細情報を取得
+    # 同じpost_idが複数のプランに属する場合、最初に見つかったplan_nameを使用
     return (
         db.query(
             Posts,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec,
             func.count(func.distinct(Likes.user_id)).label("likes_count"),
             func.count(func.distinct(Comments.id)).label("comments_count"),
+            Posts.created_at.label("purchased_at"),  # 投稿の作成日を購入日として使用
+            func.max(purchased_post_ids_subquery.c.plan_name).label(
+                "plan_name"
+            ),  # プラン名を取得
         )
         .select_from(Posts)
+        .join(
+            purchased_post_ids_subquery,
+            Posts.id == purchased_post_ids_subquery.c.post_id,
+        )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
         .outerjoin(
@@ -613,15 +718,16 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
         .filter(Posts.deleted_at.is_(None))
-        .filter(Posts.status == PostStatus.APPROVED)
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
         )
+        .order_by(Posts.created_at.desc())
         .all()
     )
 
@@ -646,117 +752,7 @@ def get_ranking_posts(db: Session, limit: int = 5):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label("thumbnail_key"),
-            VideoAssets.duration_sec.label("duration_sec"),
-        )
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        # post_plansテーブルとの結合
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        # サムネイル用のMediaAssets（kind=2）
-        .outerjoin(
-            ThumbnailAssets,
-            (Posts.id == ThumbnailAssets.post_id)
-            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
-        )
-        # メインビデオ用のMediaAssets（kind=4）
-        .outerjoin(
-            VideoAssets,
-            (Posts.id == VideoAssets.post_id)
-            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
-        )
-        .filter(active_post_cond)
-        .group_by(
-            Posts.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            ThumbnailAssets.storage_key,
-            VideoAssets.duration_sec,
-        )
-        .order_by(desc("likes_count"))
-        .limit(limit)
-        .all()
-    )
-
-
-def get_recent_posts(db: Session, limit: int = 5):
-    """
-    最新の投稿を取得（いいね数も含む）
-    """
-    now = func.now()
-    active_post_cond = and_(
-        Posts.status == PostStatus.APPROVED,
-        Posts.deleted_at.is_(None),
-        or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
-        or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
-    )
-    return (
-        db.query(
-            Posts,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            ThumbnailAssets.storage_key.label("thumbnail_key"),
-            func.count(Likes.post_id).label("likes_count"),
-            VideoAssets.duration_sec.label("duration_sec"),
-        )
-        .join(Users, Posts.creator_user_id == Users.id)
-        .join(Profiles, Users.id == Profiles.user_id)
-        # post_plansテーブルとの結合
-        .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
-        # サムネイル用のMediaAssets（kind=2）
-        .outerjoin(
-            ThumbnailAssets,
-            (Posts.id == ThumbnailAssets.post_id)
-            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
-        )
-        # メインビデオ用のMediaAssets（kind=4）
-        .outerjoin(
-            VideoAssets,
-            (Posts.id == VideoAssets.post_id)
-            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
-        )
-        # いいね数を取得するためのLikesテーブル
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .filter(active_post_cond)
-        .group_by(
-            Posts.id,
-            Users.profile_name,
-            Profiles.username,
-            Profiles.avatar_url,
-            ThumbnailAssets.storage_key,
-            VideoAssets.duration_sec,
-        )
-        .order_by(desc(Posts.created_at))
-        .limit(limit)
-        .all()
-    )
-
-
-# ========== ランキング用 集合==========
-
-
-def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
-    """
-    全期間でいいね数が多い投稿を取得
-    """
-    now = func.now()
-    active_post_cond = and_(
-        Posts.status == PostStatus.APPROVED,
-        Posts.deleted_at.is_(None),
-        or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
-        or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
-    )
-
-    return (
-        db.query(
-            Posts,
-            func.count(Likes.post_id).label("likes_count"),
-            Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -781,6 +777,138 @@ def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key,
+            VideoAssets.duration_sec,
+        )
+        .order_by(desc("likes_count"))
+        .limit(limit)
+        .all()
+    )
+
+
+def get_recent_posts(db: Session, limit: int = 10):
+    """
+    ランダムで10件の投稿を取得（いいね数も含む）
+    """
+    now = func.now()
+
+    active_post_cond = and_(
+        Posts.status == PostStatus.APPROVED,
+        Posts.deleted_at.is_(None),
+        or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
+        or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
+    )
+
+    # 1) likes_count subquery
+    likes_sq = (
+        db.query(
+            Likes.post_id.label("post_id"),
+            func.count(Likes.post_id).label("likes_count"),
+        )
+        .group_by(Likes.post_id)
+        .subquery()
+    )
+
+    # 2) Rank post
+    ranked_sq = (
+        db.query(
+            Posts.id.label("post_id"),
+            func.row_number()
+            .over(
+                partition_by=Profiles.user_id,    
+                order_by=func.random(),          
+            )
+            .label("rn"),
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .filter(active_post_cond)
+        .subquery()
+    )
+
+    rows = (
+        db.query(
+            Posts,
+            Users.profile_name,
+            Users.offical_flg,
+            Profiles.username,
+            Profiles.avatar_url,
+            ThumbnailAssets.storage_key.label("thumbnail_key"),
+            func.coalesce(likes_sq.c.likes_count, 0).label("likes_count"),
+            VideoAssets.duration_sec.label("duration_sec"),
+        )
+        .join(ranked_sq, Posts.id == ranked_sq.c.post_id)
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            ThumbnailAssets,
+            (Posts.id == ThumbnailAssets.post_id)
+            & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
+        .outerjoin(likes_sq, Posts.id == likes_sq.c.post_id)
+        .filter(active_post_cond)
+        .filter(ranked_sq.c.rn <= 2)
+        .order_by(func.random())   
+        .limit(limit)
+        .all()
+    )
+    return rows
+
+
+# ========== ランキング用 集合==========
+
+
+def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
+    """
+    全期間でいいね数が多い投稿を取得
+    """
+    now = func.now()
+    active_post_cond = and_(
+        Posts.status == PostStatus.APPROVED,
+        Posts.deleted_at.is_(None),
+        or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
+        or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
+    )
+
+    return (
+        db.query(
+            Posts,
+            func.count(Likes.post_id).label("likes_count"),
+            Users.profile_name,
+            Users.offical_flg,
+            Profiles.username,
+            Profiles.avatar_url,
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
+        .outerjoin(Likes, Posts.id == Likes.post_id)
+        .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
+        .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
+        .filter(active_post_cond)
+        .group_by(
+            Posts.id,
+            Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -811,6 +939,7 @@ def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -836,6 +965,7 @@ def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -865,6 +995,7 @@ def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -890,6 +1021,7 @@ def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -918,6 +1050,7 @@ def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -943,6 +1076,7 @@ def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -1086,27 +1220,78 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
     price = db.query(Prices).filter(Prices.post_id == post_id).first()
 
     # Planテーブルからプラン金額を取得（post_plansテーブルを経由）
-    plans = (
+    plans_query = (
         db.query(Plans)
         .join(PostPlans, Plans.id == PostPlans.plan_id)
         .filter(PostPlans.post_id == post_id)
         .all()
     )
 
-    return {"price": price, "plans": plans}
+    # プランにサムネイル情報を追加
+    plans_with_thumbnails = []
+    for plan in plans_query:
+        # プランに紐づく投稿のサムネイル画像を取得（最大3枚）
+        plan_post_info = (
+            db.query(MediaAssets.storage_key, Posts.description)
+            .join(Posts, MediaAssets.post_id == Posts.id)
+            .join(PostPlans, MediaAssets.post_id == PostPlans.post_id)
+            .filter(PostPlans.plan_id == plan.id)
+            .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
+            .limit(3)
+            .all()
+        )
+
+        # プランに紐づく投稿の総数を取得（post_plansテーブルから）
+        post_count = (
+            db.query(func.count(PostPlans.post_id))
+            .join(Posts, PostPlans.post_id == Posts.id)
+            .filter(
+                PostPlans.plan_id == plan.id,
+                Posts.deleted_at.is_(None),
+                Posts.status == PostStatus.APPROVED,
+            )
+            .scalar()
+            or 0
+        )
+
+        plans_with_thumbnails.append(
+            {
+                "id": plan.id,
+                "name": plan.name,
+                "description": plan.description,
+                "price": plan.price,
+                "type": plan.type,
+                "post_count": post_count,
+                "plan_post": [
+                    {"description": post.description, "thumbnail_url": post.storage_key}
+                    for post in plan_post_info
+                ],
+            }
+        )
+
+    return {"price": price, "plans": plans_with_thumbnails}
 
 
 def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
     """メディア情報を取得・処理"""
     media_assets = db.query(MediaAssets).filter(MediaAssets.post_id == post_id).all()
-    is_entitlement = False
 
+    # 視聴権限をチェック
+    is_entitlement = check_viewing_rights(db, post_id, user_id)
+
+    # スーパーユーザーかどうかをチェック
+    is_super_user = check_super_user(db, user_id)
+    if is_super_user:
+        is_entitlement = True
+
+    # 視聴権限に応じてメディア種別とファイル名を設定
     set_media_kind = (
         MediaAssetKind.MAIN_VIDEO if is_entitlement else MediaAssetKind.SAMPLE_VIDEO
     )
     set_file_name = "_1080w.webp" if is_entitlement else "_blurred.webp"
 
     media_info = []
+    thumbnail_key = None
     for media_asset in media_assets:
         if media_asset.kind == MediaAssetKind.THUMBNAIL:
             thumbnail_key = f"{CDN_BASE_URL}/{media_asset.storage_key}"
@@ -1133,8 +1318,14 @@ def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
                 }
             )
 
+    # for media_asset in media_assets:
+    #     if media_asset.kind == MediaAssetKind.MAIN_VIDEO:
+    #         main_duration =
+
     return {
         "media_assets": media_assets,
+        "media_info": media_info,
+        "thumbnail_key": thumbnail_key,
         "is_entitlement": is_entitlement,
     }
 
@@ -1827,6 +2018,7 @@ def get_ranking_posts_detail_categories_all_time(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -1868,6 +2060,7 @@ def get_ranking_posts_detail_categories_all_time(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -1916,6 +2109,7 @@ def get_ranking_posts_detail_categories_daily(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -1949,8 +2143,10 @@ def get_ranking_posts_detail_categories_daily(
         )
         .outerjoin(
             Likes,
-            Likes.post_id == Posts.id,
-            Likes.created_at >= one_day_ago,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_day_ago,
+            ),
         )
         .group_by(
             Categories.id,
@@ -1958,6 +2154,7 @@ def get_ranking_posts_detail_categories_daily(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2006,6 +2203,7 @@ def get_ranking_posts_detail_categories_weekly(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2039,8 +2237,10 @@ def get_ranking_posts_detail_categories_weekly(
         )
         .outerjoin(
             Likes,
-            Likes.post_id == Posts.id,
-            Likes.created_at >= one_week_ago,
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_week_ago,
+            ),
         )
         .group_by(
             Categories.id,
@@ -2048,6 +2248,7 @@ def get_ranking_posts_detail_categories_weekly(
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2096,6 +2297,7 @@ def get_ranking_posts_detail_categories_monthly(
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2129,13 +2331,10 @@ def get_ranking_posts_detail_categories_monthly(
         )
         .outerjoin(
             Likes,
-            Likes.post_id == Posts.id,
-            Likes.created_at >= one_month_ago,
-        )
-        .outerjoin(
-            VideoAssets,
-            (Posts.id == VideoAssets.post_id)
-            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+            and_(
+                Likes.post_id == Posts.id,
+                Likes.created_at >= one_month_ago,
+            ),
         )
         .group_by(
             Categories.id,
@@ -2144,6 +2343,7 @@ def get_ranking_posts_detail_categories_monthly(
             Posts.post_type.label("post_type"),
             Posts.creator_user_id.label("creator_user_id"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2211,6 +2411,7 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
             Genres.name.label("genre_name"),
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
+            Users.offical_flg.label("offical_flg"),
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
@@ -2263,6 +2464,7 @@ def get_ranking_posts_categories_all_time(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2332,6 +2534,7 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
             Genres.name.label("genre_name"),
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
+            Users.offical_flg.label("offical_flg"),
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
@@ -2387,6 +2590,7 @@ def get_ranking_posts_categories_daily(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2459,6 +2663,7 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
             Profiles.username.label("username"),
             Profiles.avatar_url.label("avatar_url"),
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2511,6 +2716,7 @@ def get_ranking_posts_categories_weekly(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2580,6 +2786,7 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
             Genres.name.label("genre_name"),
             Posts.id.label("post_id"),
             Posts.creator_user_id.label("creator_user_id"),
+            Users.offical_flg.label("offical_flg"),
             Posts.post_type.label("post_type"),
             Posts.description.label("description"),
             Users.profile_name.label("profile_name"),
@@ -2635,6 +2842,7 @@ def get_ranking_posts_categories_monthly(db: Session, limit: int = 50):
             Posts.id,
             Posts.creator_user_id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2675,6 +2883,7 @@ def get_ranking_posts_detail_overall_all_time(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2699,6 +2908,7 @@ def get_ranking_posts_detail_overall_all_time(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2731,6 +2941,7 @@ def get_ranking_posts_detail_overall_monthly(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2756,6 +2967,7 @@ def get_ranking_posts_detail_overall_monthly(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2788,6 +3000,7 @@ def get_ranking_posts_detail_overall_weekly(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2813,6 +3026,7 @@ def get_ranking_posts_detail_overall_weekly(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2845,6 +3059,7 @@ def get_ranking_posts_detail_overall_daily(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -2870,6 +3085,7 @@ def get_ranking_posts_detail_overall_daily(
         .group_by(
             Posts.id,
             Users.profile_name,
+            Users.offical_flg,
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key,
@@ -2901,6 +3117,23 @@ def add_notification_for_post(
     try:
         if type == "approved":
             try:
+                should_send_notification_post_approval = True
+                settings = (
+                    db.query(UserSettings)
+                    .filter(UserSettings.user_id == post.creator_user_id)
+                    .first()
+                )
+                if (
+                    settings is not None
+                    and settings.settings
+                    and isinstance(settings.settings, dict)
+                ):
+                    post_approve_setting = settings.settings.get("postApprove", True)
+                    if post_approve_setting is False:
+                        should_send_notification_post_approval = False
+                if not should_send_notification_post_approval:
+                    return
+
                 profiles = (
                     db.query(Profiles)
                     .filter(Profiles.user_id == post.creator_user_id)
@@ -2940,6 +3173,22 @@ def add_notification_for_post(
                     .filter(Profiles.user_id == post.creator_user_id)
                     .first()
                 )
+                should_send_notification_post_approval = True
+                settings = (
+                    db.query(UserSettings)
+                    .filter(UserSettings.user_id == post.creator_user_id)
+                    .first()
+                )
+                if (
+                    settings is not None
+                    and settings.settings
+                    and isinstance(settings.settings, dict)
+                ):
+                    post_approve_setting = settings.settings.get("postApprove", True)
+                    if post_approve_setting is False:
+                        should_send_notification_post_approval = False
+                if not should_send_notification_post_approval:
+                    return
                 message = POST_REJECTED_MD.replace("-name-", profiles.username).replace(
                     "--post-url--",
                     f"{os.environ.get('FRONTEND_URL')}/account/post/{post.id}",
@@ -2967,6 +3216,23 @@ def add_notification_for_post(
                 logger.error(f"Add notification for post rejected error: {e}")
                 pass
         elif type == "like":
+            should_send_notification_post_like = True
+            settings = (
+                db.query(UserSettings)
+                .filter(UserSettings.user_id == post.creator_user_id)
+                .first()
+            )
+            if (
+                settings is not None
+                and settings.settings
+                and isinstance(settings.settings, dict)
+            ):
+                post_like_setting = settings.settings.get("postLike", True)
+                if post_like_setting is False:
+                    should_send_notification_post_like = False
+            if not should_send_notification_post_like:
+                return
+
             liked_user_profile = (
                 db.query(Profiles).filter(Profiles.user_id == liked_user_id).first()
             )
@@ -3120,9 +3386,15 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
             Users.profile_name,
             Profiles.username,
             Profiles.avatar_url,
+            MediaAssets.storage_key.label("ogp_image_url"),
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .outerjoin(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.OGP),
+        )
         .filter(Posts.id == post_id)
         .filter(Posts.deleted_at.is_(None))
         .first()
@@ -3134,20 +3406,24 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
     # OGP画像URLを取得
     # 優先順位: generation_media (kind=2) → thumbnail → デフォルト画像
     ogp_image_url = None
-
-    # 1. generation_mediaからOGP画像を取得
-    generation_media = (
-        db.query(GenerationMedia)
-        .filter(
-            GenerationMedia.post_id == post_id,
-            GenerationMedia.kind == GenerationMediaKind.POST_IMAGE,
-        )
-        .first()
-    )
-
-    if generation_media:
-        ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
+    if result.ogp_image_url:
+        ogp_image_url = f"{CDN_BASE_URL}/{result.ogp_image_url}"
     else:
+        # 1. generation_mediaからOGP画像を取得
+        generation_media = (
+            db.query(GenerationMedia)
+            .filter(
+                GenerationMedia.post_id == post_id,
+                GenerationMedia.kind == GenerationMediaKind.POST_IMAGE,
+            )
+            .first()
+        )
+        if generation_media:
+            ogp_image_url = f"{CDN_BASE_URL}/{generation_media.storage_key}"
+        else:
+            ogp_image_url = "https://logo.mijfans.jp/bimi/ogp-image.png"
+
+    if ogp_image_url is None:
         ogp_image_url = "https://logo.mijfans.jp/bimi/ogp-image.png"
 
     # タイトル生成（descriptionの最初の30文字）

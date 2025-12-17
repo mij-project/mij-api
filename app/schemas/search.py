@@ -22,6 +22,7 @@ class CreatorSearchResult(BaseModel):
     followers_count: Optional[int] = None
     is_verified: Optional[bool] = None
     posts_count: Optional[int] = None
+    official: bool
     recent_posts: Optional[List[RecentPostThumbnail]] = []
 
     class Config:

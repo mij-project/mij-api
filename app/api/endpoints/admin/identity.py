@@ -31,7 +31,7 @@ from app.services.email.send_email import (
 )
 from app.models.admins import Admins
 from app.crud.user_crud import update_user_identity_verified_at
-from app.crud.creater_crud import update_creator, get_creator_by_user_id
+from app.crud.creator_crud import update_creator, get_creator_by_user_id
 from app.core.logger import Logger
 from app.crud.events_crud import get_event_by_code
 from app.crud.user_events_crud import check_user_event_exists

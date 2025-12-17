@@ -27,6 +27,7 @@ class PostCategoryResponse(BaseModel):
 	description: str
 	thumbnail_url: Optional[str] = None
 	likes_count: int
+	official: bool
 	creator_name: str
 	username: str
 	creator_avatar_url: Optional[str] = None
@@ -51,6 +52,13 @@ class NewArrivalsResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     duration: Optional[str] = None
     likes_count: int = 0
+
+class PaginatedNewArrivalsResponse(BaseModel):
+    posts: List[NewArrivalsResponse]
+    page: int
+    per_page: int
+    has_next: bool
+    has_previous: bool
 
 class PostUpdateRequest(BaseModel):
 	post_id: UUID

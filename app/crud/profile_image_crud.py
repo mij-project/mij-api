@@ -392,7 +392,15 @@ def add_notification_for_profile_image_submission(
         profile = (
             db.query(Profiles).filter(Profiles.user_id == submission.user_id).first()
         )
-
+        settings = (
+            db.query(UserSettings.settings)
+            .filter(UserSettings.user_id == submission.user_id)
+            .first()
+        )
+        if settings is not None and isinstance(settings[0], dict):
+            profile_approve_setting = settings[0].get("profileApprove", True)
+            if profile_approve_setting is False:
+                return
         # redirect_urlを画像タイプに応じて設定
         redirect_url = "/account/edit"
         if type == "rejected":

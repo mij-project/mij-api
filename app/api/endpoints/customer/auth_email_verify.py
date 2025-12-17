@@ -1,12 +1,12 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response, Request
 from app.db.base import get_db
 from sqlalchemy.orm import Session
 from app.constants.event_code import EventCode
 from app.crud.companies_crud import get_company_by_code, add_company_user
 from app.crud.email_verification_crud import (
-    issue_verification_token, 
-    remake_email_verification_token, 
+    issue_verification_token,
+    remake_email_verification_token,
     get_verification_token,
     update_verification_token
 )
@@ -30,16 +30,19 @@ from app.core.security import create_access_token, create_refresh_token, new_csr
 from app.core.cookies import set_auth_cookies
 from app.api.commons.utils import generate_email_verification_url
 from app.core.logger import Logger
+from app.crud import advertising_agencies_crud
 
 router = APIRouter()
 
 logger = Logger.get_logger()
 @router.post("/verify/")
-def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db)):
+def verify(body: VerifyIn, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     """メールアドレスの認証
 
     Args:
         body (VerifyIn): 認証情報
+        request (Request): リクエスト
+        response (Response): レスポンス
         db (AsyncSession, optional): データベースセッション. Defaults to Depends(get_db).
 
     Raises:
@@ -67,6 +70,16 @@ def verify(body: VerifyIn, response: Response, db: AsyncSession = Depends(get_db
         if body.code:
             _insert_company_user(db, body.code, rec.user_id)
 
+        # 広告会社経由の登録判定（セッションからリファラルコードを取得）
+        logger.info(f"メール認証時のセッション内容: {dict(request.session)}")
+        referral_code = request.session.get("referral_code")
+        logger.info(f"セッションから取得したリファラルコード: {referral_code}")
+        if referral_code:
+            _insert_user_referral(db, referral_code, rec.user_id)
+            # セッションからリファラルコードを削除
+            request.session.pop("referral_code", None)
+        else:
+            logger.warning("メール認証時にセッションにリファラルコードが存在しませんでした")
 
         # 成功: ユーザーを検証済みに
         update_user_email_verified_at(db, rec.user_id, result)
@@ -114,7 +127,12 @@ def verify_email(
                 verify_url = generate_email_verification_url(raw, email_verification_in.code)
             else:
                 verify_url = generate_email_verification_url(raw)
-            background.add_task(send_email_verification, user.email, verify_url, user.profile_name if hasattr(user, "display_name") else None)
+            background.add_task(
+                send_email_verification, 
+                user.email, 
+                verify_url, 
+                user.profile_name if hasattr(user, "profile_name") else None,
+            )
             db.commit()
             db.refresh(user)
         return {"message": "email resend"}
@@ -165,3 +183,36 @@ def _insert_company_user(db: Session, company_id: str, user_id: str) -> bool:
         add_company_user(db, company_id, user_id, fee_percent, is_referrer)
 
     return True
+
+
+def _insert_user_referral(db: Session, referral_code: str, user_id: str) -> bool:
+    """広告会社経由のユーザーリファラルを記録
+
+    Args:
+        db (Session): データベースセッション
+        referral_code (str): リファラルコード
+        user_id (str): ユーザーID
+
+    Returns:
+        bool: ユーザーリファラルの記録成功
+    """
+    try:
+        # リファラルコードから広告会社を検索
+        agency = advertising_agencies_crud.get_advertising_agency_by_code(db, referral_code)
+        if not agency:
+            logger.warning(f"リファラルコード '{referral_code}' に対応する広告会社が見つかりません")
+            return False
+
+        # user_referralsテーブルにレコードを追加
+        advertising_agencies_crud.create_user_referral(
+            db=db,
+            user_id=user_id,
+            agency_id=agency.id,
+            referral_code=referral_code,
+            landing_page=None  # メール認証時点では landing_page は不明
+        )
+        logger.info(f"ユーザーリファラルを記録しました: user_id={user_id}, referral_code={referral_code}")
+        return True
+    except Exception as e:
+        logger.error(f"ユーザーリファラルの記録に失敗しました: {e}")
+        return False

@@ -4,26 +4,40 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header, Response,
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.core.security import create_access_token, decode_token
 from app.db.base import get_db
+from app.models.creators import Creators
+from app.models.events import Events, UserEvents
+from app.models.preregistrations import Preregistrations
 from app.schemas.auth import LoginIn, TokenOut, LoginCookieOut
 from app.models.user import Users
 from sqlalchemy.orm import Session
 from app.core.security import verify_password
 from app.crud.user_crud import get_user_by_email, get_user_by_id, check_email_exists
 from app.core.security import (
-    verify_password, 
-    create_access_token, 
-    create_refresh_token, 
-    decode_token, 
-    new_csrf_token
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    new_csrf_token,
 )
-from app.core.cookies import set_auth_cookies, clear_auth_cookies, REFRESH_COOKIE, CSRF_COOKIE, ACCESS_COOKIE
+from app.core.cookies import (
+    set_auth_cookies,
+    clear_auth_cookies,
+    REFRESH_COOKIE,
+    CSRF_COOKIE,
+    ACCESS_COOKIE,
+)
 from app.core.config import settings
 from app.deps.auth import get_current_user, get_current_user_for_me
 from datetime import datetime, timedelta, timezone
 from requests_oauthlib import OAuth1Session
 from app.deps.auth import issue_app_jwt_for
 from app.crud.user_crud import create_user_by_x
-from app.crud.profile_crud import create_profile, update_profile_by_x, exist_profile_by_username, get_profile_by_username
+from app.crud.profile_crud import (
+    create_profile,
+    update_profile_by_x,
+    exist_profile_by_username,
+    get_profile_by_username,
+)
 from app.constants.enums import AccountType, AccountStatus
 from typing import Tuple
 from app.models.user import Users
@@ -35,16 +49,18 @@ from app.constants.event_code import EventCode
 from app.crud.user_events_crud import create_user_event
 from app.crud.events_crud import get_event_by_code
 from app.core.logger import Logger
+from app.crud import advertising_agencies_crud
 
 logger = Logger.get_logger()
 router = APIRouter()
 
-X_API_KEY = os.getenv('X_API_KEY')
-X_API_SECRET = os.getenv('X_API_SECRET')
-X_CALLBACK_URL = os.getenv('X_CALLBACK_URL')
+X_API_KEY = os.getenv("X_API_KEY")
+X_API_SECRET = os.getenv("X_API_SECRET")
+X_CALLBACK_URL = os.getenv("X_CALLBACK_URL")
 
 OAUTH_BASE = "https://api.twitter.com"
 USERS_BASE = "https://api.twitter.com"
+
 
 @router.post("/login", response_model=LoginCookieOut)
 def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
@@ -67,23 +83,22 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
         password = payload.password
         user = get_user_by_email(db, email)
         if not user or not verify_password(password, user.password_hash):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+            )
         if getattr(user, "is_active", True) is False:
             raise HTTPException(status_code=403, detail="User is not active")
-        
+
         # ログイン時刻を更新
         user.last_login_at = datetime.now(timezone.utc)
         db.commit()
-        
+
         access = create_access_token(str(user.id))
         refresh = create_refresh_token(str(user.id))
         csrf = new_csrf_token()
 
         set_auth_cookies(response, access, refresh, csrf)
-        return {
-            "message": "logged in", 
-            "csrf_token": csrf
-        }
+        return {"message": "logged in", "csrf_token": csrf}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -101,24 +116,40 @@ def x_login(request: Request, company_code: str = None):
         res = x.post(f"{OAUTH_BASE}/oauth/request_token")
 
         if res.status_code != 200:
-            raise HTTPException(400, f"request_token error: {res.status_code} {res.text}")
+            raise HTTPException(
+                400, f"request_token error: {res.status_code} {res.text}"
+            )
 
         tokens = dict(up.parse_qsl(res.text))
         if "oauth_token" not in tokens or "oauth_token_secret" not in tokens:
             raise HTTPException(400, f"invalid payload: {res.text}")
 
-        # セッション退避（既存のセッションデータをクリア）
-        request.session.clear()
+        # リファラルコードを保持したままOAuth情報を保存
+        # IMPORTANT: session.clear()は使わない（referral_codeなどが消えてしまうため）
+        referral_code = request.session.get(
+            "referral_code"
+        )  # 既存のリファラルコードを退避
+        session_id = request.session.get("session_id")  # 既存のセッションIDを退避
+
         request.session["oauth_token"] = tokens["oauth_token"]
         request.session["oauth_token_secret"] = tokens["oauth_token_secret"]
+
+        # 退避したデータを復元
+        if referral_code:
+            request.session["referral_code"] = referral_code
+            logger.info(
+                f"X認証開始時: リファラルコードを保持 referral_code={referral_code}"
+            )
+        if session_id:
+            request.session["session_id"] = session_id
 
         # 企業コードもセッションに保存
         if company_code:
             request.session["company_code"] = company_code
 
         # 認可URL（選択肢）
-        auth_path = "authenticate"
-        params = {"oauth_token": tokens["oauth_token"]}
+        # auth_path = "authenticate"
+        # params = {"oauth_token": tokens["oauth_token"]}
 
         auth_url = f"{OAUTH_BASE}/oauth/authorize?{up.urlencode({'oauth_token': tokens['oauth_token']})}"
         return RedirectResponse(auth_url, status_code=302)
@@ -134,7 +165,7 @@ def x_callback(
     request: Request,
     oauth_verifier: str,
     oauth_token: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Xログインコールバック → access_token交換 → ユーザー情報取得 → DB保存/更新 → Cookie設定 → リダイレクト
@@ -160,21 +191,33 @@ def x_callback(
             raise HTTPException(400, "state mismatch")
 
         # access_token 交換
-        x = OAuth1Session(X_API_KEY, X_API_SECRET, sess["oauth_token"], sess["oauth_token_secret"])
-        res = x.post(f"{OAUTH_BASE}/oauth/access_token", data={"oauth_verifier": oauth_verifier})
+        x = OAuth1Session(
+            X_API_KEY, X_API_SECRET, sess["oauth_token"], sess["oauth_token_secret"]
+        )
+        res = x.post(
+            f"{OAUTH_BASE}/oauth/access_token", data={"oauth_verifier": oauth_verifier}
+        )
 
         if res.status_code != 200:
-            raise HTTPException(400, f"access_token error: {res.status_code} {res.text}")
+            raise HTTPException(
+                400, f"access_token error: {res.status_code} {res.text}"
+            )
 
         access = dict(up.parse_qsl(res.text))
         if "oauth_token" not in access or "oauth_token_secret" not in access:
             raise HTTPException(400, f"invalid access payload: {res.text}")
 
         # ユーザー情報（v1.1 - OAuth 1.0aでメールアドレス取得）
-        x_user = OAuth1Session(X_API_KEY, X_API_SECRET, access["oauth_token"], access["oauth_token_secret"])
-        me_res = x_user.get(f"{USERS_BASE}/1.1/account/verify_credentials.json?include_email=true")
+        x_user = OAuth1Session(
+            X_API_KEY, X_API_SECRET, access["oauth_token"], access["oauth_token_secret"]
+        )
+        me_res = x_user.get(
+            f"{USERS_BASE}/1.1/account/verify_credentials.json?include_email=true"
+        )
         if me_res.status_code != 200:
-            raise HTTPException(400, f"verify_credentials error: {me_res.status_code} {me_res.text}")
+            raise HTTPException(
+                400, f"verify_credentials error: {me_res.status_code} {me_res.text}"
+            )
         me = me_res.json()
 
         x_username = me.get("screen_name")
@@ -189,7 +232,6 @@ def x_callback(
         # ユーザー存在チェック
         user_exists = check_email_exists(db, x_email)
 
-
         # 新規ユーザーフラグ
         is_new_user = False
 
@@ -199,20 +241,37 @@ def x_callback(
             offical_flg = True if preregistration else False
 
             # 新規ユーザー作成
-            user, profile = _create_user_and_profile(db, x_email, x_username, x_name, offical_flg)
+            user, profile = _create_user_and_profile(
+                db, x_email, x_username, x_name, offical_flg
+            )
             # セッションから企業コードを取得し、company_usersにレコードを追加
             company_code = request.session.get("company_code")
             if company_code:
                 try:
                     _insert_company_user(db, company_code, user.id)
                 except HTTPException as e:
-                    logger.warning(f"企業コード '{company_code}' が見つかりませんでした: {e.detail}")
+                    logger.warning(
+                        f"企業コード '{company_code}' が見つかりませんでした: {e.detail}"
+                    )
                 finally:
                     # セッションから企業コードを削除
                     request.session.pop("company_code", None)
 
             if preregistration:
                 _insert_user_event(db, user.id, EventCode.PRE_REGISTRATION)
+
+            # 広告会社経由の登録判定（セッションからリファラルコードを取得）
+            logger.info(f"X認証時のセッション内容: {dict(request.session)}")
+            referral_code = request.session.get("referral_code")
+            logger.info(f"セッションから取得したリファラルコード: {referral_code}")
+            if referral_code:
+                _insert_user_referral(db, referral_code, user.id)
+                # セッションからリファラルコードを削除
+                request.session.pop("referral_code", None)
+            else:
+                logger.warning(
+                    "X認証時にセッションにリファラルコードが存在しませんでした"
+                )
 
             is_new_user = True
         else:
@@ -224,7 +283,6 @@ def x_callback(
         db.refresh(user)
         db.refresh(profile)
 
-        
         access_token = create_access_token(str(user.id))
         refresh_token = create_refresh_token(str(user.id))
         csrf = new_csrf_token()
@@ -245,12 +303,10 @@ def x_callback(
         logger.error("Xログインコールバックに失敗しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # 認可テスト用の /auth/me
 @router.get("/me")
-def me(
-    user: Users = Depends(get_current_user_for_me), 
-    db: Session = Depends(get_db)
-):
+def me(user: Users = Depends(get_current_user_for_me), db: Session = Depends(get_db)):
     """
     ユーザー情報取得
 
@@ -266,29 +322,70 @@ def me(
     try:
         # 48時間（2日）チェック
         if user.last_login_at:
-            time_since_last_login = datetime.now(timezone.utc) - user.last_login_at.replace(tzinfo=timezone.utc)
+            time_since_last_login = datetime.now(
+                timezone.utc
+            ) - user.last_login_at.replace(tzinfo=timezone.utc)
             if time_since_last_login > timedelta(hours=48):
                 raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED, 
-                    detail="Session expired due to inactivity"
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session expired due to inactivity",
                 )
-        
+        user_updated_at = user.updated_at
+        is_pre_registration = False
+        end_pre_registration_at = None
+        if user.role == AccountType.CREATOR:
+            creator = db.query(Creators).filter(Creators.user_id == user.id).first()
+            user_updated_at = creator.created_at
+            preregistration = (
+                db.query(
+                    UserEvents,
+                    Events,
+                )
+                .join(Events, UserEvents.event_id == Events.id)
+                .filter(
+                    Events.code == EventCode.PRE_REGISTRATION,
+                    UserEvents.user_id == user.id,
+                )
+                .first()
+            )
+            if preregistration:
+                is_pre_registration = True
+                release_date = datetime(2025, 12, 15, tzinfo=timezone.utc)
+                if creator.created_at.replace(tzinfo=timezone.utc) < release_date:
+                    end_pre_registration_at = release_date + timedelta(days=90)
+                    end_pre_registration_at = end_pre_registration_at.replace(
+                        tzinfo=None
+                    )
+                else:
+                    end_pre_registration_at = creator.created_at.replace(
+                        tzinfo=timezone.utc
+                    ) + timedelta(days=90)
+                    end_pre_registration_at = end_pre_registration_at.replace(
+                        tzinfo=None
+                    )
         # アクセス時刻を更新
         user.last_login_at = datetime.now(timezone.utc)
         db.commit()
-        
+
         return {
-            "id": str(user.id), 
-            "email": user.email, 
-            "role": user.role, 
+            "id": str(user.id),
+            "email": user.email,
+            "role": user.role,
             "is_phone_verified": user.is_phone_verified,
             "is_identity_verified": user.is_identity_verified,
             "offical_flg": user.offical_flg,
+            "user_updated_at": user_updated_at,
+            "user_created_at": user.created_at,
+            "is_pre_registration": is_pre_registration,
+            "end_pre_registration_at": end_pre_registration_at,
         }
+
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/logout")
 def logout(response: Response):
@@ -304,19 +401,27 @@ def logout(response: Response):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/refresh")
 def refresh_token(request: Request, response: Response):
     refresh = request.cookies.get(REFRESH_COOKIE)
     if not refresh:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token"
+        )
 
     try:
         payload = decode_token(refresh)
     except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
 
     if payload.get("type") != "refresh":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type"
+        )
 
     user_id = payload.get("sub")
     # 必要ならDBでBAN/退会チェックなど
@@ -327,30 +432,44 @@ def refresh_token(request: Request, response: Response):
 
     # Set-Cookie（Access: HttpOnly / CSRF: 非HttpOnly）
     response.set_cookie(
-        ACCESS_COOKIE, new_access,
+        ACCESS_COOKIE,
+        new_access,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MIN * 60,
-        domain=settings.COOKIE_DOMAIN, secure=settings.COOKIE_SECURE,
-        httponly=True, samesite=settings.COOKIE_SAMESITE, path=settings.COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
+        secure=settings.COOKIE_SECURE,
+        httponly=True,
+        samesite=settings.COOKIE_SAMESITE,
+        path=settings.COOKIE_PATH,
     )
     response.set_cookie(
-        CSRF_COOKIE, new_csrf,
+        CSRF_COOKIE,
+        new_csrf,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MIN * 60,
-        domain=settings.COOKIE_DOMAIN, secure=settings.COOKIE_SECURE,
-        httponly=False, samesite=settings.COOKIE_SAMESITE, path=settings.COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
+        secure=settings.COOKIE_SECURE,
+        httponly=False,
+        samesite=settings.COOKIE_SAMESITE,
+        path=settings.COOKIE_PATH,
     )
     return {"message": "refreshed", "csrf_token": new_csrf}
+
 
 @router.get("/csrf")
 def get_csrf_token(request: Request):
     csrf = request.cookies.get(CSRF_COOKIE)
 
-    logger.info(f"csrf_header={request.headers.get('csrf-token') or request.headers.get('x-csrf-token')}")
+    logger.info(
+        f"csrf_header={request.headers.get('csrf-token') or request.headers.get('x-csrf-token')}"
+    )
     logger.info(f"cookies={request.cookies}")
     logger.info(f"csrf={csrf}")
     if not csrf:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing CSRF token")
-    
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing CSRF token"
+        )
+
     return "ok"
+
 
 @router.get("/auth/callback")
 async def auth_callback(code: str):
@@ -359,9 +478,9 @@ async def auth_callback(code: str):
             f"{os.getenv('COGNITO_DOMAIN')}/oauth2/token",
             data={
                 "grant_type": "authorization_code",
-                "client_id": os.getenv('CLIENT_ID'),
+                "client_id": os.getenv("CLIENT_ID"),
                 "code": code,
-                "redirect_uri": os.getenv('REDIRECT_URI'),
+                "redirect_uri": os.getenv("REDIRECT_URI"),
                 # "code_verifier": "<フロントで保持したverifier>"  # PKCE時に必要
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -374,15 +493,35 @@ async def auth_callback(code: str):
 
     # Cookieに保存 (本番は secure=True, samesite="None")
     res = Response(status_code=302, headers={"Location": "/"})
-    res.set_cookie("cognito_id_token", tokens["id_token"], httponly=True, samesite="Lax", secure=False)
-    res.set_cookie("cognito_access_token", tokens["access_token"], httponly=True, samesite="Lax", secure=False)
+    res.set_cookie(
+        "cognito_id_token",
+        tokens["id_token"],
+        httponly=True,
+        samesite="Lax",
+        secure=False,
+    )
+    res.set_cookie(
+        "cognito_access_token",
+        tokens["access_token"],
+        httponly=True,
+        samesite="Lax",
+        secure=False,
+    )
     if "refresh_token" in tokens:
-        res.set_cookie("cognito_refresh_token", tokens["refresh_token"], httponly=True, samesite="Lax", secure=False)
+        res.set_cookie(
+            "cognito_refresh_token",
+            tokens["refresh_token"],
+            httponly=True,
+            samesite="Lax",
+            secure=False,
+        )
 
     return res
 
 
-def _create_user_and_profile(db: Session, x_email: str, x_username: str, x_name: str, offical_flg: bool) -> Tuple[Users, Profiles]:
+def _create_user_and_profile(
+    db: Session, x_email: str, x_username: str, x_name: str, offical_flg: bool
+) -> Tuple[Users, Profiles]:
     """ユーザーとプロフィールを作成
 
     Args:
@@ -403,7 +542,7 @@ def _create_user_and_profile(db: Session, x_email: str, x_username: str, x_name:
         role=AccountType.GENERAL_USER,
         status=AccountStatus.ACTIVE,
         last_login_at=datetime.now(timezone.utc),
-        offical_flg=offical_flg
+        offical_flg=offical_flg,
     )
     user = create_user_by_x(db, user)
 
@@ -417,7 +556,9 @@ def _create_user_and_profile(db: Session, x_email: str, x_username: str, x_name:
 
 
 # def _update_user_and_profile(db: Session, user: Users, x_username: str, x_name: str) -> Tuple[Users, Profiles]:
-def _update_user_and_profile(db: Session, x_username: str, x_name: str) -> Tuple[Users, Profiles]:
+def _update_user_and_profile(
+    db: Session, x_username: str, x_name: str
+) -> Tuple[Users, Profiles]:
     """ユーザーとプロフィールを更新
 
     Args:
@@ -428,7 +569,7 @@ def _update_user_and_profile(db: Session, x_username: str, x_name: str) -> Tuple
     Returns:
         Tuple[Users, Profiles]: ユーザーとプロフィール
     """
-     # 既存ユーザーの場合、ユーザー情報を取得して更新
+    # 既存ユーザーの場合、ユーザー情報を取得して更新
     # プロフィールからユーザーIDを取得
     profile = get_profile_by_username(db, x_username)
     if profile is None:
@@ -448,6 +589,7 @@ def _update_user_and_profile(db: Session, x_username: str, x_name: str) -> Tuple
     profile = update_profile_by_x(db, user.id, x_username)
     db.commit()
     return user, profile
+
 
 def _insert_company_user(db: Session, company_code: str, user_id: str) -> bool:
     """企業にユーザーを追加
@@ -483,6 +625,7 @@ def _insert_company_user(db: Session, company_code: str, user_id: str) -> bool:
 
     return True
 
+
 def _insert_user_event(db: Session, user_id: str, event_code: str) -> bool:
     """
     ユーザーイベントを挿入
@@ -491,3 +634,42 @@ def _insert_user_event(db: Session, user_id: str, event_code: str) -> bool:
     if event:
         return create_user_event(db, user_id, event.id)
     return False
+
+
+def _insert_user_referral(db: Session, referral_code: str, user_id: str) -> bool:
+    """広告会社経由のユーザーリファラルを記録
+
+    Args:
+        db (Session): データベースセッション
+        referral_code (str): リファラルコード
+        user_id (str): ユーザーID
+
+    Returns:
+        bool: ユーザーリファラルの記録成功
+    """
+    try:
+        # リファラルコードから広告会社を検索
+        agency = advertising_agencies_crud.get_advertising_agency_by_code(
+            db, referral_code
+        )
+        if not agency:
+            logger.warning(
+                f"リファラルコード '{referral_code}' に対応する広告会社が見つかりません"
+            )
+            return False
+
+        # user_referralsテーブルにレコードを追加
+        advertising_agencies_crud.create_user_referral(
+            db=db,
+            user_id=user_id,
+            agency_id=agency.id,
+            referral_code=referral_code,
+            landing_page=None,  # X認証時点では landing_page は不明
+        )
+        logger.info(
+            f"ユーザーリファラルを記録しました (X認証): user_id={user_id}, referral_code={referral_code}"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"ユーザーリファラルの記録に失敗しました: {e}")
+        return False

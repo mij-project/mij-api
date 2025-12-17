@@ -5,3 +5,6 @@ class CompanyFeePercent:
 
 class PlatformFeePercent:
     DEFAULT = 10 # デフォルトのプラットフォーム手数料(%)
+
+class PaymentPlanPlatformFeePercent:
+    DEFAULT = 10 # デフォルトのプランフォーム手数料(%)

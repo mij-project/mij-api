@@ -1,5 +1,7 @@
-from datetime import datetime, timezone
+import calendar
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
+from app.crud.sales_crud import get_payments_by_user_id
 from app.schemas.user import (
     UserCreate,
     UserOut,
@@ -16,6 +18,7 @@ from app.crud.user_crud import (
     get_user_profile_by_username,
     get_plan_details,
 )
+from app.deps.auth import get_current_user, get_current_user_optional
 from app.crud.companies_crud import get_company_by_code
 from app.models.profiles import Profiles
 from app.models.user import Users
@@ -27,6 +30,8 @@ from app.schemas.user import (
     ProfilePurchaseResponse,
     ProfileGachaResponse,
 )
+from app.models.subscriptions import Subscriptions
+from app.constants.enums import ItemType, SubscriptionStatus
 from app.api.commons.utils import generate_email_verification_url
 import os
 from app.crud.email_verification_crud import issue_verification_token
@@ -127,10 +132,12 @@ def get_user_profile_by_company_code(
 
 @router.get("/profile", response_model=UserProfileResponse)
 def get_user_profile_by_username_endpoint(
-    username: str = Query(..., description="ユーザー名"), db: Session = Depends(get_db)
+    username: str = Query(..., description="ユーザー名"),
+    db: Session = Depends(get_db),
+    current_user: Optional[Users] = Depends(get_current_user_optional),
 ):
     """
-    ユーザー名によるユーザープロフィール取得
+    ユーザー名によるユーザープロフィール取得（未ログインでもアクセス可能）
     """
     try:
         now = datetime.now(timezone.utc)
@@ -198,6 +205,21 @@ def get_user_profile_by_username_endpoint(
             # プランの詳細情報を取得
             plan_details = get_plan_details(db, plan.id)
 
+            # 現在のユーザーが加入済みかどうかをチェック
+            is_subscribed = False
+            if current_user:
+                is_subscribed = (
+                    db.query(Subscriptions)
+                    .filter(
+                        Subscriptions.user_id == current_user.id,
+                        Subscriptions.order_id == str(plan.id),
+                        Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
+                        Subscriptions.status == SubscriptionStatus.ACTIVE,  # 1=ACTIVE
+                    )
+                    .first()
+                    is not None
+                )
+
             profile_plans.append(
                 ProfilePlanResponse(
                     id=plan.id,
@@ -207,7 +229,14 @@ def get_user_profile_by_username_endpoint(
                     currency="JPY",  # 通貨は固定（必要に応じてDBから取得）
                     type=plan.type,
                     post_count=plan_details["post_count"],
-                    thumbnails=plan_details["thumbnails"],
+                    plan_post=[
+                        {
+                            "description": post["description"],
+                            "thumbnail_url": f"{BASE_URL}/{post['storage_key']}",
+                        }
+                        for post in plan_details.get("plan_post", [])
+                    ],
+                    is_subscribed=is_subscribed,
                 )
             )
 
@@ -365,3 +394,94 @@ def _send_email_verification(
         verify_url,
         user.profile_name if hasattr(user, "profile_name") else None,
     )
+
+
+@router.get("/payment-histories")
+async def get_payment_histories(
+    period: str = Query("today"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    logger.info(f"Payment histories period: {period}")
+    if period in ["today", "yesterday", "day_before_yesterday"]:
+        return _get_payment_histories_period_date_range(
+            db, period, current_user, page, limit
+        )
+    return _get_payment_histories_period_month_range(
+        db, period, current_user, page, limit
+    )
+
+
+def _get_payment_histories_period_date_range(
+    db: Session, period: str, current_user: Users, page: int, limit: int
+):
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+            hours=9
+        )
+        end_date = now.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        ) - timedelta(hours=9)
+    elif period == "yesterday":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+            days=1, hours=9
+        )
+        end_date = now.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        ) - timedelta(days=1, hours=9)
+    elif period == "day_before_yesterday":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+            days=2, hours=9
+        )
+        end_date = now.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        ) - timedelta(days=2, hours=9)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid period")
+    payment_histories = get_payments_by_user_id(
+        db, current_user.id, start_date, end_date, page, limit
+    )
+    if payment_histories is None:
+        raise HTTPException(status_code=500, detail="Payment histories not found")
+    return payment_histories
+
+
+def _get_payment_histories_period_month_range(
+    db: Session, period: str, current_user: Users, page: int, limit: int
+):
+    start_date, end_date, none_use_start_date, none_use_end_date = __get_month_ranges(
+        period
+    )
+    payment_histories = get_payments_by_user_id(
+        db, current_user.id, start_date, end_date, page, limit
+    )
+    if payment_histories is None:
+        raise HTTPException(status_code=500, detail="Payment histories not found")
+    return payment_histories
+
+
+def __get_month_ranges(ym: str):
+    year, month = map(int, ym.split("-"))
+
+    start_date = datetime(year, month, 1, 0, 0, 0) - timedelta(hours=9)
+
+    last_day = calendar.monthrange(year, month)[1]
+    end_date = datetime(year, month, last_day, 23, 59, 59, 999_999) - timedelta(hours=9)
+
+    if month == 1:
+        prev_year = year - 1
+        prev_month = 12
+    else:
+        prev_year = year
+        prev_month = month - 1
+
+    prev_start_date = datetime(prev_year, prev_month, 1, 0, 0, 0) - timedelta(hours=9)
+    prev_last_day = calendar.monthrange(prev_year, prev_month)[1]
+    prev_end_date = datetime(
+        prev_year, prev_month, prev_last_day, 23, 59, 59, 999_999
+    ) - timedelta(hours=9)
+
+    return (start_date, end_date, prev_start_date, prev_end_date)

@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from app.models.user import Users
 from app.models.profiles import Profiles
@@ -11,7 +12,8 @@ from uuid import UUID
 from app.constants.enums import (
     AccountType,
     AccountStatus,
-    PlanStatus
+    PlanStatus,
+    PostStatus
 )
 from app.crud.profile_crud import get_profile_by_username
 from app.models.posts import Posts
@@ -20,6 +22,7 @@ from app.models.media_assets import MediaAssets
 from app.models.social import Likes, Follows
 from app.models.prices import Prices
 from app.constants.enums import PostStatus, MediaAssetKind, PlanStatus
+from app.api.commons.function import CommonFunction
 import os
 
 BASE_URL = os.getenv("CDN_BASE_URL")
@@ -73,20 +76,30 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
     """
     プランの詳細情報を取得（投稿数、サムネイル）
     """
+    active_post_cond = CommonFunction.get_active_post_cond()
+    
     # プランに紐づく投稿のサムネイルを取得（最大3枚）
-    thumbnails_query = (
-        db.query(MediaAssets.storage_key)
+    plan_posts_query = (
+        db.query(Posts.description, MediaAssets.storage_key)
         .join(Posts, MediaAssets.post_id == Posts.id)
         .join(PostPlans, Posts.id == PostPlans.post_id)
         .filter(PostPlans.plan_id == plan_id)
         .filter(MediaAssets.kind == MediaAssetKind.THUMBNAIL)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .limit(3)
         .all()
     )
 
-    thumbnails = [f"{BASE_URL}/{thumb.storage_key}" for thumb in thumbnails_query]
+    # plan_postを辞書形式で返す
+    plan_post = [
+        {
+            "description": post.description if hasattr(post, 'description') else post[0],
+            "storage_key": post.storage_key if hasattr(post, 'storage_key') else post[1]
+        }
+        for post in plan_posts_query
+    ]
 
     # プランに紐づく投稿数を取得
     post_count = (
@@ -95,11 +108,12 @@ def get_plan_details(db: Session, plan_id: UUID) -> dict:
         .filter(PostPlans.plan_id == plan_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .scalar()
     )
 
     return {
-        "thumbnails": thumbnails,
+        "plan_post": plan_post,
         "post_count": post_count or 0
     }
 
@@ -134,6 +148,8 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .subquery()
     )
 
+    active_post_cond = CommonFunction.get_active_post_cond()
+
     posts = (
         db.query(
             Posts,
@@ -151,6 +167,7 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .filter(Posts.creator_user_id == user.id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .group_by(Posts.id, thumbnail_subq.c.thumbnail_key, video_duration_subq.c.duration_sec, Prices.price, Prices.currency)
         .order_by(desc(Posts.created_at))
         .all()
@@ -208,6 +225,7 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .filter(Posts.deleted_at.is_(None))
         .filter(Prices.is_active == True)  # 有効な価格設定のみ
         .filter(Posts.status == PostStatus.APPROVED)
+        .filter(active_post_cond)
         .group_by(Posts.id, thumbnail_subq_purchase.c.thumbnail_key, Prices.price, Prices.currency, video_duration_subq_purchase.c.duration_sec)
         .order_by(desc(Posts.created_at))
         .all()
@@ -281,6 +299,12 @@ def get_following_count(db: Session, user_id: UUID) -> int:
         .filter(Follows.follower_user_id == user_id)
         .count()
     )
+
+def check_super_user(db: Session, user_id: UUID) -> bool:
+    """
+    スーパーユーザーかどうかをチェック
+    """
+    return db.query(Users).filter(Users.id == user_id, Users.role == AccountType.SUPER_USER).first() is not None
 
 def resend_email_verification(db: Session, email: str) -> Users:
     """
@@ -361,3 +385,19 @@ def create_user(db: Session, user_create: UserCreate) -> Users:
     db.add(db_user)
     db.flush()
     return db_user
+
+def create_super_user(db: Session, email: str, password: str, name: str) -> Users:
+    """
+    スーパーユーザーを作成
+    """
+    user = Users(
+        profile_name=name,
+        email=email,
+        password_hash=hash_password(password),
+        role=AccountType.SUPER_USER,
+        status=AccountStatus.ACTIVE,
+        is_email_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    return user

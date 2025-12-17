@@ -68,6 +68,8 @@ class SubscribedPlanDetail(BaseModel):
     plan_description: Optional[str] = None
     price: int
     purchase_created_at: datetime
+    next_billing_date: Optional[datetime] = None
+    status: int
     creator_avatar_url: Optional[str] = None
     creator_username: Optional[str] = None
     creator_profile_name: Optional[str] = None
@@ -123,6 +125,7 @@ class PostCardResponse(BaseModel):
     creator_avatar: Optional[str] = None
     creator_name: str
     creator_username: str
+    official: bool
     likes_count: int
     comments_count: int
     duration: Optional[str] = None
@@ -130,6 +133,7 @@ class PostCardResponse(BaseModel):
     created_at: datetime
     price: Optional[int] = None
     currency: Optional[str] = None
+    plan_name: Optional[str] = None  # プラン名（プラン購読の場合のみ）
 
     class Config:
         from_attributes = True
@@ -158,6 +162,7 @@ class AccountPostResponse(BaseModel):
     created_at: Optional[str] = None
     duration: Optional[str] = None
     is_video: bool = False
+    has_plan: bool = False
 
 class AccountPostStatusResponse(BaseModel):
     pending_posts: List[AccountPostResponse] = []
@@ -184,6 +189,8 @@ class PlanSummary(BaseModel):
     """投稿に紐づくプランの簡易情報"""
     id: str
     name: Optional[str] = None
+    price: Optional[int] = None
+    currency: Optional[str] = "JPY"
 
 
 class AccountPostDetailResponse(BaseModel):

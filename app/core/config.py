@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # メール設定
     EMAIL_ENABLED: bool = True
     EMAIL_BACKEND: str = "auto"  # "auto" | "mailhog" | "ses"
-    MAIL_FROM: str = "no-reply@mijfans.jp"
+    MAIL_FROM: str = "info@mijfans.jp"
     MAIL_FROM_NAME: str = "mijfans"
     REPLY_TO: str | None = None
     LIST_UNSUBSCRIBE: str | None = None
@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     # SES
     AWS_REGION: str = "ap-northeast-1"
     SES_CONFIGURATION_SET: str | None = "stg-outbound"
+
+    # CREDIX決済設定
+    CREDIX_API_BASE_URL: str = "https://secure.credix-web.co.jp"
+    CREDIX_CLIENTIP: str
+    CREDIX_ZKEY: str
+    CREDIX_SESSION_ENDPOINT: str = "/cgi-bin/credit/session.cgi"
+    CREDIX_ORDER_ENDPOINT: str = "/cgi-bin/credit/order.cgi"
+    CREDIX_REPEATER_ENDPOINT: str = "/cgi-bin/credit/repeater.cgi"
 
     model_config = SettingsConfigDict(
         env_file=[".env.development", ".env", ".env.local"],

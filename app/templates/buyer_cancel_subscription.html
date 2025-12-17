@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ user_name }}さん、{{ plan_name }}プランの解約について</title>
+  </head>
+  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:20px;background-color:#f9fafb;margin:0;">
+    <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+      <!-- ヘッダー -->
+      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ plan_name }}プランの解約について</h2>
+
+      <p style="color:#374151;line-height:1.6;margin-bottom:20px;">
+        {{ user_name }}様<br>
+        いつもmijfansをご利用いただき誠にありがとうございます。
+      </p>
+
+      <!-- プラン解約通知 -->
+      <div style="background-color:#fee2e2;border-left:4px solid #dc2626;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#991b1b;font-weight:bold;margin:0;">⚠ 決済に失敗したため、プランが解約されました</p>
+      </div>
+
+      <!-- 解約詳細 -->
+      <div style="background-color:#f9fafb;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #e5e7eb;">
+        <h3 style="color:#111827;margin-top:0;margin-bottom:15px;font-size:18px;">解約詳細</h3>
+
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;width:120px;">プラン名:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">{{ plan_name }}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">クリエイター:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">{{ creator_user_name }}</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- 説明 -->
+      <div style="background-color:#fef3c7;border-left:4px solid #f59e0b;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#92400e;margin:0;font-size:14px;line-height:1.6;">
+          <strong>ご注意:</strong><br>
+          {{ plan_name }}プランの決済処理に失敗したため、プランが自動的に解約されました。<br>
+          プランへのアクセス権限は失効しています。
+        </p>
+      </div>
+
+      <!-- アクションリンク -->
+      <div style="margin:25px 0;text-align:center;">
+        <p style="color:#374151;line-height:1.6;margin-bottom:15px;">プランに再度ご加入いただく場合は、下記のURLからお手続きをお願いいたします。</p>
+        <a href="{{ plan_url }}" style="display:inline-block;background-color:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;margin-bottom:10px;">
+          プランページへ
+        </a>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <!-- お問い合わせ -->
+      <div style="background-color:#f9fafb;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #e5e7eb;">
+        <h3 style="color:#111827;margin-top:0;margin-bottom:15px;font-size:18px;">お問い合わせ</h3>
+        <p style="color:#374151;line-height:1.6;margin:0;">
+          決済失敗の原因やプランに関するご質問がございましたら、お問い合わせよりお知らせください。<br>
+          内容を確認し、1営業日以内にご返答させて頂きます。<br>
+          ※ このメールは送信専用メールです。ご返信いただいてもお応えいたしかねますのでご了承ください。<br>
+          メールの配信解除を希望される方は、メール通知設定より配信解除の手続きを行ってください。<br>
+          ※ 重要なお知らせは通知設定に関わらずお送りしております。
+        </p>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <!-- フッター -->
+      <div style="margin-top:30px;">
+        <p style="color:#374151;font-size:14px;line-height:1.6;margin-bottom:10px;">
+          <strong>公式Twitter(最新情報):</strong><br>
+          <a href="https://x.com/mijfan_official" style="color:#2563eb;text-decoration:none;">https://x.com/mijfan_official</a>
+        </p>
+
+        <p style="color:#6b7280;font-size:14px;line-height:1.6;margin-top:20px;">
+          このメールは送信専用のメールアドレスから送信されているため、返信できません。<br>
+          恐れ入りますが、お問い合わせは以下のアドレスよりお願いします。<br>
+          <a href="mailto:support@mijfans.jp" style="color:#2563eb;text-decoration:none;">support@mijfans.jp</a>
+        </p>
+
+        <p style="color:#374151;font-size:14px;line-height:1.6;margin-top:20px;font-weight:bold;">
+          今後ともmijfansをよろしくお願いいたします。
+        </p>
+      </div>
+
+      <!-- コピーライト -->
+      <p style="color:#9ca3af;font-size:12px;margin-top:30px;text-align:center;">
+        © 2025 mijfans. All rights reserved.
+      </p>
+    </div>
+  </body>
+</html>
+

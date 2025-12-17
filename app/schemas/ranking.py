@@ -8,6 +8,7 @@ class RankingPostsAllTimeResponse(BaseModel):
     thumbnail_url: Optional[str] = None
     likes_count: int
     creator_name: str
+    official: bool
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
@@ -19,6 +20,7 @@ class RankingPostsMonthlyResponse(BaseModel):
     thumbnail_url: Optional[str] = None
     likes_count: int
     creator_name: str
+    official: bool
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
@@ -30,6 +32,7 @@ class RankingPostsWeeklyResponse(BaseModel):
     thumbnail_url: Optional[str] = None
     likes_count: int
     creator_name: str
+    official: bool
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
@@ -41,6 +44,7 @@ class RankingPostsDailyResponse(BaseModel):
     thumbnail_url: Optional[str] = None
     likes_count: int
     creator_name: str
+    official: bool
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
@@ -59,6 +63,7 @@ class RankingPostsCategoriesDetailResponse(BaseModel):
     thumbnail_url: Optional[str] = None
     likes_count: int
     creator_name: str
+    official: bool
     username: str
     creator_avatar_url: Optional[str] = None
     rank: int
@@ -81,6 +86,7 @@ class RankingPostsDetailDailyResponse(BaseModel):
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
     likes_count: int
+    official: bool
     creator_name: Optional[str] = None
     username: Optional[str] = None
     creator_avatar_url: Optional[str] = None
@@ -105,7 +111,8 @@ class RankingCreators(BaseModel):
     likes: int
     rank: int
     follower_ids: List[str] | List
-
+    official: bool
+    
 class RankingCreatorsResponse(BaseModel):
     all_time: List [RankingCreators]
     monthly: List [RankingCreators]

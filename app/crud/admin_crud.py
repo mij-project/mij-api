@@ -1,8 +1,7 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, desc, asc
+from sqlalchemy import desc, asc
 from datetime import datetime, timezone
-from uuid import UUID
 
 from app.models.notifications import Notifications
 from app.models.user import Users
@@ -11,7 +10,6 @@ from app.models.identity import IdentityVerifications
 from app.models.posts import Posts
 from app.models.profiles import Profiles
 from app.models.media_assets import MediaAssets
-from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.admins import Admins
 from app.models.profile_image_submissions import ProfileImageSubmissions
 from app.constants.enums import PostStatus, MediaAssetStatus
@@ -212,15 +210,16 @@ def get_users_paginated(
         tuple[List[Users], int]: (ユーザーリスト, 総件数)
     """
     skip = (page - 1) * limit
-    
+
     query = db.query(Users).options(joinedload(Users.profile))
-    
+
     if search:
         query = query.join(Profiles).filter(
             (Profiles.username.ilike(f"%{search}%")) |
+            (Users.profile_name.ilike(f"%{search}%")) |
             (Users.email.ilike(f"%{search}%"))
         )
-    
+
     if role:
         role_map = {"user": 1, "creator": 2, "admin": 3}
         query = query.filter(Users.role == role_map.get(role))
@@ -376,12 +375,14 @@ def get_posts_paginated(
         tuple[List[Posts], int]: (投稿リスト, 総件数)
     """
     skip = (page - 1) * limit
-    
-    query = db.query(Posts).join(Users, Posts.creator_user_id == Users.id).options(joinedload(Posts.creator))
-    
+
+    query = db.query(Posts).join(Users, Posts.creator_user_id == Users.id).join(Profiles, Users.id == Profiles.user_id).options(joinedload(Posts.creator))
+
     if search:
         query = query.filter(
-            Posts.description.ilike(f"%{search}%")
+            (Posts.description.ilike(f"%{search}%")) |
+            (Users.profile_name.ilike(f"%{search}%")) |
+            (Profiles.username.ilike(f"%{search}%"))
         )
     
     if status:
@@ -533,8 +534,11 @@ def update_post_status(db: Session, post_id: str, status: str) -> bool:
             "resubmit": PostStatus.RESUBMIT,
             "deleted": PostStatus.DELETED,
             "pending": PostStatus.PENDING,
+            "unpublished": PostStatus.UNPUBLISHED,
         }
         post.status = status_map.get(status, PostStatus.PENDING)
+        if status == "unpublished":
+            post.deleted_at = None
         post.updated_at = datetime.now(timezone.utc)
         
         db.commit()
