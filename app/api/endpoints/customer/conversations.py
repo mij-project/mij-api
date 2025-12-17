@@ -164,3 +164,44 @@ def get_conversations_list(
     """
     conversations = conversations_crud.get_conversations_list(db, current_user.id)
     return conversations
+
+
+@router.get("/list")
+def get_user_conversations(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    search: str = Query(None),
+    sort: str = Query("last_message_desc"),
+    unread_only: bool = Query(False),
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    ログインユーザーが参加しているtype=2の会話リストを取得
+
+    Args:
+        skip: スキップ件数（無限スクロール用）
+        limit: 取得件数
+        search: 検索キーワード（相手の名前で検索）
+        sort: ソート順（last_message_desc, last_message_asc）
+        unread_only: 未読のみフィルター
+
+    Returns:
+        会話リスト
+    """
+    conversations, total = conversations_crud.get_user_conversations(
+        db=db,
+        user_id=current_user.id,
+        skip=skip,
+        limit=limit,
+        search=search,
+        sort=sort,
+        unread_only=unread_only,
+    )
+
+    return {
+        "data": conversations,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }

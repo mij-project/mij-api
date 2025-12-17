@@ -261,7 +261,13 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
         else:  # subscription
             if not request.plan_id:
                 raise HTTPException(status_code=400, detail="Plan ID is required for subscription")
+
             plan = plan_crud.get_plan_by_id(db, request.plan_id)
+
+            # 対象のレコードに対してロックをかける
+
+
+
             if not plan:
                 raise HTTPException(status_code=404, detail="Plan not found")
 
@@ -269,6 +275,8 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
             money = math.ceil(plan.price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.plan_id
             transaction_type = PaymentTransactionType.SUBSCRIPTION
+
+            #　ロックを解除
         return money, order_id, transaction_type
     except HTTPException:
         raise

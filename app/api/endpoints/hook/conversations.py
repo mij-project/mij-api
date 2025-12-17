@@ -132,6 +132,8 @@ async def websocket_delusion_endpoint(
 
     if not user:
         logger.error("❌ Authentication failed, closing connection")
+        # WebSocket接続を受け入れてから閉じる必要がある
+        await websocket.accept()
         await websocket.close(code=4001, reason="Invalid token")
         return
 
@@ -229,12 +231,16 @@ async def websocket_admin_delusion_endpoint(
     # トークン検証（管理者テーブルから取得）
     admin = await get_admin_from_cookie(websocket, db)
     if not admin:  # 管理者認証チェック
+        # WebSocket接続を受け入れてから閉じる必要がある
+        await websocket.accept()
         await websocket.close(code=4003, reason="Admin access required")
         return
 
     # 会話の存在確認
     conversation = conversations_crud.get_conversation_by_id(db, UUID(conversation_id))
     if not conversation:
+        # WebSocket接続を受け入れてから閉じる必要がある
+        await websocket.accept()
         await websocket.close(code=4004, reason="Conversation not found")
         return
 

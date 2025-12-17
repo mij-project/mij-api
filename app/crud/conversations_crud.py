@@ -410,3 +410,153 @@ def get_new_conversations_unread(db: Session, user_id: UUID) -> int:
     except Exception as e:
         logger.error(f"Get new conversations unread error: {e}", exc_info=True)
         return False
+
+
+def get_user_conversations(
+    db: Session,
+    user_id: UUID,
+    skip: int = 0,
+    limit: int = 20,
+    search: Optional[str] = None,
+    sort: str = "last_message_desc",
+    unread_only: bool = False,
+) -> Tuple[List[dict], int]:
+    """
+    ログインユーザーが参加しているtype=2の会話リストを取得
+
+    Args:
+        db: データベースセッション
+        user_id: ログインユーザーID
+        skip: スキップ件数
+        limit: 取得件数
+        search: 検索キーワード（相手の名前で検索）
+        sort: ソート順（last_message_desc, last_message_asc）
+        unread_only: 未読のみフィルター
+
+    Returns:
+        Tuple[会話リスト, 全体件数]
+    """
+    # 基本クエリ: ユーザーが参加しているtype=2の会話
+    query = (
+        db.query(
+            Conversations.id.label("conversation_id"),
+            Conversations.last_message_at,
+            Conversations.created_at,
+            ConversationParticipants.last_read_message_id,
+            Users.id.label("partner_user_id"),
+            Users.profile_name.label("partner_name"),
+            Profiles.avatar_url.label("partner_avatar"),
+        )
+        .join(
+            ConversationParticipants,
+            Conversations.id == ConversationParticipants.conversation_id
+        )
+        .filter(
+            ConversationParticipants.user_id == user_id,
+            Conversations.type == 2,  # type=2: クリエイターとユーザーのDM
+            Conversations.is_active == True,
+            Conversations.deleted_at.is_(None),
+        )
+    )
+
+    # 相手ユーザー情報を取得するために、もう一つのConversationParticipantsとJOIN
+    # self-join を使用して相手を特定
+    from sqlalchemy.orm import aliased
+    PartnerParticipant = aliased(ConversationParticipants)
+
+    query = query.join(
+        PartnerParticipant,
+        (PartnerParticipant.conversation_id == Conversations.id) &
+        (PartnerParticipant.user_id != user_id)
+    ).join(
+        Users,
+        Users.id == PartnerParticipant.user_id
+    ).outerjoin(
+        Profiles,
+        Profiles.user_id == Users.id
+    )
+
+    # 検索フィルター（相手の名前で検索）
+    if search:
+        query = query.filter(
+            Users.profile_name.ilike(f"%{search}%")
+        )
+
+    # 未読フィルター
+    if unread_only:
+        query = query.filter(
+            (ConversationParticipants.last_read_message_id.is_(None)) |
+            (ConversationParticipants.last_read_message_id != Conversations.last_message_id)
+        )
+
+    # 全体件数を取得
+    total = query.count()
+
+    # ソート
+    if sort == "last_message_asc":
+        query = query.order_by(Conversations.last_message_at.asc())
+    else:  # last_message_desc (デフォルト)
+        query = query.order_by(Conversations.last_message_at.desc())
+
+    # ページネーション
+    conversations = query.offset(skip).limit(limit).all()
+
+    # レスポンス構築
+    result = []
+    for conv in conversations:
+        # 最終メッセージを取得
+        last_message_text = None
+        if conv.conversation_id:
+            last_message = (
+                db.query(ConversationMessages)
+                .filter(
+                    ConversationMessages.conversation_id == conv.conversation_id,
+                    ConversationMessages.deleted_at.is_(None)
+                )
+                .order_by(ConversationMessages.created_at.desc())
+                .first()
+            )
+            if last_message:
+                last_message_text = last_message.body_text
+
+        # 未読件数を計算
+        unread_count = 0
+        if conv.last_read_message_id:
+            unread_count = (
+                db.query(ConversationMessages)
+                .filter(
+                    ConversationMessages.conversation_id == conv.conversation_id,
+                    ConversationMessages.created_at > (
+                        db.query(ConversationMessages.created_at)
+                        .filter(ConversationMessages.id == conv.last_read_message_id)
+                        .scalar_subquery()
+                    ),
+                    ConversationMessages.sender_user_id != user_id,
+                    ConversationMessages.deleted_at.is_(None)
+                )
+                .count()
+            )
+        else:
+            # 最終既読メッセージIDがない場合は全メッセージを未読とする
+            unread_count = (
+                db.query(ConversationMessages)
+                .filter(
+                    ConversationMessages.conversation_id == conv.conversation_id,
+                    ConversationMessages.sender_user_id != user_id,
+                    ConversationMessages.deleted_at.is_(None)
+                )
+                .count()
+            )
+
+        result.append({
+            "id": str(conv.conversation_id),
+            "partner_user_id": str(conv.partner_user_id),
+            "partner_name": conv.partner_name,
+            "partner_avatar": f"{BASE_URL}/{conv.partner_avatar}" if conv.partner_avatar else None,
+            "last_message_text": last_message_text,
+            "last_message_at": conv.last_message_at,
+            "unread_count": unread_count,
+            "created_at": conv.created_at,
+        })
+
+    return result, total
