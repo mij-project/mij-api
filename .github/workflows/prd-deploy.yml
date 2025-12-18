@@ -12,6 +12,7 @@ env:
   ECR_API_REPOSITORY: prd-mij-api:latest
   ECS_API_CLUSTER: prd-mij-api
   ECS_API_SERVICE: prd-mij-api-service
+  ECS_PAYMENTS_CALLBACK_SERVICE: prd-mij-payments-callback-service
 
 jobs:
   build-and-push-image:
@@ -71,9 +72,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Force new deployment
+      - name: Force new deployment - API
         run: |
           aws ecs update-service --cluster ${{ env.ECS_API_CLUSTER }} --service ${{ env.ECS_API_SERVICE }} --force-new-deployment
+
+      - name: Force new deployment - PaymentsCallback
+        run: |
+          aws ecs update-service --cluster ${{ env.ECS_API_CLUSTER }} --service ${{ env.ECS_PAYMENTS_CALLBACK_SERVICE }} --force-new-deployment
 
       - name: Notify Slack (success)
         if: success()
