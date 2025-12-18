@@ -12,13 +12,18 @@ import glob
 import mimetypes
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+
 from common.logger import Logger
 
 s3 = boto3.client("s3")
 logger = Logger.get_logger()
 
+EXTINF_RE = re.compile(r"^#EXTINF:([0-9.]+),\s*$")
 
-# ---------- small utils ----------
+
+# -----------------------------
+# small utils
+# -----------------------------
 def run(cmd: List[str], capture: bool = False) -> subprocess.CompletedProcess:
     if capture:
         return subprocess.run(
@@ -30,44 +35,6 @@ def run(cmd: List[str], capture: bool = False) -> subprocess.CompletedProcess:
 def guess_content_type(path: str) -> str:
     ct, _ = mimetypes.guess_type(path)
     return ct or "application/octet-stream"
-
-
-def ffprobe_duration_ms(path: str) -> int:
-    cp = run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            path,
-        ],
-        capture=True,
-    )
-    dur = float(json.loads(cp.stdout)["format"]["duration"])
-    return int(dur * 1000)
-
-
-def ffprobe_video_wh(path: str) -> tuple[int, int]:
-    cp = run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height",
-            "-of",
-            "json",
-            path,
-        ],
-        capture=True,
-    )
-    st = json.loads(cp.stdout)["streams"][0]
-    return int(st["width"]), int(st["height"])
 
 
 def upload_dir_sse_kms(
@@ -91,10 +58,151 @@ def upload_dir_sse_kms(
         )
 
 
-# ---------- playlist rewrite (integer EXTINF like MediaConvert) ----------
-EXTINF_RE = re.compile(r"^#EXTINF:([0-9.]+),\s*$")
+# -----------------------------
+# ffprobe helpers
+# -----------------------------
+def ffprobe_duration_ms(path: str) -> int:
+    cp = run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            path,
+        ],
+        capture=True,
+    )
+    dur = float(json.loads(cp.stdout)["format"]["duration"])
+    return int(dur * 1000)
 
 
+def ffprobe_video_info(path: str) -> tuple[int, int, int]:
+    """
+    Return (w,h,rotate) in "display orientation".
+    If rotate is 90/270, swap w/h.
+    """
+    cp = run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height:stream_tags=rotate",
+            "-of",
+            "json",
+            path,
+        ],
+        capture=True,
+    )
+    st = json.loads(cp.stdout)["streams"][0]
+    w = int(st["width"])
+    h = int(st["height"])
+    rotate = int(st.get("tags", {}).get("rotate", "0") or 0) % 360
+    if rotate in (90, 270):
+        w, h = h, w
+    return w, h, rotate
+
+
+def ffprobe_fps(path: str) -> float:
+    cp = run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=avg_frame_rate",
+            "-of",
+            "json",
+            path,
+        ],
+        capture=True,
+    )
+    st = json.loads(cp.stdout)["streams"][0]
+    fr = st.get("avg_frame_rate", "0/1")
+    try:
+        num, den = fr.split("/")
+        den_f = float(den)
+        return float(num) / den_f if den_f != 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def ffprobe_h264_profile_level(path: str) -> tuple[str, float]:
+    cp = run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=profile,level",
+            "-of",
+            "json",
+            path,
+        ],
+        capture=True,
+    )
+    st = json.loads(cp.stdout)["streams"][0]
+    profile = (st.get("profile") or "").strip()
+    level_raw = st.get("level", 0)  # 30, 40, 42...
+    try:
+        level = float(level_raw) / 10.0
+    except Exception:
+        level = 0.0
+    return profile, level
+
+
+def avc1_from_profile_level(profile: str, level: float) -> str:
+    """
+    MediaConvert-like avc1 string (good enough for most hls.js use).
+    High -> 0x64, Main -> 0x4D, else -> 0x42.
+    constraint flags -> 0.
+    """
+    p = profile.lower()
+    if "high" in p:
+        profile_idc = 0x64
+    elif "main" in p:
+        profile_idc = 0x4D
+    else:
+        profile_idc = 0x42
+
+    constraints = 0x00
+    level_idc = int(round(level * 10))
+    level_idc = max(0, min(level_idc, 255))
+    return f"avc1.{profile_idc:02x}{constraints:02x}{level_idc:02x}"
+
+
+def ffprobe_video_wh(path: str) -> tuple[int, int]:
+    cp = run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "json",
+            path,
+        ],
+        capture=True,
+    )
+    st = json.loads(cp.stdout)["streams"][0]
+    return int(st["width"]), int(st["height"])
+
+
+# -----------------------------
+# HLS playlist helpers
+# -----------------------------
 def parse_hls_items(m3u8_path: str) -> List[Tuple[float, str]]:
     items: List[Tuple[float, str]] = []
     cur: Optional[float] = None
@@ -137,92 +245,75 @@ def write_mediaconvert_like_media_playlist(
         f.write("\n".join(lines))
 
 
-def write_master_m3u8(
-    out_dir: str, rid: str, variants: List[Tuple[str, int, int, int]]
+def write_master_m3u8_mediaconvert_like(
+    out_dir: str, rid: str, variants: List[dict]
 ) -> str:
-    # variants: (label,w,h,bandwidth)
     p = os.path.join(out_dir, f"{rid}.m3u8")
-    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
-    for label, w, h, bw in variants:
-        lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bw},RESOLUTION={w}x{h}")
-        lines.append(f"{rid}_{label}.m3u8")
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        "#EXT-X-INDEPENDENT-SEGMENTS",
+    ]
+    for v in variants:
+        lines.append(
+            "#EXT-X-STREAM-INF:"
+            f"BANDWIDTH={v['bandwidth']},"
+            f"AVERAGE-BANDWIDTH={v['avg_bandwidth']},"
+            f'CODECS="{v["codecs"]}",'
+            f"RESOLUTION={v['w']}x{v['h']},"
+            f"FRAME-RATE={v['fps']:.3f}"
+        )
+        lines.append(f"{rid}_{v['label']}.m3u8")
     lines.append("")
     with open(p, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     return p
 
 
-# ---------- loudness csv (MediaConvert-like schema) ----------
-def run_loudness_series(input_path: str, out_txt: str, apply_loudnorm: bool) -> None:
-    # ebur128 metadata -> ametadata print lavfi.r128.I to file
-    af = f"ebur128=metadata=1,ametadata=mode=print:key=lavfi.r128.I:file={out_txt}"
-    if apply_loudnorm:
-        af = "loudnorm=I=-23," + af
+# -----------------------------
+# rendition policy (MediaConvert-ish)
+# -----------------------------
+def pick_renditions(
+    in_w: int, in_h: int
+) -> List[Tuple[str, int, int, int, int, int, str]]:
+    """
+    Return list of (label, target_w, target_h, maxrate_k, buf_k, crf, a_br)
+    NOTE: target_w/target_h here are "nominal" targets used for scaling rules.
+    - landscape: we lock HEIGHT, width auto (-2)
+    - portrait: lock WIDTH, height auto (-2)
+    """
+    is_portrait = in_h > in_w
 
-    run(
-        [
-            "ffmpeg",
-            "-y",
-            "-hide_banner",
-            "-nostats",
-            "-i",
-            input_path,
-            "-vn",
-            "-af",
-            af,
-            "-f",
-            "null",
-            "-",
+    if is_portrait:
+        r = [
+            ("480p", 480, 854, 1200, 2400, 23, "96k"),
+            ("720p", 720, 1280, 2500, 5000, 21, "128k"),
+            ("1080p", 1080, 1920, 4500, 9000, 20, "128k"),
         ]
-    )
+        if in_h >= 3840:
+            r.append(("2160p", 2160, 3840, 12000, 24000, 18, "192k"))
+        return r
+
+    r = [
+        ("480p", 854, 480, 1200, 2400, 23, "96k"),
+        ("720p", 1280, 720, 2500, 5000, 21, "128k"),
+        ("1080p", 1920, 1080, 4500, 9000, 20, "128k"),
+    ]
+    if in_h >= 2160:
+        r.append(("2160p", 3840, 2160, 12000, 24000, 18, "192k"))
+    return r
 
 
-def parse_ametadata_series(txt_path: str) -> Dict[int, float]:
-    # Map second(1-based) -> integrated loudness value
-    pts_time: Optional[float] = None
-    series: Dict[int, float] = {}
-
-    with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            line = line.strip()
-            if "pts_time:" in line:
-                m = re.search(r"pts_time:([0-9.]+)", line)
-                if m:
-                    pts_time = float(m.group(1))
-                continue
-            if line.startswith("lavfi.r128.I=") and pts_time is not None:
-                val = float(line.split("=", 1)[1])
-                sec = int(pts_time) + 1
-                series[sec] = val
-    return series
-
-
-def write_loudness_csv(
-    csv_path: str, input_series: Dict[int, float], output_series: Dict[int, float]
-) -> None:
-    max_sec = max([*input_series.keys(), *output_series.keys()], default=1)
-    lines = ["Seconds,Dialnorm,InputIntegratedLoudness,OutputIntegratedLoudness"]
-    for s in range(1, max_sec + 1):
-        in_i = input_series.get(
-            s, list(input_series.values())[-1] if input_series else 0.0
-        )
-        out_i = output_series.get(
-            s, list(output_series.values())[-1] if output_series else -23.0
-        )
-        lines.append(f"{s},0,{in_i:.6f},{out_i:.6f}")
-    with open(csv_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-
-
-# ---------- ffmpeg encode (single dir, mediaconvert-like naming) ----------
+# -----------------------------
+# encode (key point: NO PAD, width/height auto to preserve AR)
+# -----------------------------
 def build_ffmpeg_cmd(
     input_path: str,
     out_dir: str,
     rid: str,
     encode_run_id: str,
-    renditions: List[
-        Tuple[str, int, int, int, int, int, str]
-    ],  # label,w,h,maxrate_k,buf_k,crf,a_br
+    renditions: List[Tuple[str, int, int, int, int, int, str]],
+    is_portrait: bool,
 ) -> List[str]:
     n = len(renditions)
     split_tags = [f"v{i}" for i in range(n)]
@@ -230,14 +321,18 @@ def build_ffmpeg_cmd(
 
     fc = f"[0:v]split={n}" + "".join([f"[{t}]" for t in split_tags]) + ";"
     parts = []
-    for i, (_label, w, h, *_rest) in enumerate(renditions):
-        parts.append(
-            f"[{split_tags[i]}]"
-            f"scale=w={w}:h={h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
-            f"setsar=1"
-            f"[{out_tags[i]}]"
-        )
+
+    # MediaConvert-like: preserve aspect ratio, do NOT pad into a fixed canvas.
+    for i, (_label, tw, th, *_rest) in enumerate(renditions):
+        if is_portrait:
+            # lock width (tw), height auto
+            scale = f"scale=w={tw}:h=-2:flags=fast_bilinear"
+        else:
+            # lock height (th), width auto
+            scale = f"scale=w=-2:h={th}:flags=fast_bilinear"
+
+        parts.append(f"[{split_tags[i]}]{scale},setsar=1[{out_tags[i]}]")
+
     filter_complex = fc + ";".join(parts)
 
     cmd: List[str] = [
@@ -250,12 +345,11 @@ def build_ffmpeg_cmd(
         filter_complex,
     ]
 
-    # gần “MediaConvert feel”: cố định keyframe theo 6s, GOP ~2s (tương đương gopsize=2s trong job bạn)
     common_v = [
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast",
+        "superfast",
         "-profile:v",
         "high",
         "-bf",
@@ -269,7 +363,7 @@ def build_ffmpeg_cmd(
         "-force_key_frames",
         "expr:gte(t,n_forced*6)",
     ]
-    # audio normalize gần giống “CORRECT_AUDIO” (không match byte nhưng đủ đồng nhất)
+
     common_a = [
         "-c:a",
         "aac",
@@ -277,11 +371,10 @@ def build_ffmpeg_cmd(
         "2",
         "-ar",
         "48000",
-        "-af",
-        "loudnorm=I=-23",
     ]
 
-    for i, (label, _w, _h, maxrate_k, buf_k, crf, a_br) in enumerate(renditions):
+    # let ffmpeg use CPU cores; do NOT cap threads here
+    for i, (label, _tw, _th, maxrate_k, buf_k, crf, a_br) in enumerate(renditions):
         pl = os.path.join(out_dir, f"{rid}_{label}.m3u8")
         seg = os.path.join(out_dir, f"{rid}_{label}{encode_run_id}__%05d.ts")
         cmd += [
@@ -313,6 +406,7 @@ def build_ffmpeg_cmd(
             seg,
             pl,
         ]
+
     return cmd
 
 
@@ -326,12 +420,24 @@ def avg_bitrate_from_segments(
     return int((total_bytes * 8) / seconds)
 
 
-def send_webhook(
-    *,
-    url: str,
-    secret: str,
-    detail: dict,
-) -> None:
+def first_segment_path(
+    out_dir: str, rid: str, label: str, encode_run_id: str
+) -> Optional[str]:
+    seg_glob = os.path.join(out_dir, f"{rid}_{label}{encode_run_id}__*.ts")
+    segs = sorted(glob.glob(seg_glob))
+    return segs[0] if segs else None
+
+
+def first_segment_wh(
+    out_dir: str, rid: str, label: str, encode_run_id: str
+) -> tuple[int, int]:
+    seg0 = first_segment_path(out_dir, rid, label, encode_run_id)
+    if not seg0:
+        return (0, 0)
+    return ffprobe_video_wh(seg0)
+
+
+def send_webhook(*, url: str, secret: str, detail: dict) -> None:
     if not url:
         return
     r = requests.post(
@@ -340,124 +446,129 @@ def send_webhook(
     r.raise_for_status()
 
 
+# -----------------------------
+# main
+# -----------------------------
 def main() -> None:
-    # --- required env ---
     INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "mij-ingest-dev")
-    INPUT_KEY = os.environ.get(
-        "INPUT_KEY",
-        "post-media/8ada4b6e-62d5-4918-b321-6c1432accd9c/main/4306cf4e-b9fe-4021-81a4-1983aa8e8543/44f42430-f878-47af-b331-27226f8eb32b.mp4",
-    )
-
+    INPUT_KEY = os.environ.get("INPUT_KEY", "post-media/0d3c6214-977a-456e-b93b-2e953da114b5/sample/fb996f20-cf91-4d28-a190-3b4653f54356/267d03be-71f2-48f4-be34-8f8a35df066a.mp4")
     OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "mij-media-dev")
-    OUTPUT_PREFIX = os.environ.get(
-        "OUTPUT_PREFIX",
-        "transcode-mc/8ada4b6e-62d5-4918-b321-6c1432accd9c/4306cf4e-b9fe-4021-81a4-1983aa8e8543/e0d58381-132f-4800-8dd5-c796192c4c64/test-hls/",
-    )
-
+    OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "transcode-mc/0d3c6214-977a-456e-b93b-2e953da114b5/fb996f20-cf91-4d28-a190-3b4653f54356/cd729d4a-e9ef-4503-9ea4-61a19e6887aa/hls/")
     KMS_KEY_ARN = os.environ.get("KMS_KEY_ARN", "alias/mij-media-kms-dev")
 
-    WEBHOOK_URL = os.environ.get(
-        "WEBHOOK_URL", "http://localhost:8000/webhooks/mediaconvert"
-    )
-    WEBHOOK_SECRET = os.environ.get(
-        "WEBHOOK_SECRET",
-        "ed4ea5a8087ebe7d2de592c7700056ed8cdaf0feae7116793e0bac09b8ea9cbc",
-    )
+    WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+    WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
-    USERMETA = json.loads(os.environ.get("USERMETA_JSON", "{}")) or {
-        "postId": "4306cf4e-b9fe-4021-81a4-1983aa8e8543",
-        "assetId": "60d5d3f7-759f-4a09-aebe-afdd78f88c48",
-        "renditionJobId": "2bb778fb-6802-4257-8c3e-e3112b11983c",
-        "type": "final-hls",
-        "env": "dev",
-    }
+    USERMETA = json.loads(os.environ.get("USERMETA_JSON", "{}")) or {}
     RID = USERMETA.get("renditionJobId") or str(uuid.uuid4())
-
     ENCODE_RUN_ID = os.environ.get("ENCODE_RUN_ID") or str(uuid.uuid4())
 
     JOB_ID = os.environ.get("JOB_ID") or f"ecs-{int(time.time())}"
     QUEUE_ARN = os.environ.get("QUEUE_ARN") or "arn:aws:ecs:queue/Default"
 
-    media_dir = "media"
-    in_path = Path(__file__).parent / media_dir / "input"
-    out_dir = Path(__file__).parent / media_dir / "output"
-    shutil.rmtree(in_path, ignore_errors=True)
+    base_dir = Path(__file__).parent / "media"
+    in_dir = base_dir / "input"
+    out_dir = base_dir / "output"
+    shutil.rmtree(in_dir, ignore_errors=True)
     shutil.rmtree(out_dir, ignore_errors=True)
-    os.makedirs(out_dir, exist_ok=True)
+    in_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    renditions = [
-        ("360p", 640, 360, 800, 1600, 23, "96k"),
-        ("480p", 854, 480, 1200, 2400, 23, "96k"),
-        ("720p", 1280, 720, 2500, 5000, 21, "128k"),
-        ("1080p", 1920, 1080, 4500, 9000, 20, "128k"),
-    ]
+    in_path = in_dir / "input.mp4"
 
     base_s3 = f"s3://{OUTPUT_BUCKET}/{OUTPUT_PREFIX.strip('/')}"
     try:
+        logger.info(f"INPUT_BUCKET={INPUT_BUCKET}")
+        logger.info(f"INPUT_KEY={INPUT_KEY}")
+        logger.info(f"OUTPUT_BUCKET={OUTPUT_BUCKET}")
+        logger.info(f"OUTPUT_PREFIX={OUTPUT_PREFIX}")
+        logger.info(f"RID={RID}")
+
         # 1) download
-        s3.download_file(INPUT_BUCKET, INPUT_KEY, in_path)
+        s3.download_file(INPUT_BUCKET, INPUT_KEY, str(in_path))
 
-        # 2) duration
-        duration_ms = ffprobe_duration_ms(in_path)
-        in_w, in_h = ffprobe_video_wh(in_path)
-        if max(in_w, in_h) >= 3840 and min(in_w, in_h) >= 2160:
-            renditions.append(("2160p", 3840, 2160, 12000, 24000, 18, "192k"))
-            logger.info(f"Detected 4K input {in_w}x{in_h}, enable 2160p rendition")
-        # 3) loudness series (input vs output)
-        logs_dir = Path(__file__).parent / "media"
-        logs_dir.mkdir(parents=True, exist_ok=True)
+        # 2) probe
+        duration_ms = ffprobe_duration_ms(str(in_path))
+        w_disp, h_disp, _rot = ffprobe_video_info(str(in_path))
+        is_portrait = h_disp > w_disp
+        fps = ffprobe_fps(str(in_path))
+        if fps <= 0:
+            fps = 25.0
 
-        in_txt = str(logs_dir / "loud_in.txt")
-        out_txt = str(logs_dir / "loud_out.txt")
+        renditions = pick_renditions(w_disp, h_disp)
 
-        run_loudness_series(in_path, in_txt, apply_loudnorm=False)
-        run_loudness_series(in_path, out_txt, apply_loudnorm=True)
-        in_series = parse_ametadata_series(in_txt)
-        out_series = parse_ametadata_series(out_txt)
-
-        # create loudness csv per rendition (MediaConvert tạo per output)
-        for label, *_rest in renditions:
-            csv_path = os.path.join(out_dir, f"{RID}_{label}_loudness.csv")
-            write_loudness_csv(csv_path, in_series, out_series)
-
-        # 4) encode
-        cmd = build_ffmpeg_cmd(in_path, out_dir, RID, ENCODE_RUN_ID, renditions)
+        # 3) encode
+        cmd = build_ffmpeg_cmd(
+            input_path=str(in_path),
+            out_dir=str(out_dir),
+            rid=RID,
+            encode_run_id=ENCODE_RUN_ID,
+            renditions=renditions,
+            is_portrait=is_portrait,
+        )
         run(cmd)
 
-        # 5) rewrite variant playlists to integer EXTINF/targetduration
+        # 4) rewrite media playlists (integer EXTINF like MediaConvert)
         for label, *_rest in renditions:
-            pl = os.path.join(out_dir, f"{RID}_{label}.m3u8")
+            pl = os.path.join(str(out_dir), f"{RID}_{label}.m3u8")
             items = parse_hls_items(pl)
             write_mediaconvert_like_media_playlist(pl, items)
 
-        # 6) master playlist
-        # bandwidth roughly = maxrate(video)+audio
+        # 5) master playlist (MediaConvert-like fields)
         variants = []
-        for label, w, h, maxrate_k, _buf_k, _crf, a_br in renditions:
+        for label, _tw, _th, maxrate_k, _buf_k, _crf, a_br in renditions:
             audio_bps = 128_000 if a_br == "128k" else 96_000
-            variants.append((label, w, h, maxrate_k * 1000 + audio_bps))
-        write_master_m3u8(out_dir, RID, variants)
 
-        # 7) upload
-        upload_dir_sse_kms(out_dir, OUTPUT_BUCKET, OUTPUT_PREFIX, KMS_KEY_ARN)
+            # RESOLUTION should reflect real encoded dims (like MediaConvert shows 1440x1080 etc.)
+            w_real, h_real = first_segment_wh(str(out_dir), RID, label, ENCODE_RUN_ID)
 
-        # 8) build MediaConvert-like detail + send webhook
-        output_details = []
-        for label, w, h, _maxrate_k, _buf_k, _crf, _a_br in renditions:
-            avg_br = avg_bitrate_from_segments(
-                out_dir, RID, label, ENCODE_RUN_ID, duration_ms
+            # BANDWIDTH ~ MaxBitrate + audio (close enough)
+            bw = int(maxrate_k * 1000 + audio_bps)
+
+            # AVERAGE-BANDWIDTH ~ avg video + audio
+            avg_video = avg_bitrate_from_segments(
+                str(out_dir), RID, label, ENCODE_RUN_ID, duration_ms
             )
+            avg_bw = int(avg_video + audio_bps)
+
+            seg0 = first_segment_path(str(out_dir), RID, label, ENCODE_RUN_ID)
+            if seg0:
+                prof, lvl = ffprobe_h264_profile_level(seg0)
+                avc1 = avc1_from_profile_level(prof, lvl)
+            else:
+                avc1 = "avc1.640028"
+
+            codecs = f"{avc1},mp4a.40.2"
+            variants.append(
+                {
+                    "label": label,
+                    "w": w_real,
+                    "h": h_real,
+                    "bandwidth": bw,
+                    "avg_bandwidth": avg_bw,
+                    "codecs": codecs,
+                    "fps": float(fps),
+                }
+            )
+
+        write_master_m3u8_mediaconvert_like(str(out_dir), RID, variants)
+
+        # 6) upload
+        upload_dir_sse_kms(str(out_dir), OUTPUT_BUCKET, OUTPUT_PREFIX, KMS_KEY_ARN)
+
+        # 7) webhook detail
+        output_details = []
+        for v in variants:
             output_details.append(
                 {
                     "outputFilePaths": [
-                        f"{base_s3}/{RID}_{label}.m3u8",
-                        f"{base_s3}/{RID}_{label}_loudness.csv",
+                        f"{base_s3}/{RID}_{v['label']}.m3u8",
                     ],
                     "durationInMs": duration_ms,
                     "videoDetails": {
-                        "widthInPx": w,
-                        "heightInPx": h,
-                        "averageBitrate": avg_br,
+                        "widthInPx": v["w"],
+                        "heightInPx": v["h"],
+                        "averageBitrate": int(v["avg_bandwidth"]),
                     },
                 }
             )
@@ -480,6 +591,7 @@ def main() -> None:
             "blackVideoDetected": 0,
             "warnings": [],
         }
+
         logger.info(detail)
         send_webhook(url=WEBHOOK_URL, secret=WEBHOOK_SECRET, detail=detail)
 

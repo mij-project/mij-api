@@ -108,17 +108,16 @@ def _create_media_convert_job(
     }
 
     # If using AWS MediaConvert, you can use the following code:
+    # MediaConvertにジョブを送信
     # settings = build_settings_func(
     #     input_key=asset_row.storage_key,
     #     output_prefix=output_prefix,
     #     usermeta=usermeta,
     # )
 
-    # MediaConvertにジョブを送信
     # try:
     #     mediaconvert_client = s3_client_for_mc()
     #     response = mediaconvert_client.create_job(**settings)
-
     #     # ジョブIDを保存
     #     update_data = {
     #         "id": media_rendition_job.id,
@@ -152,6 +151,7 @@ def _create_media_convert_job(
             "id": media_rendition_job.id,
             "status": MediaRenditionJobStatus.FAILED,
         }
+        
     # ジョブ設定更新
     update_media_rendition_job(db, media_rendition_job.id, update_data)
     db.commit()

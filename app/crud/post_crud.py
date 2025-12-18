@@ -3449,3 +3449,18 @@ def get_post_ogp_data(db: Session, post_id: str) -> Dict[str, Any] | None:
         },
         "created_at": result.created_at,
     }
+
+
+def mark_post_as_deleted(db: Session, post_id: str, user_id: str):
+    """
+    投稿を削除マーク
+    """
+    post = db.query(Posts).filter(Posts.id == post_id).first()
+    if not post:
+        raise Exception("Post not found")
+    if post.creator_user_id != user_id:
+        raise Exception("User is not the creator of the post")
+    post.status = PostStatus.DELETED
+    post.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+    return True
