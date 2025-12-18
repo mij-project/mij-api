@@ -19,6 +19,7 @@ class PlanUpdateRequest(BaseModel):
     type: Optional[int] = Field(None, description="1=通常, 2=おすすめ")
     welcome_message: Optional[str] = Field(None, max_length=1000)
     post_ids: Optional[List[UUID]] = Field(None, description="プランに含める投稿IDリスト")
+    price: Optional[int] = Field(None, ge=0)
 
 class PlanResponse(BaseModel):
     id: UUID
