@@ -24,6 +24,8 @@ class NewPostArrivalDomain:
         self.email_service = EmailService(Path(__file__).parent / "mailtemplates")
 
     def _exec(self):
+        self.logger.info(f"CREATOR_USER_ID {self.creator_user_id}")
+        self.logger.info(f"POST_ID {self.post_id}")
         followers = self._creator_followers()
         for follower in followers:
             self._send_notification_to_follower(follower)
@@ -47,7 +49,7 @@ class NewPostArrivalDomain:
             .join(FollowerProfile, FollowerProfile.user_id == Follows.follower_user_id)
             # creator profile
             .join(CreatorProfile, CreatorProfile.user_id == Follows.creator_user_id)
-            # settings của follower (có thể không tồn tại)
+            # settings of follower
             .outerjoin(UserSettings, UserSettings.user_id == Follows.follower_user_id)
             .filter(Follows.creator_user_id == self.creator_user_id)
             .all()
