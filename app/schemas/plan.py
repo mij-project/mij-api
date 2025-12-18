@@ -20,6 +20,7 @@ class PlanUpdateRequest(BaseModel):
     welcome_message: Optional[str] = Field(None, max_length=1000)
     post_ids: Optional[List[UUID]] = Field(None, description="プランに含める投稿IDリスト")
     open_dm_flg: Optional[bool] = Field(None, description="DMを開放するかどうか")
+    price: Optional[int] = Field(None, ge=0)
 
 class PlanResponse(BaseModel):
     id: UUID

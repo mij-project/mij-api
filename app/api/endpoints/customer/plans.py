@@ -315,6 +315,8 @@ def update_user_plan(
             update_data["welcome_message"] = plan_data.welcome_message
         if plan_data.open_dm_flg is not None:
             update_data["open_dm_flg"] = plan_data.open_dm_flg
+        if plan_data.price is not None:
+            update_data["price"] = plan_data.price
 
         # プランを更新（決済処理でロックがかかっている可能性があるので、ロックをかけてから更新する）
         updated_plan = _update_plan_with_retry(db, plan_id, update_data)
