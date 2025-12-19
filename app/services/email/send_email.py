@@ -576,3 +576,70 @@ def _send_backend(to: str, subject: str, html: str, tags: dict[str, str] | None 
         logger.error(f"[email] send failed backend={backend} to={to} err={e}")
 
 
+# --------------------------
+# チップ決済メール
+# --------------------------
+def send_chip_payment_buyer_success_email(
+    to: str,
+    recipient_name: str | None = None,
+    recipient_profile_url: str | None = None,
+    transaction_id: str | None = None,
+    payment_amount: int | None = None,
+    payment_date: str | None = None,
+    has_message: bool = False,
+    message_text: str | None = None,
+) -> None:
+    """チップ送信完了メール（購入者用）"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】{recipient_name}へのチップ送信が完了しました"
+    ctx = {
+        "recipient_name": recipient_name or "",
+        "recipient_profile_url": recipient_profile_url or "",
+        "transaction_id": transaction_id or "",
+        "payment_amount": payment_amount or 0,
+        "payment_date": payment_date or "",
+        "has_message": has_message,
+        "message_text": message_text or "",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="chip_payment_buyer_success.html",
+        ctx=ctx,
+        tags={"category": "chip_payment_buyer"},
+    )
+
+
+def send_chip_payment_seller_success_email(
+    to: str,
+    sender_name: str | None = None,
+    sender_profile_url: str | None = None,
+    transaction_id: str | None = None,
+    seller_amount: int | None = None,
+    payment_date: str | None = None,
+    has_message: bool = False,
+    message_text: str | None = None,
+    sales_url: str | None = None,
+) -> None:
+    """チップ受取通知メール（クリエイター用）"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】{sender_name}さんからチップが届きました"
+    ctx = {
+        "sender_name": sender_name or "",
+        "sender_profile_url": sender_profile_url or "",
+        "transaction_id": transaction_id or "",
+        "seller_amount": seller_amount or 0,
+        "payment_date": payment_date or "",
+        "has_message": has_message,
+        "message_text": message_text or "",
+        "sales_url": sales_url or "",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="chip_payment_seller_success.html",
+        ctx=ctx,
+        tags={"category": "chip_payment_seller"},
+    )

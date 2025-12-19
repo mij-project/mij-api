@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, exists
+from sqlalchemy import desc, exists, or_
 from typing import Optional, List, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
@@ -10,7 +10,7 @@ from app.models.conversation_messages import ConversationMessages
 from app.models.conversation_participants import ConversationParticipants
 from app.models.user import Users
 from app.models.admins import Admins
-from app.constants.enums import ConversationType, ParticipantType
+from app.constants.enums import ConversationType, ParticipantType, ConversationMessageType
 from app.models.profiles import Profiles
 from app.constants.messages import WelcomeMessage
 import os
@@ -136,20 +136,23 @@ def create_message(
     sender_user_id: UUID | None = None,
     sender_admin_id: UUID | None = None,
     body_text: str = "",
+    status: int = 1,
 ) -> ConversationMessages:
     """
     メッセージを作成
     - sender_user_id と sender_admin_id の両方が None の場合はシステムメッセージ
     - sender_user_id が指定されている場合はユーザーメッセージ
     - sender_admin_id が指定されている場合は管理者メッセージ
+    - status: メッセージステータス（0=無効、1=有効）
     """
     message = ConversationMessages(
         conversation_id=conversation_id,
         sender_user_id=sender_user_id,
         sender_admin_id=sender_admin_id,
-        type=1,  # テキストメッセージ
+        type=ConversationMessageType.USER,
         body_text=body_text,
         moderation=1,  # デフォルト: 承認済み
+        status=status,
     )
     db.add(message)
     db.flush()
@@ -166,6 +169,41 @@ def create_message(
     db.refresh(message)
     return message
 
+
+def create_chip_message(
+    db: Session,
+    conversation_id: UUID,
+    sender_user_id: UUID | None = None,
+    sender_admin_id: UUID | None = None,
+    body_text: str = "",
+    status: int = 1,
+) -> ConversationMessages:
+    """
+    チップメッセージを作成
+    """
+    message = ConversationMessages(
+        conversation_id=conversation_id,
+        sender_user_id=sender_user_id,
+        sender_admin_id=sender_admin_id,
+        type=ConversationMessageType.CHIP,
+        body_text=body_text,
+        moderation=1,  # デフォルト: 承認済み
+        status=status,
+    )
+    db.add(message)
+    db.flush()
+
+    # 会話の最終メッセージ情報を更新
+    conversation = (
+        db.query(Conversations).filter(Conversations.id == conversation_id).first()
+    )
+    if conversation:
+        conversation.last_message_id = message.id
+        conversation.last_message_at = message.created_at
+
+    db.commit()
+    db.refresh(message)
+    return message
 
 def get_messages_by_conversation(
     db: Session, conversation_id: UUID, skip: int = 0, limit: int = 50
@@ -185,6 +223,10 @@ def get_messages_by_conversation(
         .join(Admins, ConversationMessages.sender_admin_id == Admins.id, isouter=True)
         .filter(
             ConversationMessages.conversation_id == conversation_id,
+            or_(
+                ConversationMessages.status != 0,
+                ConversationMessages.status.is_(None),
+            ),
             ConversationMessages.deleted_at.is_(None),
         )
         .order_by(ConversationMessages.created_at.asc())
@@ -505,18 +547,27 @@ def get_user_conversations(
     for conv in conversations:
         # 最終メッセージを取得
         last_message_text = None
+        last_message = None
         if conv.conversation_id:
             last_message = (
                 db.query(ConversationMessages)
                 .filter(
                     ConversationMessages.conversation_id == conv.conversation_id,
-                    ConversationMessages.deleted_at.is_(None)
+                    ConversationMessages.deleted_at.is_(None),
+                    or_(
+                        ConversationMessages.status != 0,
+                        ConversationMessages.status.is_(None)
+                    ),
                 )
                 .order_by(ConversationMessages.created_at.desc())
                 .first()
             )
             if last_message:
                 last_message_text = last_message.body_text
+
+        # last_message_textがnullの場合は会話を除外
+        if last_message_text is None:
+            continue
 
         # 未読件数を計算
         unread_count = 0

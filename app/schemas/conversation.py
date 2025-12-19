@@ -67,3 +67,15 @@ class UnreadCountResponse(BaseModel):
 # 既読更新リクエスト
 class MarkAsReadRequest(BaseModel):
     message_id: UUID
+
+# 会話メッセージレスポンス（相手のプロフィール情報を含む）
+class ConversationMessagesResponse(BaseModel):
+    messages: List[MessageResponse]
+    partner_user_id: Optional[UUID] = None
+    partner_username: Optional[str] = None
+    partner_profile_name: Optional[str] = None
+    partner_avatar: Optional[str] = None
+    can_send_message: bool = False
+
+    class Config:
+        from_attributes = True

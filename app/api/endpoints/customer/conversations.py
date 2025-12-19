@@ -1,16 +1,24 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import cast
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from typing import List
 from uuid import UUID
 
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
-from app.crud import conversations_crud
+from app.crud import conversations_crud, user_crud, profile_crud, payments_crud, subscriptions_crud
+from app.models.conversation_participants import ConversationParticipants
+from app.models.payments import Payments
+from app.models.subscriptions import Subscriptions
+from app.models.plans import Plans
+from app.constants.enums import PaymentType, PaymentStatus, SubscriptionStatus
 from app.schemas.conversation import (
     MessageCreate,
     MessageResponse,
     ConversationResponse,
+    ConversationMessagesResponse,
 )
 import os
 
@@ -211,7 +219,7 @@ def get_user_conversations(
 # ========== 個別会話のメッセージAPI ==========
 
 
-@router.get("/{conversation_id}/messages", response_model=List[MessageResponse])
+@router.get("/{conversation_id}/messages", response_model=ConversationMessagesResponse)
 def get_conversation_messages(
     conversation_id: UUID,
     skip: int = Query(0, ge=0),
@@ -223,6 +231,7 @@ def get_conversation_messages(
     個別会話のメッセージ一覧を取得
     - ユーザーが参加している会話のみ取得可能
     - 古い順にソート
+    - 相手のプロフィール情報も含む
     """
     # ユーザーがこの会話に参加しているか確認
     if not conversations_crud.is_user_in_conversation(db, conversation_id, current_user.id):
@@ -233,8 +242,33 @@ def get_conversation_messages(
         db, conversation_id, skip, limit
     )
 
-    # レスポンスを構築
-    response = []
+    # 会話の参加者から相手のユーザー情報を取得
+    partner_user_id = None
+    partner_username = None
+    partner_profile_name = None
+    partner_avatar = None
+
+    # conversation_participantsから相手のuser_idを取得
+    participants = db.query(ConversationParticipants).filter(
+        ConversationParticipants.conversation_id == conversation_id,
+        ConversationParticipants.user_id != current_user.id
+    ).first()
+
+
+    if participants:
+        partner_user_id = participants.user_id
+        # 相手のユーザー情報とプロフィールを取得
+        partner_user = user_crud.get_user_by_id(db, partner_user_id)
+        if partner_user:
+            partner_username = partner_user.profile_name
+            partner_profile_name = partner_user.profile_name
+            # プロフィールから相手のアバターを取得
+            partner_profile = profile_crud.get_profile_by_user_id(db, partner_user_id)
+            if partner_profile and partner_profile.avatar_url:
+                partner_avatar = f"{BASE_URL}/{partner_profile.avatar_url}"
+
+    # メッセージレスポンスを構築
+    message_responses = []
     for message, sender, profile, admin in messages:
         # 送信者情報の判定
         sender_username = None
@@ -254,7 +288,7 @@ def get_conversation_messages(
             sender_avatar = None
             sender_profile_name = "運営"
 
-        response.append(
+        message_responses.append(
             MessageResponse(
                 id=message.id,
                 conversation_id=message.conversation_id,
@@ -270,7 +304,26 @@ def get_conversation_messages(
             )
         )
 
-    return response
+    # メッセージ送信権限の判定
+    can_send_message = False
+    if partner_user_id:
+        # 条件1: チップ送信履歴の確認（双方向）
+        has_chip_history = payments_crud.get_payment_by_user_id(db, current_user.id, partner_user_id, PaymentType.CHIP)
+
+        # 条件2: DM解放プラン加入の確認
+        # order_typeが1(plan_id)の場合のみ、order_idをUUIDにキャストしてplansテーブルと結合
+        has_dm_plan = subscriptions_crud.get_subscription_by_user_id(db, current_user.id, partner_user_id)
+        # どちらか一方を満たせばメッセージ送信可能
+        can_send_message = has_chip_history or has_dm_plan
+
+    return ConversationMessagesResponse(
+        messages=message_responses,
+        partner_user_id=partner_user_id,
+        partner_username=partner_username,
+        partner_profile_name=partner_profile_name,
+        partner_avatar=partner_avatar,
+        can_send_message=can_send_message,
+    )
 
 
 @router.post("/{conversation_id}/messages", response_model=MessageResponse)
@@ -330,3 +383,32 @@ def mark_conversation_message_as_read(
     conversations_crud.mark_as_read(db, conversation_id, current_user.id, message_id)
 
     return {"status": "ok", "message": "Message marked as read"}
+
+
+@router.get("/get-or-create/{partner_user_id}")
+def get_or_create_conversation_with_user(
+    partner_user_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    指定したユーザーとの会話を取得または作成
+    - 既存の会話があればそれを返す
+    - なければ新規作成して返す
+    - 自分自身との会話は禁止
+    """
+    # 自分自身との会話は禁止
+    if current_user.id == partner_user_id:
+        raise HTTPException(status_code=400, detail="Cannot create conversation with yourself")
+
+    # 既存の会話を取得または新規作成
+    conversation = conversations_crud.get_or_create_dm_conversation(
+        db=db,
+        user_id_1=current_user.id,
+        user_id_2=partner_user_id,
+    )
+
+    return {
+        "conversation_id": str(conversation.id),
+        "partner_user_id": str(partner_user_id),
+    }

@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from app.models.payments import Payments
 from datetime import datetime, timezone
-
+from app.constants.enums import PaymentType, PaymentStatus
 
 def create_payment(
     db: Session,
@@ -73,3 +73,23 @@ def create_free_payment(
     db.add(payment)
     db.flush()
     return payment
+
+def get_payment_by_user_id(
+    db: Session,
+    user_id: UUID,
+    partner_user_id: UUID,
+    payment_type: int,
+) -> Payments:
+    """
+    ユーザーの決済履歴を取得
+    """
+    has_chip_history = db.query(Payments).filter(
+        Payments.payment_type == PaymentType.CHIP,
+        Payments.status == PaymentStatus.SUCCEEDED,
+        (
+            (Payments.buyer_user_id == user_id) & (Payments.seller_user_id == partner_user_id)
+        ) | (
+            (Payments.buyer_user_id == partner_user_id) & (Payments.seller_user_id == user_id)
+        )
+    ).first() is not None
+    return has_chip_history
