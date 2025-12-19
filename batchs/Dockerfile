@@ -5,7 +5,7 @@ WORKDIR /app
 
 # システムパッケージの更新とffmpegのインストール
 RUN apt-get update && apt-get install -y \
-    ffmpeg \
+    ffmpeg ca-certificates dos2unix\
     && rm -rf /var/lib/apt/lists/*
 
 # アプリケーションファイルをコピー
