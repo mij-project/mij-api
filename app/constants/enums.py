@@ -309,3 +309,14 @@ class ConversationMessageType:
 class ConversationMessageStatus:
     INACTIVE = 0 # 無効
     ACTIVE = 1 # 有効
+    PENDING = 2 # 予約送信
+
+class MessageAssetStatus:
+    PENDING = 0 # 審査待ち
+    APPROVED = 1 # 承認済み
+    REJECTED = 2 # 拒否
+    RESUBMIT = 3 # 再申請
+
+class MessageAssetType:
+    IMAGE = 1 # 画像
+    VIDEO = 2 # 動画

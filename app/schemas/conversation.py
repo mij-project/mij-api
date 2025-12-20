@@ -5,7 +5,20 @@ from datetime import datetime
 
 # メッセージ作成リクエスト
 class MessageCreate(BaseModel):
-    body_text: str = Field(..., min_length=1, max_length=5000)
+    body_text: Optional[str] = Field(None, max_length=5000)  # テキストのみ、またはアセットのみも許可
+    asset_storage_key: Optional[str] = None  # アセットのS3キー（オプション）
+    asset_type: Optional[int] = Field(None, ge=1, le=2)  # 1=画像, 2=動画（オプション）
+
+# メッセージアセット情報（MessageResponse内で使用）
+class MessageAssetInfo(BaseModel):
+    id: UUID
+    status: int  # 0=審査待ち, 1=承認済み, 2=拒否
+    asset_type: int  # 1=画像, 2=動画
+    cdn_url: Optional[str] = None  # 承認済みの場合のみ
+    storage_key: str
+
+    class Config:
+        from_attributes = True
 
 # メッセージレスポンス
 class MessageResponse(BaseModel):
@@ -22,6 +35,9 @@ class MessageResponse(BaseModel):
     sender_username: Optional[str] = None
     sender_avatar: Optional[str] = None
     sender_profile_name: Optional[str] = None
+
+    # アセット情報（オプション）
+    asset: Optional[MessageAssetInfo] = None
 
     class Config:
         from_attributes = True

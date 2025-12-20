@@ -4,27 +4,36 @@ from sqlalchemy import cast
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from typing import List
 from uuid import UUID
-
+from app.schemas.conversation import MessageAssetInfo
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
-from app.crud import conversations_crud, user_crud, profile_crud, payments_crud, subscriptions_crud
+from app.crud import conversations_crud, user_crud, profile_crud, payments_crud, subscriptions_crud, message_assets_crud
 from app.models.conversation_participants import ConversationParticipants
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
 from app.models.plans import Plans
-from app.constants.enums import PaymentType, PaymentStatus, SubscriptionStatus
+from app.constants.enums import PaymentType, PaymentStatus, SubscriptionStatus, MessageAssetStatus
 from app.schemas.conversation import (
     MessageCreate,
     MessageResponse,
     ConversationResponse,
     ConversationMessagesResponse,
 )
+from app.schemas.message_asset import (
+    PresignedUrlRequest,
+    PresignedUrlResponse,
+)
+from app.services.s3 import presign, keygen
+from app.constants.enums import MessageAssetType
+import logging
 import os
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 BASE_URL = os.getenv("CDN_BASE_URL")
+MESSAGE_ASSETS_CDN_URL = os.getenv("MESSAGE_ASSETS_CDN_URL", "")
 
 # ========== 一般ユーザー用エンドポイント ==========
 
@@ -288,6 +297,26 @@ def get_conversation_messages(
             sender_avatar = None
             sender_profile_name = "運営"
 
+        # メッセージアセット情報を取得
+        asset_response = None
+        message_assets = message_assets_crud.get_message_assets_by_message_id(db, message.id)
+        if message_assets:
+            # 最初のアセットのみ取得（1メッセージにつき1アセット）
+            asset = message_assets[0]
+
+            # 承認済みの場合のみCDN URLを設定
+            cdn_url = None
+            if asset.status == MessageAssetStatus.APPROVED:
+                cdn_url = f"{MESSAGE_ASSETS_CDN_URL}/{asset.storage_key}"
+
+            asset_response = MessageAssetInfo(
+                id=asset.id,
+                status=asset.status,
+                asset_type=asset.asset_type,
+                cdn_url=cdn_url,
+                storage_key=asset.storage_key,
+            )
+
         message_responses.append(
             MessageResponse(
                 id=message.id,
@@ -301,6 +330,7 @@ def get_conversation_messages(
                 sender_username=sender_username,
                 sender_avatar=sender_avatar,
                 sender_profile_name=sender_profile_name,
+                asset=asset_response,
             )
         )
 
@@ -336,10 +366,19 @@ def send_conversation_message(
     """
     個別会話にメッセージを送信
     - ユーザーが参加している会話のみ送信可能
+    - テキストのみ、または画像/動画を含むメッセージを送信可能
     """
     # ユーザーがこの会話に参加しているか確認
     if not conversations_crud.is_user_in_conversation(db, conversation_id, current_user.id):
         raise HTTPException(status_code=403, detail="Access denied to this conversation")
+
+    # テキストとアセットの両方がない場合はエラー
+    if not message_data.body_text and not message_data.asset_storage_key:
+        raise HTTPException(status_code=400, detail="Either body_text or asset is required")
+
+    # アセットがある場合はasset_typeも必要
+    if message_data.asset_storage_key and not message_data.asset_type:
+        raise HTTPException(status_code=400, detail="asset_type is required when asset_storage_key is provided")
 
     # メッセージを作成
     message = conversations_crud.create_message(
@@ -348,6 +387,28 @@ def send_conversation_message(
         sender_user_id=current_user.id,
         body_text=message_data.body_text,
     )
+
+    # アセットがある場合はmessage_assetレコードを作成
+    message_asset = None
+    if message_data.asset_storage_key and message_data.asset_type:
+        message_asset = message_assets_crud.create_message_asset(
+            db=db,
+            message_id=message.id,
+            asset_type=message_data.asset_type,
+            storage_key=message_data.asset_storage_key,
+            status=MessageAssetStatus.PENDING,  # 審査待ち
+        )
+
+    # レスポンス構築
+    asset_response = None
+    if message_asset:
+        asset_response = MessageAssetInfo(
+            id=message_asset.id,
+            status=message_asset.status,
+            asset_type=message_asset.asset_type,
+            cdn_url=None,  # 審査待ちの場合はnull
+            storage_key=message_asset.storage_key,
+        )
 
     return MessageResponse(
         id=message.id,
@@ -361,6 +422,7 @@ def send_conversation_message(
         sender_username=current_user.profile_name,
         sender_avatar=None,  # TODO: プロフィールから取得
         sender_profile_name=current_user.profile_name,
+        asset=asset_response,
     )
 
 
@@ -412,3 +474,84 @@ def get_or_create_conversation_with_user(
         "conversation_id": str(conversation.id),
         "partner_user_id": str(partner_user_id),
     }
+
+
+# ========== メッセージアセット用エンドポイント ==========
+
+@router.post("/{conversation_id}/messages/upload-url", response_model=PresignedUrlResponse)
+def get_message_asset_upload_url(
+    conversation_id: UUID,
+    request: PresignedUrlRequest,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    メッセージアセット用のPresigned URL取得
+    - ユーザーが参加している会話のみ取得可能
+    - 画像または動画のアップロード用URL生成
+    """
+    try:
+        # ユーザーがこの会話に参加しているか確認
+        if not conversations_crud.is_user_in_conversation(db, conversation_id, current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied to this conversation")
+
+        # ファイルタイプの検証
+        allowed_image_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
+        allowed_video_types = ["video/mp4", "video/quicktime"]  # mp4, mov
+
+        if request.asset_type == MessageAssetType.IMAGE:
+            if request.content_type not in allowed_image_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid image content type. Allowed: {', '.join(allowed_image_types)}"
+                )
+        elif request.asset_type == MessageAssetType.VIDEO:
+            if request.content_type not in allowed_video_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid video content type. Allowed: {', '.join(allowed_video_types)}"
+                )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid asset type")
+
+        # 拡張子の検証
+        allowed_extensions = {
+            MessageAssetType.IMAGE: ["jpg", "jpeg", "png", "gif", "webp"],
+            MessageAssetType.VIDEO: ["mp4", "mov"],
+        }
+
+        if request.file_extension.lower() not in allowed_extensions[request.asset_type]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file extension for asset type. Allowed: {', '.join(allowed_extensions[request.asset_type])}"
+            )
+
+        # ストレージキー生成（まだメッセージIDがないので仮のUUIDを使用）
+        import uuid
+        temp_message_id = str(uuid.uuid4())
+        asset_type_str = "image" if request.asset_type == MessageAssetType.IMAGE else "video"
+
+        storage_key = keygen.message_asset_key(
+            conversation_id=str(conversation_id),
+            message_id=temp_message_id,
+            asset_type=asset_type_str,
+            ext=request.file_extension.lower(),
+        )
+
+        # Presigned URL生成
+        result = presign.presign_put(
+            resource="message-assets",
+            key=storage_key,
+            content_type=request.content_type,
+            expires_in=3600,  # 1時間
+        )
+
+        return PresignedUrlResponse(
+            storage_key=result["key"],
+            upload_url=result["upload_url"],
+            expires_in=result["expires_in"],
+            required_headers=result["required_headers"],
+        )
+    except Exception as e:
+        logger.error(f"メッセージアセット用のPresigned URL取得エラーが発生しました: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -565,9 +565,6 @@ def get_user_conversations(
             if last_message:
                 last_message_text = last_message.body_text
 
-        # last_message_textがnullの場合は会話を除外
-        if last_message_text is None:
-            continue
 
         # 未読件数を計算
         unread_count = 0

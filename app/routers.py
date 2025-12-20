@@ -23,6 +23,7 @@ from app.api.endpoints.customer import (
     account,
     auth_email_verify,
     conversations,
+    message_assets as customer_message_assets,
     order,
     sms_verifications,
     banners,
@@ -57,6 +58,7 @@ from app.api.endpoints.admin import (
     subscriptions_info as admin_subscriptions_info,
     advertising_agencies as admin_advertising_agencies,
     user as admin_user,
+    message_assets as admin_message_assets,
 )
 
 # Debug routes
@@ -112,6 +114,9 @@ api_router.include_router(
 )
 api_router.include_router(
     conversations.router, prefix="/conversations", tags=["Conversations"]
+)
+api_router.include_router(
+    customer_message_assets.router, prefix="/users/me/message-assets", tags=["Message Assets"]
 )
 api_router.include_router(order.router, prefix="/orders", tags=["Orders"])
 api_router.include_router(
@@ -201,5 +206,11 @@ api_router.include_router(
     prefix="/admin/users",
     tags=["Admin Users"],
 )
+api_router.include_router(
+    admin_message_assets.router,
+    prefix="/admin/message-assets",
+    tags=["Admin Message Assets"],
+)
+
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])

@@ -134,3 +134,19 @@ def temp_video_key(creator_id: str, filename: str, ext: str) -> str:
         str: 一時保存ビデオキー
     """
     return f"temp-videos/{creator_id}/{uuid.uuid4()}.{ext}"
+
+def message_asset_key(conversation_id: str, message_id: str, asset_type: str, ext: str) -> str:
+    """
+    メッセージアセットキー生成
+
+    Args:
+        conversation_id: str 会話ID
+        message_id: str メッセージID
+        asset_type: str アセットタイプ（"image" or "video"）
+        ext: str 拡張子
+
+    Returns:
+        str: メッセージアセットキー
+    """
+    uid = uuid.uuid4()
+    return f"conversations/{conversation_id}/messages/{message_id}/{asset_type}/{uid}.{ext}"
