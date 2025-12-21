@@ -214,7 +214,7 @@ async def get_post_detail(
             is_scheduled = True
         else:
             is_scheduled = False
-        if expiration_info and expiration_info.replace(tzinfo=timezone.utc) > now:
+        if expiration_info and expiration_info.replace(tzinfo=timezone.utc) < now:
             is_expired = True
         else:
             is_expired = False
