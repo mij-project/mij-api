@@ -123,7 +123,24 @@ def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
         liked_user_profile = (
             db.query(Profiles).filter(Profiles.user_id == user_id).first()
         )
+        should_send = True
+        settings = (
+            db.query(
+                UserSettings.settings.label("settings")
+            )
+            .filter(
+                UserSettings.user_id == post.creator_user_id, 
+                UserSettings.type == UserSettingsType.EMAIL
+            )
+            .first()
+        )
+        if settings:
+            post_like_setting = settings.settings.get("postLike", True)
+            if not post_like_setting:
+                should_send = False
 
+        if not should_send:
+            return
         if not liked_user:
             logger.error(f"Liked user not found: {user_id}")
             return
@@ -187,7 +204,7 @@ def add_mail_notification_like(db: Session, user_id: UUID, post_id: UUID) -> Non
         if (
             (not user.settings)
             or (user.settings is None)
-            or (user.settings.get("like", True) == True)
+            or (user.settings.get("postLike", True))
         ):
             send_like_notification_email(
                 user.Users.email,

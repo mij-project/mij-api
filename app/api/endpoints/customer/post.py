@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from app.db.base import get_db
-from app.deps.auth import get_current_user_optional
+from app.deps.auth import get_current_user, get_current_user_optional
 from app.constants.enums import PostStatus
 from app.models.user import Users
 from app.schemas.post import (
@@ -16,10 +16,12 @@ from app.constants.enums import PostVisibility, PostType, PriceType, MediaAssetK
 from app.crud.post_crud import (
     create_post,
     get_post_detail_by_id,
+    mark_post_as_deleted,
     update_post,
     get_post_ogp_data,
 )
-from app.crud.price_crud import create_price, delete_price_by_post_id
+from app.crud.price_crud import create_price
+from app.models.prices import Prices
 from app.crud.post_plans_crud import create_post_plan, delete_plan_by_post_id
 from app.crud.tags_crud import exit_tag, create_tag
 from app.crud.post_tags_crud import create_post_tag, delete_post_tags_by_post_id
@@ -29,13 +31,13 @@ from app.crud.post_categories_crud import (
 )
 from app.crud.post_crud import get_recent_posts
 from app.models.tags import Tags
-from typing import List
 import os
 from os import getenv
 from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
 from app.core.logger import Logger
 from app.services.slack.slack import SlackService
+import time
 
 slack_alert = SlackService.initialize()
 logger = Logger.get_logger()
@@ -130,8 +132,9 @@ async def update_post_endpoint(
 
         # 単品販売の場合、価格をデリートインサート
         if request_data.single:
-            delete_price_by_post_id(db, request_data.post_id)
-            price = _create_price(db, request_data.post_id, request_data.price)
+            # 決済処理でロックがかかっている可能性があるので、ロックをかけてから削除・挿入する
+            # 10回リトライする
+            _delete_and_insert_price(db, request_data.post_id, request_data.price)
 
         # プランの場合、プランをデリートインサート
         if request_data.plan:
@@ -195,13 +198,26 @@ async def get_post_detail(
             post_data["price"],
             is_own_post,
         )
-
         # カテゴリ情報を整形
         categories_data = _format_categories_info(post_data["categories"])
 
         # 販売情報を整形
         sale_info = _format_sale_info(post_data["price"], post_data["plans"])
 
+        # Schedule and Expiration Information
+        schedule_info, expiration_info = (
+            post_data["post"].scheduled_at,
+            post_data["post"].expiration_at,
+        )
+        now = datetime.now(timezone.utc)
+        if schedule_info and schedule_info.replace(tzinfo=timezone.utc) > now:
+            is_scheduled = True
+        else:
+            is_scheduled = False
+        if expiration_info and expiration_info.replace(tzinfo=timezone.utc) < now:
+            is_expired = True
+        else:
+            is_expired = False
         # 投稿詳細を整形
         post_detail = {
             "id": str(post_data["post"].id),
@@ -215,6 +231,8 @@ async def get_post_detail(
             "post_main_duration": main_duration,
             "is_purchased": post_data["is_entitlement"]
             or is_own_post,  # 購入済み or 自分の投稿
+            "is_scheduled": is_scheduled,
+            "is_expired": is_expired,
         }
 
         return post_detail
@@ -230,7 +248,7 @@ async def get_post_detail(
 async def get_new_arrivals(
     page: int = Query(1, ge=1, description="ページ番号（1から開始）"),
     per_page: int = Query(20, ge=1, le=100, description="1ページあたりの件数"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
         # ページ番号からオフセットを計算
@@ -374,31 +392,43 @@ def _update_post(
         if request_data.expiration
         else None,
         "visibility": visibility,
-        "status": PostStatus.RESUBMIT,
+        "status": request_data.status if request_data.status else PostStatus.RESUBMIT,
         "reject_comments": "",
     }
     return update_post(db, post_data)
 
 
-# def _delete_post_categories(db: Session, post_id: str):
-#     """投稿に紐づくカテゴリを削除する"""
-#     delete_post_category(db, post_id)
-#     return True
+def _delete_and_insert_price(db: Session, post_id: str, price: int):
+    """投稿に価格をデリートインサートする"""
+    for retry_count in range(10):
+        try:
+            # 既存の価格レコードに対してロックをかける（存在する場合）
+            existing_prices = (
+                db.query(Prices)
+                .filter(Prices.post_id == post_id)
+                .with_for_update()
+                .all()
+            )
 
-# def _delete_post_tags(db: Session, post_id: str):
-#     """投稿に紐づくタグを削除する"""
-#     delete_post_tag(db, post_id)
-#     return True
+            # 既存の価格を削除
+            if existing_prices:
+                for existing_price in existing_prices:
+                    db.delete(existing_price)
+                db.flush()  # 削除をフラッシュ
 
-# def _delete_post_plans(db: Session, post_id: str):
-#     """投稿に紐づくプランを削除する"""
-#     delete_post_plans(db, post_id)
-#     return True
-
-# def _delete_post_price(db: Session, post_id: str):
-#     """投稿に紐づく価格を削除する"""
-#     delete_price(db, post_id)
-#     return True
+            # 新しい価格を挿入
+            price = _create_price(db, post_id, price)
+            break  # 成功したらループを抜ける
+        except Exception as e:
+            db.rollback()  # エラー時はロールバック
+            logger.warning(
+                f"価格デリートインサートエラー（リトライ {retry_count + 1}/10）: {e}"
+            )
+            if retry_count < 9:  # 最後のリトライでない場合のみ待機
+                time.sleep(0.5)  # 500ms待機
+            else:
+                logger.error("価格デリートインサートが10回失敗しました", e)
+                raise
 
 
 def _refresh_related_objects(
@@ -550,3 +580,19 @@ def _format_sale_info(price: dict | None, plans: list | None):
             for plan in (plans or [])
         ],
     }
+
+
+@router.delete("/{post_id}")
+async def delete_post(
+    post_id: str,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """投稿を削除する"""
+    try:
+        mark_post_as_deleted(db, post_id, current_user.id)
+        return {"message": "投稿が削除されました"}
+    except Exception as e:
+        db.rollback()
+        logger.error("投稿削除エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))

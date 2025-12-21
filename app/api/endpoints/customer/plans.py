@@ -30,12 +30,14 @@ from app.crud.plan_crud import (
     get_creator_posts_for_plan,
     get_plan_by_id,
 )
+from app.models.plans import Plans
 from app.crud.post_crud import get_posts_by_plan_id
-from app.constants.enums import PlanStatus, PriceType
+from app.constants.enums import PlanStatus, PriceType, PostType
 from app.crud.price_crud import create_price
 from uuid import UUID
 from typing import Optional
 import os
+import time
 from app.core.logger import Logger
 
 logger = Logger.get_logger()
@@ -165,7 +167,7 @@ def get_plan_posts(
                 likes_count=likes_count or 0,
                 comments_count=comments_count or 0,
                 duration=duration,
-                is_video=(post.post_type == 1),  # 1が動画
+                is_video=(post.post_type == PostType.VIDEO),  # 1が動画
                 created_at=created_at,
             )
             posts.append(post_response)
@@ -307,9 +309,11 @@ def update_user_plan(
             update_data["type"] = plan_data.type
         if plan_data.welcome_message is not None:
             update_data["welcome_message"] = plan_data.welcome_message
+        if plan_data.price is not None:
+            update_data["price"] = plan_data.price
 
-        # プランを更新
-        updated_plan = update_plan(db, plan_id, update_data)
+        # プランを更新（決済処理でロックがかかっている可能性があるので、ロックをかけてから更新する）
+        updated_plan = _update_plan_with_retry(db, plan_id, update_data)
 
         # 投稿を更新
         if plan_data.post_ids is not None:
@@ -437,3 +441,39 @@ def get_posts_for_plan(
     except Exception as e:
         logger.error("投稿一覧取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _update_plan_with_retry(db: Session, plan_id: UUID, update_data: dict) -> Plans:
+    """プランを更新する（決済処理でロックがかかっている可能性があるので、ロックをかけてから更新し、リトライする）"""
+    from datetime import datetime, timezone
+    
+    for retry_count in range(10):
+        try:
+            # プランレコードに対してロックをかける
+            plan = db.query(Plans).filter(
+                Plans.id == plan_id,
+                Plans.deleted_at.is_(None)
+            ).with_for_update().first()
+            
+            if not plan:
+                raise HTTPException(status_code=404, detail="プランが見つかりません")
+            
+            # プランを更新
+            for key, value in update_data.items():
+                if hasattr(plan, key) and value is not None:
+                    setattr(plan, key, value)
+            
+            plan.updated_at = datetime.now(timezone.utc)
+            db.flush()  # 変更をフラッシュ
+            
+            return plan
+        except HTTPException:
+            raise  # HTTPExceptionは再発生させる
+        except Exception as e:
+            db.rollback()  # エラー時はロールバック
+            logger.warning(f"プラン更新エラー（リトライ {retry_count + 1}/10）: {e}")
+            if retry_count < 9:  # 最後のリトライでない場合のみ待機
+                time.sleep(0.5)  # 500ms待機
+            else:
+                logger.error("プラン更新が10回失敗しました", e)
+                raise
