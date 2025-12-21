@@ -10,8 +10,9 @@ import time
 import uuid
 import glob
 import mimetypes
+import shlex
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import List, Tuple, Optional
 
 from common.logger import Logger
 
@@ -25,11 +26,22 @@ EXTINF_RE = re.compile(r"^#EXTINF:([0-9.]+),\s*$")
 # small utils
 # -----------------------------
 def run(cmd: List[str], capture: bool = False) -> subprocess.CompletedProcess:
-    if capture:
-        return subprocess.run(
-            cmd, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    """
+    Keep behavior: raise on non-zero exit.
+    Improve: always capture stdout/stderr so ECS logs show real ffmpeg errors.
+    """
+    logger.info("RUN: " + " ".join(shlex.quote(c) for c in cmd))
+    cp = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if cp.returncode != 0:
+        logger.error(
+            f"Command failed rc={cp.returncode}\n"
+            f"--- stdout (tail) ---\n{(cp.stdout or '')[-20000:]}\n"
+            f"--- stderr (tail) ---\n{(cp.stderr or '')[-20000:]}"
         )
-    return subprocess.run(cmd, check=True)
+        raise subprocess.CalledProcessError(
+            cp.returncode, cmd, output=cp.stdout, stderr=cp.stderr
+        )
+    return cp
 
 
 def guess_content_type(path: str) -> str:
@@ -134,6 +146,71 @@ def ffprobe_fps(path: str) -> float:
         return 0.0
 
 
+def ffprobe_color_info(path: str) -> dict:
+    """
+    Return pix_fmt + color metadata (when available).
+    """
+    cp = run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=pix_fmt,color_transfer,color_primaries,color_space,color_range",
+            "-of",
+            "json",
+            path,
+        ],
+        capture=True,
+    )
+    st = json.loads(cp.stdout).get("streams", [{}])[0] or {}
+    return {
+        "pix_fmt": (st.get("pix_fmt") or "").strip(),
+        "color_transfer": (st.get("color_transfer") or "").strip(),
+        "color_primaries": (st.get("color_primaries") or "").strip(),
+        "color_space": (st.get("color_space") or "").strip(),
+        "color_range": (st.get("color_range") or "").strip(),
+    }
+
+
+def is_hdr_colorinfo(ci: dict) -> bool:
+    """
+    Detect common HDR signals:
+      - PQ: smpte2084
+      - HLG: arib-std-b67
+      - BT.2020 primaries/colorspace often present
+    """
+    trc = (ci.get("color_transfer") or "").lower()
+    pri = (ci.get("color_primaries") or "").lower()
+    csp = (ci.get("color_space") or "").lower()
+
+    if trc in ("smpte2084", "arib-std-b67"):
+        return True
+    if "bt2020" in pri:
+        return True
+    if "bt2020" in csp:
+        return True
+    return False
+
+
+def ffmpeg_has_filters(filters: List[str]) -> bool:
+    """
+    Check if current ffmpeg binary has needed filters (zscale/tonemap).
+    """
+    try:
+        cp = run(["ffmpeg", "-hide_banner", "-filters"], capture=True)
+        txt = (cp.stdout or "") + "\n" + (cp.stderr or "")
+        # lines look like: " ... zscale  V->V ..."
+        for f in filters:
+            if f not in txt:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def ffprobe_h264_profile_level(path: str) -> tuple[str, float]:
     cp = run(
         [
@@ -161,11 +238,6 @@ def ffprobe_h264_profile_level(path: str) -> tuple[str, float]:
 
 
 def avc1_from_profile_level(profile: str, level: float) -> str:
-    """
-    MediaConvert-like avc1 string (good enough for most hls.js use).
-    High -> 0x64, Main -> 0x4D, else -> 0x42.
-    constraint flags -> 0.
-    """
     p = profile.lower()
     if "high" in p:
         profile_idc = 0x64
@@ -276,12 +348,6 @@ def write_master_m3u8_mediaconvert_like(
 def pick_renditions(
     in_w: int, in_h: int
 ) -> List[Tuple[str, int, int, int, int, int, str]]:
-    """
-    Return list of (label, target_w, target_h, maxrate_k, buf_k, crf, a_br)
-    NOTE: target_w/target_h here are "nominal" targets used for scaling rules.
-    - landscape: we lock HEIGHT, width auto (-2)
-    - portrait: lock WIDTH, height auto (-2)
-    """
     is_portrait = in_h > in_w
 
     if is_portrait:
@@ -305,7 +371,12 @@ def pick_renditions(
 
 
 # -----------------------------
-# encode (key point: NO PAD, width/height auto to preserve AR)
+# encode
+# Safe strategy:
+#   - If HDR (PQ/HLG/BT2020) AND ffmpeg has zscale+tonemap:
+#       tonemap to SDR BT.709 once, then split+scale, then output yuv420p (8-bit)
+#   - Else:
+#       split+scale and force yuv420p (8-bit)
 # -----------------------------
 def build_ffmpeg_cmd(
     input_path: str,
@@ -314,24 +385,40 @@ def build_ffmpeg_cmd(
     encode_run_id: str,
     renditions: List[Tuple[str, int, int, int, int, int, str]],
     is_portrait: bool,
+    do_tonemap: bool,
 ) -> List[str]:
     n = len(renditions)
     split_tags = [f"v{i}" for i in range(n)]
     out_tags = [f"v{i}o" for i in range(n)]
 
-    fc = f"[0:v]split={n}" + "".join([f"[{t}]" for t in split_tags]) + ";"
-    parts = []
+    # Pre-filter (HDR->SDR) applied ONCE before split to save CPU and keep consistent colors.
+    if do_tonemap:
+        # HDR to SDR BT.709
+        # - linearize: zscale=t=linear:npl=100
+        # - float: format=gbrpf32le
+        # - set primaries: zscale=p=bt709
+        # - tonemap: hable, no desat
+        # - back to bt709 + tv range
+        pre = (
+            "zscale=t=linear:npl=100,"
+            "format=gbrpf32le,"
+            "zscale=p=bt709,"
+            "tonemap=tonemap=hable:desat=0,"
+            "zscale=t=bt709:m=bt709:r=tv"
+        )
+        fc = f"[0:v]{pre},split={n}" + "".join([f"[{t}]" for t in split_tags]) + ";"
+    else:
+        fc = f"[0:v]split={n}" + "".join([f"[{t}]" for t in split_tags]) + ";"
 
-    # MediaConvert-like: preserve aspect ratio, do NOT pad into a fixed canvas.
+    parts = []
     for i, (_label, tw, th, *_rest) in enumerate(renditions):
         if is_portrait:
-            # lock width (tw), height auto
             scale = f"scale=w={tw}:h=-2:flags=fast_bilinear"
         else:
-            # lock height (th), width auto
             scale = f"scale=w=-2:h={th}:flags=fast_bilinear"
 
-        parts.append(f"[{split_tags[i]}]{scale},setsar=1[{out_tags[i]}]")
+        # Always force 8-bit output for x264 High profile
+        parts.append(f"[{split_tags[i]}]{scale},format=yuv420p,setsar=1[{out_tags[i]}]")
 
     filter_complex = fc + ";".join(parts)
 
@@ -343,15 +430,26 @@ def build_ffmpeg_cmd(
         input_path,
         "-filter_complex",
         filter_complex,
+        "-max_muxing_queue_size",
+        "1024",
     ]
 
     common_v = [
         "-c:v",
         "libx264",
+        "-pix_fmt",
+        "yuv420p",
         "-preset",
         "superfast",
         "-profile:v",
         "high",
+        # tag output as SDR BT.709 (helpful for some players/pipelines)
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-colorspace",
+        "bt709",
         "-bf",
         "2",
         "-sc_threshold",
@@ -373,7 +471,6 @@ def build_ffmpeg_cmd(
         "48000",
     ]
 
-    # let ffmpeg use CPU cores; do NOT cap threads here
     for i, (label, _tw, _th, maxrate_k, buf_k, crf, a_br) in enumerate(renditions):
         pl = os.path.join(out_dir, f"{rid}_{label}.m3u8")
         seg = os.path.join(out_dir, f"{rid}_{label}{encode_run_id}__%05d.ts")
@@ -450,10 +547,16 @@ def send_webhook(*, url: str, secret: str, detail: dict) -> None:
 # main
 # -----------------------------
 def main() -> None:
-    INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "mij-ingest-dev")
-    INPUT_KEY = os.environ.get("INPUT_KEY", "post-media/0d3c6214-977a-456e-b93b-2e953da114b5/sample/fb996f20-cf91-4d28-a190-3b4653f54356/267d03be-71f2-48f4-be34-8f8a35df066a.mp4")
+    INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "prd-mij-ingest")
+    INPUT_KEY = os.environ.get(
+        "INPUT_KEY",
+        "post-media/6ba83de7-b6f3-4cef-809c-4d8e84544e20/main/17627573-541e-447c-8490-0d0bd4194214/21e4990e-fd9f-4fe2-8b67-07db2bde2de0.mp4",
+    )
     OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "mij-media-dev")
-    OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "transcode-mc/0d3c6214-977a-456e-b93b-2e953da114b5/fb996f20-cf91-4d28-a190-3b4653f54356/cd729d4a-e9ef-4503-9ea4-61a19e6887aa/hls/")
+    OUTPUT_PREFIX = os.environ.get(
+        "OUTPUT_PREFIX",
+        "transcode-mc/0d3c6214-977a-456e-b93b-2e953da114b5/fb996f20-cf91-4d28-a190-3b4653f54356/cd729d4a-e9ef-4503-9ea4-61a19e6887aa/test-hls/",
+    )
     KMS_KEY_ARN = os.environ.get("KMS_KEY_ARN", "alias/mij-media-kms-dev")
 
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
@@ -495,6 +598,23 @@ def main() -> None:
         if fps <= 0:
             fps = 25.0
 
+        # detect HDR and filter availability
+        ci = ffprobe_color_info(str(in_path))
+        hdr = is_hdr_colorinfo(ci)
+        has_tm = ffmpeg_has_filters(["zscale", "tonemap"])
+
+        logger.info(
+            "InputColorInfo="
+            + json.dumps(ci, ensure_ascii=False)
+            + f" hdr={hdr} ffmpeg_has_zscale_tonemap={has_tm}"
+        )
+
+        do_tonemap = bool(hdr and has_tm)
+        if hdr and not has_tm:
+            logger.warning(
+                "HDR input detected but ffmpeg lacks zscale/tonemap; will fallback to 8-bit conversion without tonemapping."
+            )
+
         renditions = pick_renditions(w_disp, h_disp)
 
         # 3) encode
@@ -505,6 +625,7 @@ def main() -> None:
             encode_run_id=ENCODE_RUN_ID,
             renditions=renditions,
             is_portrait=is_portrait,
+            do_tonemap=do_tonemap,
         )
         run(cmd)
 
@@ -519,13 +640,10 @@ def main() -> None:
         for label, _tw, _th, maxrate_k, _buf_k, _crf, a_br in renditions:
             audio_bps = 128_000 if a_br == "128k" else 96_000
 
-            # RESOLUTION should reflect real encoded dims (like MediaConvert shows 1440x1080 etc.)
             w_real, h_real = first_segment_wh(str(out_dir), RID, label, ENCODE_RUN_ID)
 
-            # BANDWIDTH ~ MaxBitrate + audio (close enough)
             bw = int(maxrate_k * 1000 + audio_bps)
 
-            # AVERAGE-BANDWIDTH ~ avg video + audio
             avg_video = avg_bitrate_from_segments(
                 str(out_dir), RID, label, ENCODE_RUN_ID, duration_ms
             )
