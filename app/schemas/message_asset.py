@@ -115,6 +115,8 @@ class UserMessageAssetsListResponse(BaseModel):
     """ユーザーのメッセージアセット一覧レスポンス"""
     pending_message_assets: List[UserMessageAssetResponse]
     reject_message_assets: List[UserMessageAssetResponse]
+    pending_count: int
+    reject_count: int
 
     class Config:
         from_attributes = True

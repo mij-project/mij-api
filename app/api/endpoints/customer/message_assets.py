@@ -39,6 +39,11 @@ def get_my_message_assets(
     """
     自分が送信したメッセージアセット一覧を取得
     """
+    # カウント取得（PENDING と REJECTED）
+    counts = message_assets_crud.get_user_message_assets_counts(db, current_user.id)
+    pending_count = counts['pending_count']
+    reject_count = counts['reject_count']
+
     assets = message_assets_crud.get_user_message_assets(
         db, current_user.id, status, skip, limit
     )
@@ -97,7 +102,7 @@ def get_my_message_assets(
         # CDN URL設定
         cdn_url = f"{BASE_URL}/{asset.storage_key}"
 
-        if asset.status == MessageAssetStatus.PENDING:
+        if asset.status == MessageAssetStatus.PENDING or asset.status == MessageAssetStatus.RESUBMIT:
             pending_responses.append(
                 UserMessageAssetResponse(
                     id=asset.id,
@@ -140,6 +145,8 @@ def get_my_message_assets(
     return UserMessageAssetsListResponse(
         pending_message_assets=pending_responses,
         reject_message_assets=reject_responses,
+        pending_count=pending_count,
+        reject_count=reject_count,
     )
 
 

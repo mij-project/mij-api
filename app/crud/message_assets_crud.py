@@ -187,8 +187,6 @@ def get_user_message_assets(
         .filter(ConversationMessages.sender_user_id == user_id)
     )
 
-    if status is not None:
-        query = query.filter(MessageAssets.status == status)
 
     return (
         query.order_by(MessageAssets.created_at.desc())
@@ -355,3 +353,41 @@ def resubmit_message_asset(
     db.commit()
     db.refresh(asset)
     return asset
+
+
+def get_user_message_assets_counts(
+    db: Session,
+    user_id: UUID
+) -> dict:
+    """
+    ユーザーのメッセージアセットのステータス別カウントを取得
+
+    Args:
+        db: データベースセッション
+        user_id: ユーザーID
+
+    Returns:
+        {'pending_count': int, 'reject_count': int}
+    """
+    # PENDING と RESUBMIT のカウント
+    pending_count = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.sender_user_id == user_id)
+        .filter(MessageAssets.status.in_([MessageAssetStatus.PENDING, MessageAssetStatus.RESUBMIT]))
+        .count()
+    )
+
+    # REJECTED のカウント
+    reject_count = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.sender_user_id == user_id)
+        .filter(MessageAssets.status == MessageAssetStatus.REJECTED)
+        .count()
+    )
+
+    return {
+        'pending_count': pending_count,
+        'reject_count': reject_count
+    }
