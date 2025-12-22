@@ -17,13 +17,34 @@ from app.schemas.search import (
     SearchResponse,
     SearchHistoryItem,
     SearchHistoryResponse,
+    SearchCategoriesResponse,
+    SearchCategoryItem,
 )
+from app.crud.categories_crud import fetch_search_categories
+from app.core.logger import Logger
 
+logger = Logger.get_logger()
 BASE_URL = getenv("CDN_BASE_URL")
 router = APIRouter()
 
 
 # --- Endpoints ---
+
+@router.get("/search/view/categories", response_model=SearchCategoriesResponse)
+def get_search_categories(
+    db: Session = Depends(get_db),
+):
+    """
+    検索カテゴリー取得
+    """
+    try:
+        categories = fetch_search_categories(db)
+        items = [SearchCategoryItem(id=category.id, name=category.name, slug=category.slug) for category in categories]
+        return SearchCategoriesResponse(items=items)
+    except Exception as e:
+        logger.error(f"検索カテゴリー取得に失敗しました: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/search", response_model=SearchResponse)
 def search(
