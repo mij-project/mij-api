@@ -60,6 +60,7 @@ from app.api.endpoints.admin import (
     advertising_agencies as admin_advertising_agencies,
     user as admin_user,
     message_assets as admin_message_assets,
+    search_history as admin_search_history,
 )
 
 # Debug routes
@@ -216,5 +217,10 @@ api_router.include_router(
     tags=["Admin Message Assets"],
 )
 
+api_router.include_router(
+    admin_search_history.router,
+    prefix="/admin/search-history",
+    tags=["Admin Search History"],
+)
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])
