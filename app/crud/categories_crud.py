@@ -70,3 +70,13 @@ def get_genres_with_categories(db: Session):
             "categories": categories
         })
     return result
+
+def fetch_search_categories(db: Session) -> List[Categories]:
+    categories = (
+        db.query(Categories)
+        .filter(Categories.is_active == True)
+        .filter(Categories.slug.in_(["ntr", "big-tits", "ass", "ntr", "beauty", "big-breasts", "personal-shooting", "orgasm", "deep-throat"]))
+        .order_by(Categories.sort_order)
+        .all()
+    )
+    return categories
