@@ -24,6 +24,7 @@ from app.api.endpoints.customer import (
     auth_email_verify,
     conversations,
     message_assets as customer_message_assets,
+    bulk_messages,
     order,
     sms_verifications,
     banners,
@@ -117,6 +118,9 @@ api_router.include_router(
 )
 api_router.include_router(
     customer_message_assets.router, prefix="/users/me/message-assets", tags=["Message Assets"]
+)
+api_router.include_router(
+    bulk_messages.router, prefix="/bulk-messages", tags=["Bulk Messages"]
 )
 api_router.include_router(order.router, prefix="/orders", tags=["Orders"])
 api_router.include_router(

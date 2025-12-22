@@ -317,6 +317,10 @@ def get_conversation_messages(
                 storage_key=asset.storage_key,
             )
 
+        # body_textが空かつassetもない場合は除外
+        if not message.body_text and asset_response is None:
+            continue
+
         message_responses.append(
             MessageResponse(
                 id=message.id,

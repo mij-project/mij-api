@@ -150,3 +150,21 @@ def message_asset_key(conversation_id: str, message_id: str, asset_type: str, ex
     """
     uid = uuid.uuid4()
     return f"conversations/{conversation_id}/messages/{message_id}/{asset_type}/{uid}.{ext}"
+
+
+def bulk_message_asset_key(user_id: str, bulk_message_id: str, asset_type: str, ext: str) -> str:
+    """
+    一斉送信メッセージアセットキー生成
+
+    Args:
+        user_id: str ユーザーID（クリエイター）
+        bulk_message_id: str 一斉送信ID
+        asset_type: str アセットタイプ（"image" or "video"）
+        ext: str 拡張子
+
+    Returns:
+        str: 一斉送信メッセージアセットキー
+    """
+    uid = uuid.uuid4()
+    d = datetime.now(timezone.utc)
+    return f"bulk-messages/{user_id}/{d.year}/{d.month:02d}/{d.day:02d}/{bulk_message_id}/{asset_type}/{uid}.{ext}"
