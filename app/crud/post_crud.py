@@ -1989,6 +1989,179 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         # 価格情報
         "single_price": single_price_data[0] if single_price_data else None,
         "plans": plans_list,
+        # カテゴリー情報
+    }
+
+def get_post_and_categories_by_id(db: Session, post_id: str) -> dict:
+    """
+    投稿IDをキーにして投稿情報、ユーザー情報、メディア情報、カテゴリー情報を取得
+    """
+
+    # 投稿情報と関連データを取得
+    result = (
+        db.query(
+            Posts,
+            Users,
+            Profiles,
+            MediaAssets,
+            MediaRenditionJobs.output_key.label("rendition_output_key"),
+            MediaRenditionJobs.input_key.label("input_key"),
+        )
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(MediaAssets, Posts.id == MediaAssets.post_id)
+        .outerjoin(MediaRenditionJobs, MediaAssets.id == MediaRenditionJobs.asset_id)
+        .filter(Posts.id == post_id)
+        .filter(Posts.deleted_at.is_(None))
+        .all()
+    )
+
+    if not result:
+        return None
+
+    # 最初のレコードから基本情報を取得
+    first_row = result[0]
+    post = first_row.Posts
+    user = first_row.Users
+    profile = first_row.Profiles
+
+    # メディアアセット情報を整理
+    media_assets = []
+    rendition_jobs = []
+
+    for row in result:
+        if row.MediaAssets:
+            media_asset = {
+                "id": str(row.MediaAssets.id),
+                "status": row.MediaAssets.status,
+                "post_id": str(row.MediaAssets.post_id),
+                "kind": row.MediaAssets.kind,
+                "storage_key": row.MediaAssets.storage_key,
+                "file_size": row.MediaAssets.bytes,
+                "reject_comments": row.MediaAssets.reject_comments,
+                "duration": float(row.MediaAssets.duration_sec)
+                if row.MediaAssets.duration_sec
+                else None,
+                "duration_sec": float(row.MediaAssets.duration_sec)
+                if row.MediaAssets.duration_sec
+                else None,
+                "orientation": row.MediaAssets.orientation,
+                "sample_type": row.MediaAssets.sample_type,
+                "sample_start_time": float(row.MediaAssets.sample_start_time)
+                if row.MediaAssets.sample_start_time
+                else None,
+                "sample_end_time": float(row.MediaAssets.sample_end_time)
+                if row.MediaAssets.sample_end_time
+                else None,
+                "created_at": row.MediaAssets.created_at.isoformat()
+                if row.MediaAssets.created_at
+                else None,
+                "updated_at": None,
+                "input_key": getattr(row, 'input_key', None),
+            }
+
+            # 重複を避けるため、既に存在するかチェック
+            if not any(ma["id"] == media_asset["id"] for ma in media_assets):
+                media_assets.append(media_asset)
+
+        if row.rendition_output_key:
+            rendition_job = {"output_key": row.rendition_output_key}
+
+            # 重複を避けるため、既に存在するかチェック
+            if not any(
+                rj["output_key"] == rendition_job["output_key"] for rj in rendition_jobs
+            ):
+                rendition_jobs.append(rendition_job)
+
+    # 価格情報を取得（単品販売）
+    single_price_data = (
+        db.query(Prices.price)
+        .filter(Prices.post_id == post_id, Prices.is_active == True)
+        .first()
+    )
+
+    # プラン情報を取得
+    plan_data = (
+        db.query(Plans.id, Plans.name, Plans.price)
+        .join(PostPlans, Plans.id == PostPlans.plan_id)
+        .filter(
+            PostPlans.post_id == post_id,
+            Plans.deleted_at.is_(None),
+        )
+        .all()
+    )
+
+    # プラン情報をリスト形式に整形
+    plans_list = (
+        [
+            {"plan_id": str(plan.id), "plan_name": plan.name, "price": plan.price}
+            for plan in plan_data
+        ]
+        if plan_data
+        else None
+    )
+
+    # カテゴリー情報を取得
+    category_data = (
+        db.query(Categories.id, Categories.name, Categories.slug)
+        .join(PostCategories, Categories.id == PostCategories.category_id)
+        .filter(PostCategories.post_id == post_id)
+        .all()
+    )
+
+    # カテゴリー情報をリスト形式に整形
+    categories_list = (
+        [
+            {
+                "category_id": str(category.id),
+                "category_name": category.name,
+                "slug": category.slug,
+            }
+            for category in category_data
+        ]
+        if category_data
+        else None
+    )
+
+    # 指定された内容を返却
+    return {
+        # 投稿情報
+        "id": str(post.id),
+        "description": post.description,
+        "status": post.status,
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+        "authenticated_flg": post.authenticated_flg,
+        # ユーザー情報
+        "user_id": str(user.id),
+        "profile_name": user.profile_name,
+        # プロフィール情報
+        "username": profile.username,
+        "profile_avatar_url": f"{CDN_BASE_URL}/{profile.avatar_url}"
+        if profile.avatar_url
+        else None,
+        "post_type": post.post_type,
+        # メディアアセット情報
+        "media_assets": {
+            ma["id"]: {
+                "kind": ma["kind"],
+                "storage_key": ma["storage_key"],
+                "status": ma["status"],
+                "reject_comments": ma["reject_comments"],
+                "duration_sec": ma.get("duration_sec"),
+                "orientation": ma.get("orientation"),
+                "sample_type": ma.get("sample_type"),
+                "sample_start_time": ma.get("sample_start_time"),
+                "sample_end_time": ma.get("sample_end_time"),
+                "input_key": ma.get("input_key"),
+            }
+            for ma in media_assets
+            if ma["storage_key"]
+        },  # メディアアセットIDをキー、kindとstorage_keyを含む辞書を値とする辞書
+        # 価格情報
+        "single_price": single_price_data[0] if single_price_data else None,
+        "plans": plans_list,
+        # カテゴリー情報
+        "categories": categories_list,
     }
 
 
