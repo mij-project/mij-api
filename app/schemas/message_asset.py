@@ -94,6 +94,7 @@ class UserMessageAssetDetailResponse(BaseModel):
     type: int
     conversation_id: UUID
     status: int  # 0=審査待ち, 1=承認済み, 2=拒否
+    message_status: Optional[int] = None  # conversation_messageのstatus（1=送信済み, 3=予約中など）
     asset_type: int  # 1=画像, 2=動画
     storage_key: str
     cdn_url: Optional[str] = None
@@ -117,10 +118,12 @@ class UserMessageAssetDetailResponse(BaseModel):
 
 class UserMessageAssetsListResponse(BaseModel):
     """ユーザーのメッセージアセット一覧レスポンス"""
-    pending_message_assets: List[UserMessageAssetResponse]
-    reject_message_assets: List[UserMessageAssetResponse]
-    pending_count: int
-    reject_count: int
+    pending_message_assets: List[UserMessageAssetResponse] = []
+    reject_message_assets: List[UserMessageAssetResponse] = []
+    reserved_message_assets: List[UserMessageAssetResponse] = []
+    pending_count: int = 0
+    reject_count: int = 0
+    reserved_count: int = 0
 
     class Config:
         from_attributes = True

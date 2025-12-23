@@ -4,7 +4,7 @@ from uuid import UUID
 from typing import Optional, List, Tuple
 from datetime import datetime
 from app.models.message_assets import MessageAssets
-from app.constants.enums import MessageAssetStatus
+from app.constants.enums import MessageAssetStatus, ConversationMessageStatus
 from app.models.conversation_messages import ConversationMessages
 from app.models.conversations import Conversations
 from app.models.conversation_participants import ConversationParticipants
@@ -708,7 +708,7 @@ def get_user_message_assets_counts(
         user_id: ユーザーID
 
     Returns:
-        {'pending_count': int, 'reject_count': int}
+        {'pending_count': int, 'reject_count': int, 'reserved_count': int}
     """
     from sqlalchemy import func
 
@@ -734,9 +734,22 @@ def get_user_message_assets_counts(
     )
     reject_count = db.query(func.count()).select_from(reject_subquery).scalar() or 0
 
+    # 予約送信（status=2）のグループ数をカウント（審査中でないもののみ）
+    reserved_subquery = (
+        db.query(MessageAssets.group_by)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.sender_user_id == user_id)
+        .filter(ConversationMessages.status == ConversationMessageStatus.PENDING)
+        .filter(MessageAssets.status.notin_([MessageAssetStatus.PENDING, MessageAssetStatus.RESUBMIT]))
+        .distinct()
+        .subquery()
+    )
+    reserved_count = db.query(func.count()).select_from(reserved_subquery).scalar() or 0
+
     return {
         'pending_count': pending_count,
-        'reject_count': reject_count
+        'reject_count': reject_count,
+        'reserved_count': reserved_count
     }
 
 

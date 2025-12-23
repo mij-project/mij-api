@@ -217,8 +217,6 @@ def get_user_conversations(
 
 
 # ========== 個別会話のメッセージAPI ==========
-
-
 @router.get("/{conversation_id}/messages", response_model=ConversationMessagesResponse)
 def get_conversation_messages(
     conversation_id: UUID,
