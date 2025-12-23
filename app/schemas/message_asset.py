@@ -63,6 +63,8 @@ class UserMessageAssetResponse(BaseModel):
     """ユーザーのメッセージアセットレスポンス（一覧用）"""
     id: UUID
     message_id: UUID
+    type: int
+    group_by: str
     conversation_id: UUID
     asset_type: int  # 1=画像, 2=動画
     storage_key: str
@@ -88,6 +90,8 @@ class UserMessageAssetDetailResponse(BaseModel):
     """ユーザーのメッセージアセット詳細レスポンス"""
     id: UUID
     message_id: UUID
+    group_by: str
+    type: int
     conversation_id: UUID
     status: int  # 0=審査待ち, 1=承認済み, 2=拒否
     asset_type: int  # 1=画像, 2=動画

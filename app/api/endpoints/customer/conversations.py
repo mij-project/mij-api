@@ -174,16 +174,6 @@ async def get_new_conversations_unread(
     return {"is_unread": is_unread}
 
 
-@router.get("/conversations/list", response_model=List[ConversationResponse])
-def get_conversations_list(
-    current_user: Users = Depends(get_current_user), db: Session = Depends(get_db)
-):
-    """
-    会話一覧を取得
-    """
-    conversations = conversations_crud.get_conversations_list(db, current_user.id)
-    return conversations
-
 
 @router.get("/list")
 def get_user_conversations(
@@ -537,7 +527,7 @@ def get_message_asset_upload_url(
         import uuid
         temp_message_id = str(uuid.uuid4())
         asset_type_str = "image" if request.asset_type == MessageAssetType.IMAGE else "video"
-
+        
         storage_key = keygen.message_asset_key(
             conversation_id=str(conversation_id),
             message_id=temp_message_id,

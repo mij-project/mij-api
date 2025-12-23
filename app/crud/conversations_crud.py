@@ -10,7 +10,7 @@ from app.models.conversation_messages import ConversationMessages
 from app.models.conversation_participants import ConversationParticipants
 from app.models.user import Users
 from app.models.admins import Admins
-from app.constants.enums import ConversationType, ParticipantType, ConversationMessageType
+from app.constants.enums import ConversationType, ParticipantType, ConversationMessageType, ConversationMessageStatus
 from app.models.profiles import Profiles
 from app.constants.messages import WelcomeMessage
 import os
@@ -272,6 +272,7 @@ def get_messages_by_conversation(
                 ConversationMessages.status.is_(None),
             ),
             ConversationMessages.deleted_at.is_(None),
+            ConversationMessages.status != ConversationMessageStatus.PENDING,
         )
         .order_by(ConversationMessages.created_at.asc())
         .offset(skip)
@@ -602,6 +603,7 @@ def get_user_conversations(
                         ConversationMessages.status != 0,
                         ConversationMessages.status.is_(None)
                     ),
+                    ConversationMessages.status != ConversationMessageStatus.PENDING,
                 )
                 .order_by(ConversationMessages.created_at.desc())
                 .first()

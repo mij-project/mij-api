@@ -211,9 +211,9 @@ def get_user_message_assets(
     status: Optional[int] = None,
     skip: int = 0,
     limit: int = 50
-) -> list[MessageAssets]:
+) -> List[dict]:
     """
-    ユーザーが送信したメッセージアセット一覧を取得
+    ユーザーが送信したメッセージアセット一覧を取得（group_byでグループ化）
 
     Args:
         db: データベースセッション
@@ -223,22 +223,107 @@ def get_user_message_assets(
         limit: 取得件数
 
     Returns:
-        MessageAssetsオブジェクトのリスト
+        グループ化されたアセット情報のリスト
+        各要素は {"group_by": str, "asset": MessageAssets, "message": ConversationMessages} の形式
+        各グループから代表的なアセット1件のみを返す
     """
-
-    query = (
-        db.query(MessageAssets)
+    from sqlalchemy import func
+    
+    # 総グループ数を取得
+    count_query = (
+        db.query(func.count(func.distinct(MessageAssets.group_by)))
         .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
         .filter(ConversationMessages.sender_user_id == user_id)
     )
-
-
-    return (
-        query.order_by(MessageAssets.created_at.desc())
+    
+    if status is not None:
+        count_query = count_query.filter(MessageAssets.status == status)
+    
+    # group_byでグループ化して、各グループの最初のアセットのcreated_atでソート
+    subquery = (
+        db.query(
+            MessageAssets.group_by,
+            func.min(MessageAssets.created_at).label("min_created_at")
+        )
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.sender_user_id == user_id)
+    )
+    
+    if status is not None:
+        subquery = subquery.filter(MessageAssets.status == status)
+    
+    subquery = (
+        subquery.group_by(MessageAssets.group_by)
+        .order_by(func.min(MessageAssets.created_at).desc())
         .offset(skip)
         .limit(limit)
+        .subquery()
+    )
+    
+    # 各グループのgroup_by値と最小created_atを取得
+    group_by_list = (
+        db.query(subquery.c.group_by, subquery.c.min_created_at)
         .all()
     )
+    
+    if not group_by_list:
+        return []
+    
+    # 各グループから代表アセット1件を取得（created_atが最小のもの）
+    assets = []
+    for group_by, min_created_at in group_by_list:
+        asset_query = (
+            db.query(MessageAssets)
+            .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+            .filter(
+                MessageAssets.group_by == group_by,
+                MessageAssets.created_at == min_created_at,
+                ConversationMessages.sender_user_id == user_id
+            )
+        )
+        if status is not None:
+            asset_query = asset_query.filter(MessageAssets.status == status)
+        
+        asset = asset_query.order_by(MessageAssets.created_at.asc()).first()
+        if asset:
+            assets.append(asset)
+    
+    asset_dict = {asset.group_by: asset for asset in assets}
+    
+    # メッセージIDのリストを取得
+    message_ids = list(set([asset.message_id for asset in assets]))
+    
+    # メッセージ情報を一括取得
+    messages = (
+        db.query(ConversationMessages)
+        .filter(ConversationMessages.id.in_(message_ids))
+        .all()
+    )
+    message_dict = {msg.id: msg for msg in messages}
+    
+    # グループごとに整理（代表アセット1件のみ）
+    grouped_data = []
+    for group_by, min_created_at in group_by_list:
+        asset = asset_dict.get(group_by)
+        if not asset:
+            continue
+        
+        message = message_dict.get(asset.message_id)
+        
+        grouped_data.append({
+            "group_by": group_by,
+            "asset": asset,
+            "message": message
+        })
+    
+    # ソート順を保持（min_created_atの降順）
+    sorted_groups = sorted(
+        grouped_data,
+        key=lambda x: x["asset"].created_at if x["asset"] else datetime.min,
+        reverse=True
+    )
+    
+    return sorted_groups
 
 
 def get_message_assets_for_admin(
@@ -351,6 +436,63 @@ def get_message_assets_for_admin(
     )
     
     return sorted_groups, total
+
+
+def get_message_asset_detail_by_group_by_for_user(
+    db: Session, group_by: str, user_id: UUID
+) -> Optional[dict]:
+    """
+    ユーザー用：group_byでメッセージアセット詳細を取得（メッセージ情報含む）
+
+    Args:
+        db: データベースセッション
+        group_by: グループ化キー
+        user_id: ユーザーID（送信者の確認用）
+
+    Returns:
+        詳細情報の辞書 or None
+    """
+    # group_byでグループ化されたアセットから代表的な1件を取得（最初に作成されたもの）
+    asset = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(
+            MessageAssets.group_by == group_by,
+            ConversationMessages.sender_user_id == user_id
+        )
+        .order_by(MessageAssets.created_at.asc())
+        .first()
+    )
+    
+    if not asset:
+        return None
+
+    # メッセージ情報を取得
+    message = (
+        db.query(ConversationMessages)
+        .filter(ConversationMessages.id == asset.message_id)
+        .first()
+    )
+
+    if not message:
+        return None
+
+    # 会話情報を取得
+    conversation = (
+        db.query(Conversations)
+        .filter(Conversations.id == message.conversation_id)
+        .first()
+    )
+
+    if not conversation:
+        return None
+
+    # 詳細情報を辞書形式で返却
+    return {
+        "asset": asset,
+        "message": message,
+        "conversation": conversation,
+    }
 
 
 def get_message_asset_detail_by_group_by_for_admin(
@@ -559,7 +701,7 @@ def get_user_message_assets_counts(
     user_id: UUID
 ) -> dict:
     """
-    ユーザーのメッセージアセットのステータス別カウントを取得
+    ユーザーのメッセージアセットのステータス別カウントを取得（group_byでグループ化）
 
     Args:
         db: データベースセッション
@@ -568,25 +710,105 @@ def get_user_message_assets_counts(
     Returns:
         {'pending_count': int, 'reject_count': int}
     """
-    # PENDING と RESUBMIT のカウント
-    pending_count = (
-        db.query(MessageAssets)
+    from sqlalchemy import func
+
+    # PENDING と RESUBMIT のグループ数をカウント
+    pending_subquery = (
+        db.query(MessageAssets.group_by)
         .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
         .filter(ConversationMessages.sender_user_id == user_id)
         .filter(MessageAssets.status.in_([MessageAssetStatus.PENDING, MessageAssetStatus.RESUBMIT]))
-        .count()
+        .distinct()
+        .subquery()
     )
+    pending_count = db.query(func.count()).select_from(pending_subquery).scalar() or 0
 
-    # REJECTED のカウント
-    reject_count = (
-        db.query(MessageAssets)
+    # REJECTED のグループ数をカウント
+    reject_subquery = (
+        db.query(MessageAssets.group_by)
         .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
         .filter(ConversationMessages.sender_user_id == user_id)
         .filter(MessageAssets.status == MessageAssetStatus.REJECTED)
-        .count()
+        .distinct()
+        .subquery()
     )
+    reject_count = db.query(func.count()).select_from(reject_subquery).scalar() or 0
 
     return {
         'pending_count': pending_count,
         'reject_count': reject_count
     }
+
+
+def resubmit_message_asset_by_group_by(
+    db: Session,
+    group_by: str,
+    user_id: UUID,
+    new_storage_key: str,
+    new_asset_type: int,
+    message_text: Optional[str] = None
+) -> Optional[MessageAssets]:
+    """
+    group_byで同じグループの全メッセージアセットを一括再申請
+
+    Args:
+        db: データベースセッション
+        group_by: グループ化キー
+        user_id: ユーザーID（権限チェック用）
+        new_storage_key: 新しいS3ストレージキー
+        new_asset_type: 新しいアセットタイプ（1=画像, 2=動画）
+        message_text: メッセージ本文（オプション）
+
+    Returns:
+        更新された代表的なMessageAssetsオブジェクト or None
+    """
+    # group_byで同じグループの全アセットを取得
+    assets = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(
+            MessageAssets.group_by == group_by,
+            ConversationMessages.sender_user_id == user_id
+        )
+        .all()
+    )
+
+    if not assets:
+        return None
+
+    # 最初のアセットのステータスをチェック（全て同じステータスのはず）
+    if assets[0].status != MessageAssetStatus.REJECTED:
+        return None
+
+    # 同じgroup_byの全アセットを一括更新
+    for asset in assets:
+        asset.storage_key = new_storage_key
+        asset.asset_type = new_asset_type
+        asset.status = MessageAssetStatus.RESUBMIT
+        asset.reject_comments = None
+
+    # メッセージ本文も更新する場合（全メッセージを更新）
+    if message_text is not None:
+        message_ids = [asset.message_id for asset in assets]
+        messages = (
+            db.query(ConversationMessages)
+            .filter(ConversationMessages.id.in_(message_ids))
+            .all()
+        )
+        for message in messages:
+            message.body_text = message_text
+
+    db.commit()
+
+    # 代表的なアセット1件を返す（最初に作成されたもの）
+    representative_asset = (
+        db.query(MessageAssets)
+        .filter(MessageAssets.group_by == group_by)
+        .order_by(MessageAssets.created_at.asc())
+        .first()
+    )
+
+    if representative_asset:
+        db.refresh(representative_asset)
+
+    return representative_asset
