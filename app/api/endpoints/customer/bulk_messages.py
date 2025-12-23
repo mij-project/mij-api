@@ -56,12 +56,8 @@ def get_bulk_message_upload_url(
     - 画像または動画のアップロード用URL生成
     """
     try:
-        # クリエイター権限チェック
-        if not current_user.is_creator:
-            raise HTTPException(status_code=403, detail="クリエイターのみアクセス可能です")
-
         # ファイルタイプの検証
-        allowed_image_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
+        allowed_image_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]
         allowed_video_types = ["video/mp4", "video/quicktime"]  # mp4, mov
 
         if request.asset_type == MessageAssetType.IMAGE:
@@ -81,7 +77,7 @@ def get_bulk_message_upload_url(
 
         # 拡張子の検証
         allowed_extensions = {
-            MessageAssetType.IMAGE: ["jpg", "jpeg", "png", "gif", "webp"],
+            MessageAssetType.IMAGE: ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif"],
             MessageAssetType.VIDEO: ["mp4", "mov"],
         }
 
@@ -135,8 +131,6 @@ def send_bulk_message(
     - 予約送信にも対応
     """
     # クリエイター権限チェック
-    if not current_user.is_creator:
-        raise HTTPException(status_code=403, detail="クリエイターのみアクセス可能です")
 
     # 送信先が1つも選択されていない場合はエラー
     if not request.send_to_chip_senders and not request.send_to_single_purchasers and not request.send_to_plan_subscribers:
@@ -158,16 +152,6 @@ def send_bulk_message(
     if not target_user_ids:
         raise HTTPException(status_code=400, detail="送信対象のユーザーが見つかりません")
 
-    # 予約送信の場合
-    if request.scheduled_at:
-        # 予約送信日時が過去でないかチェック
-        if request.scheduled_at <= datetime.utcnow():
-            raise HTTPException(status_code=400, detail="予約送信日時は未来の日時を指定してください")
-
-        # TODO: 予約送信の実装（別途バッチ処理や非同期タスクで実装）
-        # 現在は即時送信のみ対応のため、エラーを返す
-        raise HTTPException(status_code=501, detail="予約送信機能は現在実装中です")
-
     # 即時送信
     sent_count = bulk_message_crud.send_bulk_messages(
         db=db,
@@ -175,7 +159,8 @@ def send_bulk_message(
         message_text=request.message_text,
         target_user_ids=target_user_ids,
         asset_storage_key=request.asset_storage_key,
-        asset_type=request.asset_type
+        asset_type=request.asset_type,
+        scheduled_at=request.scheduled_at
     )
 
     return BulkMessageSendResponse(

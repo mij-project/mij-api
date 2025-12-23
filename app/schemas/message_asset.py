@@ -123,9 +123,10 @@ class UserMessageAssetsListResponse(BaseModel):
 
 
 class AdminMessageAssetListResponse(BaseModel):
-    """管理者用メッセージアセット一覧レスポンス"""
+    """管理者用メッセージアセット一覧レスポンス（group_byでグループ化）"""
     id: UUID
-    message_id: UUID
+    group_by: str
+    type: int
     conversation_id: UUID
     status: int  # 0=審査待ち, 1=承認済み, 2=拒否
     asset_type: int  # 1=画像, 2=動画
@@ -143,12 +144,6 @@ class AdminMessageAssetListResponse(BaseModel):
     sender_profile_name: Optional[str] = None
     sender_avatar: Optional[str] = None
 
-    # 受信者情報
-    recipient_user_id: Optional[UUID] = None
-    recipient_username: Optional[str] = None
-    recipient_profile_name: Optional[str] = None
-    recipient_avatar: Optional[str] = None
-
     class Config:
         from_attributes = True
 
@@ -156,17 +151,17 @@ class AdminMessageAssetListResponse(BaseModel):
 class AdminMessageAssetDetailResponse(BaseModel):
     """管理者用メッセージアセット詳細レスポンス"""
     id: UUID
-    message_id: UUID
-    conversation_id: UUID
+    group_by: str
+    type: int
     status: int  # 0=審査待ち, 1=承認済み, 2=拒否
     asset_type: int  # 1=画像, 2=動画
+    group_by: str
     storage_key: str
     cdn_url: Optional[str] = None
-    reject_comments: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
-    # メッセージ全文
+    # メッセージ情報
     message_text: Optional[str] = None
     message_created_at: Optional[datetime] = None
 
@@ -175,12 +170,5 @@ class AdminMessageAssetDetailResponse(BaseModel):
     sender_username: Optional[str] = None
     sender_profile_name: Optional[str] = None
     sender_avatar: Optional[str] = None
-
-    # 受信者情報
-    recipient_user_id: Optional[UUID] = None
-    recipient_username: Optional[str] = None
-    recipient_profile_name: Optional[str] = None
-    recipient_avatar: Optional[str] = None
-
     class Config:
         from_attributes = True

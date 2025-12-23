@@ -9,6 +9,7 @@ from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
 from app.models.admins import Admins
 from app.models.conversation_messages import ConversationMessages
+from app.models.message_assets import MessageAssets
 from app.crud import message_assets_crud
 from app.crud import notifications_crud, user_crud
 from app.schemas.message_asset import (
@@ -36,36 +37,30 @@ def get_message_assets(
 ):
     """
     メッセージアセット一覧を取得（管理者用）
+    - group_byでグループ化（1グループ = 1レスポンス）
     - フィルター対応
     - ページネーション対応
-    - 送信者・受信者情報含む
+    - 送信者情報含む（受信者情報は含まない）
     """
     skip = (page - 1) * page_size
 
-    # アセット一覧と総件数を取得
-    assets, total = message_assets_crud.get_message_assets_for_admin(
+    # グループ化されたアセット一覧と総グループ数を取得
+    grouped_data, total = message_assets_crud.get_message_assets_for_admin(
         db, status=status, skip=skip, limit=page_size
     )
 
     responses = []
-    for asset in assets:
-        # メッセージ情報を取得
-        message = (
-            db.query(ConversationMessages)
-            .filter(ConversationMessages.id == asset.message_id)
-            .first()
-        )
-
-        if not message:
+    for group in grouped_data:
+        message = group["message"]
+        asset = group["asset"]
+        
+        if not message or not asset:
             continue
 
-        # 送信者・受信者の詳細情報を取得
+        # 送信者の詳細情報を取得
         detail = message_assets_crud.get_message_asset_detail_for_admin(db, asset.id)
         if not detail:
             continue
-
-        # CDN URL設定（承認済みの場合のみ）
-        cdn_url = f"{BASE_URL}/{asset.storage_key}"
 
         # 送信者情報
         sender_profile = detail.get("sender_profile")
@@ -83,26 +78,15 @@ def get_message_assets(
                 if sender_user:
                     sender_profile_name = sender_user.profile_name
 
-        # 受信者情報
-        recipient_profile = detail.get("recipient_profile")
-        recipient_user_id = None
-        recipient_username = None
-        recipient_profile_name = None
-        recipient_avatar = None
-        
-        if recipient_profile:
-            recipient_user_id = recipient_profile.user_id
-            recipient_username = recipient_profile.username
-            recipient_avatar = f"{BASE_URL}/{recipient_profile.avatar_url}" if recipient_profile.avatar_url else None
-            # profile_nameはUsersテーブルから取得
-            recipient_user = user_crud.get_user_by_id(db, recipient_profile.user_id)
-            if recipient_user:
-                recipient_profile_name = recipient_user.profile_name
+        # CDN URL設定（承認済みの場合のみ）
+        cdn_url = f"{BASE_URL}/{asset.storage_key}"
 
+        # グループ単位でレスポンスを作成（代表アセット1件のみ）
         responses.append(
             AdminMessageAssetListResponse(
                 id=asset.id,
-                message_id=asset.message_id,
+                group_by=asset.group_by,
+                type=message.type,
                 conversation_id=message.conversation_id,
                 status=asset.status,
                 asset_type=asset.asset_type,
@@ -115,10 +99,6 @@ def get_message_assets(
                 sender_username=sender_username,
                 sender_profile_name=sender_profile_name,
                 sender_avatar=sender_avatar,
-                recipient_user_id=recipient_user_id,
-                recipient_username=recipient_username,
-                recipient_profile_name=recipient_profile_name,
-                recipient_avatar=recipient_avatar,
             )
         )
 
@@ -131,17 +111,18 @@ def get_message_assets(
     }
 
 
-@router.get("/{asset_id}", response_model=AdminMessageAssetDetailResponse)
+@router.get("/{group_by}", response_model=AdminMessageAssetDetailResponse)
 def get_message_asset_detail(
-    asset_id: UUID,
+    group_by: str,
     current_admin: Admins = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """
     メッセージアセット詳細を取得（管理者用）
-    - 送信者・受信者・メッセージ情報含む
+    - group_byでグループ化されたアセット情報を取得
+    - 送信者・メッセージ情報含む（受信者情報は含まない）
     """
-    detail = message_assets_crud.get_message_asset_detail_for_admin(db, asset_id)
+    detail = message_assets_crud.get_message_asset_detail_by_group_by_for_admin(db, group_by)
 
     if not detail:
         raise HTTPException(status_code=404, detail="Message asset not found")
@@ -149,7 +130,6 @@ def get_message_asset_detail(
     asset = detail["asset"]
     message = detail["message"]
     sender_profile = detail["sender_profile"]
-    recipient_profile = detail["recipient_profile"]
 
     # CDN URL設定（承認済みの場合のみ）
     cdn_url = f"{MESSAGE_ASSETS_CDN_URL}/{asset.storage_key}"
@@ -169,30 +149,14 @@ def get_message_asset_detail(
             if sender_user:
                 sender_profile_name = sender_user.profile_name
 
-    # 受信者情報
-    recipient_user_id = None
-    recipient_username = None
-    recipient_profile_name = None
-    recipient_avatar = None
-    
-    if recipient_profile:
-        recipient_user_id = recipient_profile.user_id
-        recipient_username = recipient_profile.username
-        recipient_avatar = f"{BASE_URL}/{recipient_profile.avatar_url}" if recipient_profile.avatar_url else None
-        # profile_nameはUsersテーブルから取得
-        recipient_user = user_crud.get_user_by_id(db, recipient_profile.user_id)
-        if recipient_user:
-            recipient_profile_name = recipient_user.profile_name
-
     return AdminMessageAssetDetailResponse(
         id=asset.id,
-        message_id=asset.message_id,
-        conversation_id=message.conversation_id,
+        group_by=asset.group_by,
+        type=message.type,
         status=asset.status,
         asset_type=asset.asset_type,
         storage_key=asset.storage_key,
         cdn_url=cdn_url,
-        reject_comments=asset.reject_comments,
         created_at=asset.created_at,
         updated_at=asset.updated_at,
         message_text=message.body_text,
@@ -201,23 +165,20 @@ def get_message_asset_detail(
         sender_username=sender_username,
         sender_profile_name=sender_profile_name,
         sender_avatar=sender_avatar,
-        recipient_user_id=recipient_user_id,
-        recipient_username=recipient_username,
-        recipient_profile_name=recipient_profile_name,
-        recipient_avatar=recipient_avatar,
     )
 
 
-@router.post("/{asset_id}/approve", response_model=MessageAssetResponse)
+@router.post("/{group_by}/approve", response_model=MessageAssetResponse)
 def approve_message_asset(
-    asset_id: UUID,
+    group_by: str,
     current_admin: Admins = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """
     メッセージアセットを承認（管理者用）
+    - group_byでグループ化されたすべてのアセットを承認
     """
-    asset = message_assets_crud.approve_message_asset(db, asset_id)
+    asset = message_assets_crud.approve_message_asset_by_group_by(db, group_by)
 
     if not asset:
         raise HTTPException(status_code=404, detail="Message asset not found")
@@ -237,21 +198,27 @@ def approve_message_asset(
     )
 
 
-@router.post("/{asset_id}/reject", response_model=MessageAssetResponse)
+@router.post("/{group_by}/reject", response_model=MessageAssetResponse)
 def reject_message_asset(
-    asset_id: UUID,
+    group_by: str,
     request: MessageAssetRejectRequest,
     current_admin: Admins = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """
     メッセージアセットを拒否（管理者用）
+    - group_byでグループ化されたすべてのアセットを拒否
     - 拒否理由をコメントとして保存
     - 送信者への通知を送信
-    - メッセージを削除
     """
-    # アセットを取得
-    asset = message_assets_crud.get_message_asset_by_id(db, asset_id)
+    # 代表的なアセットを取得（メッセージ情報取得のため）
+    asset = (
+        db.query(MessageAssets)
+        .filter(MessageAssets.group_by == group_by)
+        .order_by(MessageAssets.created_at.asc())
+        .first()
+    )
+    
     if not asset:
         raise HTTPException(status_code=404, detail="Message asset not found")
 
@@ -268,8 +235,13 @@ def reject_message_asset(
     if not sender_user_id:
         raise HTTPException(status_code=400, detail="Message has no sender user")
 
-    # アセットを拒否状態に更新
-    asset = message_assets_crud.reject_message_asset(db, asset_id, request.reject_comments)
+    # アセットを拒否状態に更新（同じgroup_byのすべてのアセット）
+    asset = message_assets_crud.reject_message_asset_by_group_by(
+        db, group_by, request.reject_comments
+    )
+
+    if not asset:
+        raise HTTPException(status_code=404, detail="Failed to reject message asset")
 
     # 送信者への通知を作成
     notifications_crud.add_notification_for_message_asset_rejection(
@@ -278,7 +250,7 @@ def reject_message_asset(
         reject_comments=request.reject_comments,
     )
 
-    # レスポンスを保存（メッセージ削除前に）
+    # レスポンスを保存
     response = MessageAssetResponse(
         id=asset.id,
         status=asset.status,

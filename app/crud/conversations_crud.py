@@ -130,6 +130,54 @@ def is_user_in_conversation(db: Session, conversation_id: UUID, user_id: UUID) -
 # ========== メッセージ管理 ==========
 
 
+def _update_conversation_last_message(
+    db: Session, conversation_id: UUID, message: ConversationMessages
+) -> None:
+    """
+    会話の最終メッセージ情報を更新する共通関数
+    """
+    conversation = (
+        db.query(Conversations).filter(Conversations.id == conversation_id).first()
+    )
+    if conversation:
+        conversation.last_message_id = message.id
+        conversation.last_message_at = message.created_at
+
+
+def _create_and_save_message(
+    db: Session,
+    conversation_id: UUID,
+    message_type: int,
+    sender_user_id: UUID | None = None,
+    sender_admin_id: UUID | None = None,
+    body_text: str = "",
+    status: int = 1,
+    scheduled_at: datetime | None = None,
+) -> ConversationMessages:
+    """
+    メッセージを作成・保存する共通関数
+    """
+    message = ConversationMessages(
+        conversation_id=conversation_id,
+        sender_user_id=sender_user_id,
+        sender_admin_id=sender_admin_id,
+        type=message_type,
+        body_text=body_text,
+        moderation=1,  # デフォルト: 承認済み
+        status=status,
+        scheduled_at=scheduled_at,
+    )
+    db.add(message)
+    db.flush()
+
+    # 会話の最終メッセージ情報を更新
+    _update_conversation_last_message(db, conversation_id, message)
+
+    db.commit()
+    db.refresh(message)
+    return message
+
+
 def create_message(
     db: Session,
     conversation_id: UUID,
@@ -145,29 +193,39 @@ def create_message(
     - sender_admin_id が指定されている場合は管理者メッセージ
     - status: メッセージステータス（0=無効、1=有効）
     """
-    message = ConversationMessages(
+    return _create_and_save_message(
+        db=db,
         conversation_id=conversation_id,
+        message_type=ConversationMessageType.USER,
         sender_user_id=sender_user_id,
         sender_admin_id=sender_admin_id,
-        type=ConversationMessageType.USER,
         body_text=body_text,
-        moderation=1,  # デフォルト: 承認済み
         status=status,
     )
-    db.add(message)
-    db.flush()
 
-    # 会話の最終メッセージ情報を更新
-    conversation = (
-        db.query(Conversations).filter(Conversations.id == conversation_id).first()
+
+def create_bulk_message(
+    db: Session,
+    conversation_id: UUID,
+    sender_user_id: UUID | None = None,
+    sender_admin_id: UUID | None = None,
+    body_text: str = "",
+    status: int = 1,
+    scheduled_at: datetime | None = None,
+) -> ConversationMessages:
+    """
+    一斉送信メッセージを作成
+    """
+    return _create_and_save_message(
+        db=db,
+        conversation_id=conversation_id,
+        message_type=ConversationMessageType.BULK,
+        sender_user_id=sender_user_id,
+        sender_admin_id=sender_admin_id,
+        body_text=body_text,
+        status=status,
+        scheduled_at=scheduled_at,
     )
-    if conversation:
-        conversation.last_message_id = message.id
-        conversation.last_message_at = message.created_at
-
-    db.commit()
-    db.refresh(message)
-    return message
 
 
 def create_chip_message(
@@ -181,29 +239,15 @@ def create_chip_message(
     """
     チップメッセージを作成
     """
-    message = ConversationMessages(
+    return _create_and_save_message(
+        db=db,
         conversation_id=conversation_id,
+        message_type=ConversationMessageType.CHIP,
         sender_user_id=sender_user_id,
         sender_admin_id=sender_admin_id,
-        type=ConversationMessageType.CHIP,
         body_text=body_text,
-        moderation=1,  # デフォルト: 承認済み
         status=status,
     )
-    db.add(message)
-    db.flush()
-
-    # 会話の最終メッセージ情報を更新
-    conversation = (
-        db.query(Conversations).filter(Conversations.id == conversation_id).first()
-    )
-    if conversation:
-        conversation.last_message_id = message.id
-        conversation.last_message_at = message.created_at
-
-    db.commit()
-    db.refresh(message)
-    return message
 
 def get_messages_by_conversation(
     db: Session, conversation_id: UUID, skip: int = 0, limit: int = 50

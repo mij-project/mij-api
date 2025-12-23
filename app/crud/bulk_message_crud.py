@@ -3,8 +3,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct, cast
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from uuid import UUID
+import uuid
 from typing import List, Dict, Optional
 from datetime import datetime
+from sqlalchemy.types import String
+from app.constants.enums import ConversationMessageStatus
 
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
@@ -18,7 +21,9 @@ from app.constants.enums import (
     PaymentStatus,
     SubscriptionStatus,
     SubscriptionType,
-    MessageAssetStatus
+    ItemType,
+    MessageAssetStatus,
+    ConversationMessageStatus
 )
 from app.crud import conversations_crud, message_assets_crud
 
@@ -62,21 +67,21 @@ def get_bulk_message_recipients(db: Session, creator_user_id: UUID) -> Dict:
     )
 
     # 3. プラン別加入者情報
-    # subscriptions テーブルで order_type = SubscriptionType.PLAN のユーザーを集計
-    # order_id を UUID にキャストして plans テーブルと結合
+    # subscriptions テーブルで order_type = ItemType.PLAN のユーザーを集計
+    # order_id を文字列として plans テーブルと結合
     plan_subscribers = (
         db.query(
-            cast(Subscriptions.order_id, PG_UUID).label('plan_id'),
+            Plans.id.label('plan_id'),
             Plans.name.label('plan_name'),
-            func.count(distinct(Subscriptions.user_id)).label('subscribers_count')
+            func.count(Subscriptions.id).label('subscribers_count')
         )
-        .join(Plans, cast(Subscriptions.order_id, PG_UUID) == Plans.id)
+        .join(Plans, Subscriptions.order_id == func.cast(Plans.id, String))
         .filter(
             Subscriptions.creator_id == creator_user_id,
-            Subscriptions.order_type == SubscriptionType.PLAN,
+            Subscriptions.order_type == ItemType.PLAN,
             Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED])
         )
-        .group_by(cast(Subscriptions.order_id, PG_UUID), Plans.name)
+        .group_by(Plans.id, Plans.name)
         .all()
     )
 
@@ -153,7 +158,7 @@ def get_target_user_ids(
             db.query(distinct(Subscriptions.user_id))
             .filter(
                 Subscriptions.creator_id == creator_user_id,
-                Subscriptions.order_type == SubscriptionType.PLAN,
+                Subscriptions.order_type == ItemType.PLAN,
                 Subscriptions.order_id.in_(plan_id_strings),
                 Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED])
             )
@@ -170,7 +175,8 @@ def send_bulk_messages(
     message_text: str,
     target_user_ids: List[UUID],
     asset_storage_key: Optional[str] = None,
-    asset_type: Optional[int] = None
+    asset_type: Optional[int] = None,
+    scheduled_at: Optional[datetime] = None
 ) -> int:
     """
     対象ユーザーに一斉メッセージを送信
@@ -182,12 +188,12 @@ def send_bulk_messages(
         target_user_ids: 送信対象ユーザーIDリスト
         asset_storage_key: アセットのストレージキー（任意）
         asset_type: アセットタイプ（任意）
-
+        scheduled_at: 予約送信日時（任意）
     Returns:
         送信数
     """
     sent_count = 0
-
+    group_by = str(uuid.uuid4())
     for user_id in target_user_ids:
         # 会話を取得または作成（type=2のDM）
         conversation = conversations_crud.get_or_create_dm_conversation(
@@ -197,12 +203,25 @@ def send_bulk_messages(
         )
 
         # メッセージを作成
-        message = conversations_crud.create_message(
-            db=db,
-            conversation_id=conversation.id,
-            sender_user_id=creator_user_id,
-            body_text=message_text
-        )
+        if scheduled_at:
+            message = conversations_crud.create_bulk_message(
+                db=db,
+                conversation_id=conversation.id,
+                sender_user_id=creator_user_id,
+                body_text=message_text,
+                status=ConversationMessageStatus.PENDING,
+                scheduled_at=scheduled_at
+            )
+        else:
+            message = conversations_crud.create_bulk_message(
+                db=db,
+                conversation_id=conversation.id,
+                sender_user_id=creator_user_id,
+                body_text=message_text,
+                status=ConversationMessageStatus.ACTIVE,
+            )
+
+
 
         # アセットがある場合はmessage_assetレコードを作成
         if asset_storage_key and asset_type:
@@ -211,7 +230,8 @@ def send_bulk_messages(
                 message_id=message.id,
                 asset_type=asset_type,
                 storage_key=asset_storage_key,
-                status=MessageAssetStatus.PENDING  # 審査待ち
+                status=MessageAssetStatus.PENDING,
+                group_by=group_by,
             )
 
         sent_count += 1

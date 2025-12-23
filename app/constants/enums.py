@@ -305,6 +305,7 @@ class ConversationMessageType:
     SYSTEM = 0 # システムメッセージ
     USER = 1 # メッセージ
     CHIP = 2 # チップメッセージ
+    BULK = 3 # 一斉送信メッセージ
 
 class ConversationMessageStatus:
     INACTIVE = 0 # 無効

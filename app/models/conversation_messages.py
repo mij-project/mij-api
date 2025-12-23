@@ -28,6 +28,7 @@ class ConversationMessages(Base):
     body_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     parent_message_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("conversation_messages.id"), nullable=True)
     moderation: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())

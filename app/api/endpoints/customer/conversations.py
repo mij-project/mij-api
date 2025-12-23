@@ -4,6 +4,7 @@ from sqlalchemy import cast
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from typing import List
 from uuid import UUID
+import uuid
 from app.schemas.conversation import MessageAssetInfo
 from app.db.base import get_db
 from app.deps.auth import get_current_user
@@ -395,12 +396,14 @@ def send_conversation_message(
     # アセットがある場合はmessage_assetレコードを作成
     message_asset = None
     if message_data.asset_storage_key and message_data.asset_type:
+        group_by = str(uuid.uuid4())
         message_asset = message_assets_crud.create_message_asset(
             db=db,
             message_id=message.id,
             asset_type=message_data.asset_type,
             storage_key=message_data.asset_storage_key,
             status=MessageAssetStatus.PENDING,  # 審査待ち
+            group_by=group_by,
         )
 
     # レスポンス構築
