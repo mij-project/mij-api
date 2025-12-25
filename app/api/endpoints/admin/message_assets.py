@@ -27,7 +27,7 @@ router = APIRouter()
 MESSAGE_ASSETS_CDN_URL = os.getenv("MESSAGE_ASSETS_CDN_URL", "")
 BASE_URL = os.getenv("CDN_BASE_URL")
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 def get_message_assets(
     status: Optional[int] = Query(None, description="0=審査中, 1=承認済み, 2=拒否"),
     page: int = Query(1, ge=1),
