@@ -9,6 +9,7 @@ from app.models.conversation_messages import ConversationMessages
 from app.models.conversations import Conversations
 from app.models.conversation_participants import ConversationParticipants
 from app.models.profiles import Profiles
+from app.models.reservation_message import ReservationMessage
 
 def create_message_asset(
     db: Session,
@@ -1242,3 +1243,92 @@ def resubmit_message_asset_by_group_by(
         db.refresh(representative_asset)
 
     return representative_asset
+
+
+def get_message_assets_by_group_by(db: Session, group_by: str) -> List[MessageAssets]:
+    """
+    group_byに紐づくすべてのメッセージアセットを取得
+
+    Args:
+        db: データベースセッション
+        group_by: グループ化キー
+
+    Returns:
+        メッセージアセットのリスト
+    """
+    assets = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.group_by == group_by)
+        .all()
+    )
+
+    return assets
+
+
+def delete_reserved_message_by_group_by(
+    db: Session,
+    group_by: str,
+    user_id: UUID
+) -> Tuple[Optional[ReservationMessage], List[str]]:
+    """
+    予約中のメッセージを物理削除
+    - conversation_messages (group_byに紐づく全レコード)
+    - message_assets (group_byに紐づく全レコード)
+    - reservation_message (group_byに紐づくレコード)
+
+    Args:
+        db: データベースセッション
+        group_by: グループ化キー
+        user_id: 送信者ユーザーID（権限確認用）
+
+    Returns:
+        Tuple[ReservationMessage | None, List[str]]: (削除されたreservation_message, S3ストレージキーのリスト)
+
+    Raises:
+        ValueError: 予約中のメッセージでない場合、または権限がない場合
+    """
+    # 1. メッセージの存在確認と権限チェック
+    messages = (
+        db.query(ConversationMessages)
+        .filter(
+            ConversationMessages.group_by == group_by,
+            ConversationMessages.sender_user_id == user_id
+        )
+        .all()
+    )
+
+    if not messages:
+        raise ValueError("Message not found or permission denied")
+
+    # 2. 予約中のメッセージであることを確認
+    if messages[0].status != ConversationMessageStatus.PENDING:
+        raise ValueError("Only reserved messages can be deleted")
+
+    # 3. reservation_messageを取得（EventBridge削除用）
+    reservation_message = (
+        db.query(ReservationMessage)
+        .filter(ReservationMessage.group_by == group_by)
+        .first()
+    )
+
+    # 4. message_assetsを取得してストレージキーを保存（S3削除用）
+    assets = get_message_assets_by_group_by(db, group_by)
+    storage_keys = [asset.storage_key for asset in assets if asset.storage_key]
+
+    # 5. DB削除（物理削除）
+    # message_assetsを削除
+    for asset in assets:
+        db.delete(asset)
+
+    # conversation_messagesを削除
+    for message in messages:
+        db.delete(message)
+
+    # reservation_messageを削除
+    if reservation_message:
+        db.delete(reservation_message)
+
+    db.flush()  # 削除を即座に反映（commitは呼び出し側で行う）
+
+    return reservation_message, storage_keys

@@ -493,6 +493,73 @@ def get_message_asset_upload_url_by_group_by(
         logger.error(f"Failed to generate upload URL: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
 
+@router.delete("/{group_by}")
+def delete_message_asset_by_group_by(
+    group_by: str,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    予約中のメッセージを削除（物理削除）
+    - conversation_messages (group_byに紐づく全レコード)
+    - message_assets (group_byに紐づく全レコード + S3ファイル)
+    - reservation_message (group_byに紐づくレコード + EventBridge Schedule)
+    """
+
+    try:
+        # 1. CRUD関数を使用してDB削除とreservation_message/storage_keysを取得
+        reservation_message, storage_keys = message_assets_crud.delete_reserved_message_by_group_by(
+            db, group_by, current_user.id
+        )
+
+        # 2. EventBridge Scheduleの削除
+        if reservation_message and reservation_message.event_bridge_name:
+            try:
+                scheduler = scheduler_client()
+                scheduler.delete_schedule(
+                    Name=reservation_message.event_bridge_name
+                )
+                logger.info(f"EventBridge schedule deleted: {reservation_message.event_bridge_name}")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to delete EventBridge schedule: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"EventBridge削除に失敗しました: {str(e)}"
+                )
+
+        # 3. S3ファイルの削除
+        for storage_key in storage_keys:
+            try:
+                delete_object(resource="message-assets", key=storage_key)
+                logger.info(f"S3 file deleted: {storage_key}")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to delete S3 file: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"S3ファイル削除に失敗しました: {str(e)}"
+                )
+
+        # 4. コミット
+        db.commit()
+        logger.info(f"Reserved message deleted successfully: {group_by}")
+
+        return {"message": "Reserved message deleted successfully"}
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to delete reserved message: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"予約メッセージ削除に失敗しました: {str(e)}"
+        )
 
 def _update_reservation_schedule(
     db: Session,

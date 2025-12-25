@@ -92,6 +92,8 @@ class ConversationMessagesResponse(BaseModel):
     partner_profile_name: Optional[str] = None
     partner_avatar: Optional[str] = None
     can_send_message: bool = False
+    current_user_is_creator: bool = False
+    partner_user_is_creator: bool = False
 
     class Config:
         from_attributes = True

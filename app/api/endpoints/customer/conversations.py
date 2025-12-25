@@ -339,6 +339,13 @@ def get_conversation_messages(
         # どちらか一方を満たせばメッセージ送信可能
         can_send_message = has_chip_history or has_dm_plan
 
+    # ユーザーの役割情報を取得
+    from app.constants.enums import AccountType
+    current_user_is_creator = current_user.account_type == AccountType.CREATOR
+    partner_user_is_creator = False
+    if partner_user_id and partner_user:
+        partner_user_is_creator = partner_user.account_type == AccountType.CREATOR
+
     return ConversationMessagesResponse(
         messages=message_responses,
         partner_user_id=partner_user_id,
@@ -346,6 +353,8 @@ def get_conversation_messages(
         partner_profile_name=partner_profile_name,
         partner_avatar=partner_avatar,
         can_send_message=can_send_message,
+        current_user_is_creator=current_user_is_creator,
+        partner_user_is_creator=partner_user_is_creator,
     )
 
 
