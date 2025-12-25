@@ -2,7 +2,8 @@ import random
 import string
 import secrets
 import base64
-import hashlib, bcrypt
+import hashlib 
+import bcrypt
 from typing import Dict, Any, Optional
 from os import getenv
 from app.constants.enums import MediaAssetKind, MediaAssetStatus
@@ -13,6 +14,7 @@ from app.services.s3.presign import presign_get
 
 CDN_URL = getenv("CDN_BASE_URL")
 MEDIA_CDN_URL = getenv("MEDIA_CDN_URL")
+INGEST_CDN_URL = getenv("INGEST_CDN_URL")
 
 APPROVED_MEDIA_CDN_KINDS = {
     MediaAssetKind.MAIN_VIDEO,
@@ -135,8 +137,9 @@ def resolve_media_asset_storage_key(media_asset: Dict[str, Any]) -> str:
 
     if status in PENDING_MEDIA_ASSET_STATUSES:
         if kind in PRESIGN_MEDIA_KINDS:
-            presign_url = presign_get("ingest", storage_key)
-            return presign_url["download_url"]
+            # presign_url = presign_get("ingest", storage_key)
+            # return presign_url["download_url"]
+            return f"{INGEST_CDN_URL}/{storage_key}"
         if kind in CDN_MEDIA_KINDS:
             return f"{CDN_URL}/{storage_key}"
 
