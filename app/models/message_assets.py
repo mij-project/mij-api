@@ -21,7 +21,6 @@ class MessageAssets(Base):
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     asset_type: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)
-    group_by: Mapped[str] = mapped_column(Text, nullable=False)
     reject_comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())

@@ -374,24 +374,24 @@ def send_conversation_message(
         raise HTTPException(status_code=400, detail="asset_type is required when asset_storage_key is provided")
 
     # メッセージを作成
+    group_by = str(uuid.uuid4())
     message = conversations_crud.create_message(
         db=db,
         conversation_id=conversation_id,
         sender_user_id=current_user.id,
         body_text=message_data.body_text,
+        group_by=group_by,
     )
 
     # アセットがある場合はmessage_assetレコードを作成
     message_asset = None
     if message_data.asset_storage_key and message_data.asset_type:
-        group_by = str(uuid.uuid4())
         message_asset = message_assets_crud.create_message_asset(
             db=db,
             message_id=message.id,
             asset_type=message_data.asset_type,
             storage_key=message_data.asset_storage_key,
             status=MessageAssetStatus.PENDING,  # 審査待ち
-            group_by=group_by,
         )
 
     # レスポンス構築
@@ -432,13 +432,20 @@ def mark_conversation_message_as_read(
     メッセージを既読にする
     - ユーザーが参加している会話のみ既読可能
     """
+    from app.core.logger import Logger
+    logger = Logger.get_logger()
+
+    logger.info(f"Mark as read request: conversation_id={conversation_id}, message_id={message_id}, user_id={current_user.id}")
+
     # ユーザーがこの会話に参加しているか確認
     if not conversations_crud.is_user_in_conversation(db, conversation_id, current_user.id):
+        logger.warning(f"User {current_user.id} is not a participant in conversation {conversation_id}")
         raise HTTPException(status_code=403, detail="Access denied to this conversation")
 
     # 既読にする
     conversations_crud.mark_as_read(db, conversation_id, current_user.id, message_id)
 
+    logger.info(f"Message {message_id} marked as read successfully")
     return {"status": "ok", "message": "Message marked as read"}
 
 

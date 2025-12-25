@@ -54,8 +54,9 @@ class MessageAssetRejectRequest(BaseModel):
 class MessageAssetResubmitRequest(BaseModel):
     """メッセージアセット再申請リクエスト（ユーザー用）"""
     message_text: Optional[str] = Field(None, max_length=1000, description="メッセージ本文（オプション）")
-    asset_storage_key: str = Field(..., description="新しいアセットのS3ストレージキー")
-    asset_type: int = Field(..., ge=1, le=2, description="1=画像, 2=動画")
+    asset_storage_key: Optional[str] = Field(None, description="新しいアセットのS3ストレージキー（Noneの場合は画像削除）")
+    asset_type: Optional[int] = Field(None, ge=1, le=2, description="1=画像, 2=動画（Noneの場合は画像削除）")
+    scheduled_at: Optional[datetime] = Field(None, description="予約送信日時（予約送信の場合のみ）")
 
 
 
@@ -66,8 +67,8 @@ class UserMessageAssetResponse(BaseModel):
     type: int
     group_by: str
     conversation_id: UUID
-    asset_type: int  # 1=画像, 2=動画
-    storage_key: str
+    asset_type: Optional[int] = None  # 1=画像, 2=動画（テキストのみの場合はNone）
+    storage_key: Optional[str] = None
     cdn_url: Optional[str] = None
     reject_comments: Optional[str] = None
     created_at: datetime
@@ -75,6 +76,8 @@ class UserMessageAssetResponse(BaseModel):
 
     # メッセージ情報
     message_text: Optional[str] = None
+    scheduled_at: Optional[datetime] = None  # 予約送信時刻
+    recipient_count: Optional[int] = None  # 送信先数（一斉送信の場合）
 
     # 相手の情報
     partner_user_id: Optional[UUID] = None
@@ -95,8 +98,8 @@ class UserMessageAssetDetailResponse(BaseModel):
     conversation_id: UUID
     status: int  # 0=審査待ち, 1=承認済み, 2=拒否
     message_status: Optional[int] = None  # conversation_messageのstatus（1=送信済み, 3=予約中など）
-    asset_type: int  # 1=画像, 2=動画
-    storage_key: str
+    asset_type: Optional[int] = None  # 1=画像, 2=動画（テキストのみの場合はNone）
+    storage_key: Optional[str] = None
     cdn_url: Optional[str] = None
     reject_comments: Optional[str] = None
     created_at: datetime
@@ -105,6 +108,7 @@ class UserMessageAssetDetailResponse(BaseModel):
     # メッセージ全文
     message_text: Optional[str] = None
     message_created_at: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None  # 予約送信時刻
 
     # 相手の情報
     partner_user_id: Optional[UUID] = None

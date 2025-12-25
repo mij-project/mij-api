@@ -17,21 +17,26 @@ from app.crud.user_crud import (
     check_profile_name_exists,
     get_user_profile_by_username,
     get_plan_details,
+    get_user_by_id,
 )
 from app.deps.auth import get_current_user, get_current_user_optional
 from app.crud.companies_crud import get_company_by_code
 from app.models.profiles import Profiles
 from app.models.user import Users
 from app.api.commons.utils import generate_code
-from app.crud.profile_crud import create_profile, get_profile_ogp_data
+from app.crud.profile_crud import create_profile, get_profile_ogp_data, get_profile_by_user_id
 from app.schemas.user import (
     ProfilePostResponse,
     ProfilePlanResponse,
     ProfilePurchaseResponse,
     ProfileGachaResponse,
+    TopBuyerResponse,
 )
+from app.crud.payments_crud import get_top_buyers_by_user_id
 from app.models.subscriptions import Subscriptions
-from app.constants.enums import ItemType, SubscriptionStatus
+from app.models.payments import Payments
+from app.constants.enums import ItemType, SubscriptionStatus, PaymentStatus
+from sqlalchemy import func, select
 from app.api.commons.utils import generate_email_verification_url
 import os
 from app.crud.email_verification_crud import issue_verification_token
@@ -295,6 +300,25 @@ def get_user_profile_by_username_endpoint(
                 )
             )
 
+        # 購入金額上位3名を取得
+        top_buyers = []
+        # seller_user_idが現在のユーザーで、statusがSUCCEEDEDのレコードを集計
+        top_buyers_results = get_top_buyers_by_user_id(db, user.id)
+        
+        for buyer_result in top_buyers_results:
+            buyer_user_id = buyer_result.buyer_user_id
+            # 購入者情報を取得
+            buyer_user = get_user_by_id(db, str(buyer_user_id))
+            if buyer_user:
+                buyer_profile = get_profile_by_user_id(db, buyer_user_id)
+                top_buyers.append(
+                    TopBuyerResponse(
+                        profile_name=buyer_user.profile_name if buyer_user else "",
+                        username=buyer_profile.username if buyer_profile else None,
+                        avatar_url=f"{BASE_URL}/{buyer_profile.avatar_url}" if buyer_profile and buyer_profile.avatar_url else None,
+                    )
+                )
+
         return UserProfileResponse(
             id=user.id,
             profile_name=user.profile_name,
@@ -314,6 +338,7 @@ def get_user_profile_by_username_endpoint(
             plans=profile_plans,
             individual_purchases=profile_purchases,
             gacha_items=profile_gacha_items,
+            top_buyers=top_buyers,
         )
     except Exception as e:
         logger.error("ユーザープロフィール取得エラー: ", e)

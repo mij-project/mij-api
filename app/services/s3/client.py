@@ -93,6 +93,12 @@ def ecs_client():
         region_name=AWS_REGION,
     )
 
+def scheduler_client():
+    return boto3.client(
+        "scheduler",
+        region_name=AWS_REGION,
+    )
+
 
 def _bucket_and_kms(resource: Resource):
     """

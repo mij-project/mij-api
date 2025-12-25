@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, Any
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from app.models.identity import IdentityVerifications
 from app.models.posts import Posts
 from app.models.profiles import Profiles
 from app.models.message_assets import MessageAssets
+from app.models.conversation_messages import ConversationMessages
 from app.models.admins import Admins
 from app.models.profile_image_submissions import ProfileImageSubmissions
 from app.constants.enums import PostStatus, ProfileImageStatus, VerificationStatus, CreatorStatus, MessageAssetStatus, MediaAssetStatus
@@ -129,12 +131,16 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
         total_users = db.query(Users).count()
         total_posts = db.query(Posts).count()
 
-        # メッセージアセット審査中件数（status=0が審査待ち、group_byでグループ化）
-        from sqlalchemy import func
-        # サブクエリでgroup_byでグループ化し、その数をカウント
+        # メッセージアセット審査中件数（status=0が審査待ち、ConversationMessages.group_byでグループ化）
+        # ConversationMessagesとJOINして、ConversationMessages.group_byでグループ化し、その数をカウント
         distinct_groups = (
-            db.query(MessageAssets.group_by)
-            .filter(MessageAssets.status.in_([MessageAssetStatus.PENDING, MessageAssetStatus.RESUBMIT]))
+            db.query(ConversationMessages.group_by)
+            .select_from(MessageAssets)
+            .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+            .filter(
+                MessageAssets.status.in_([MessageAssetStatus.PENDING, MessageAssetStatus.RESUBMIT]),
+                ConversationMessages.group_by.isnot(None)
+            )
             .distinct()
             .subquery()
         )

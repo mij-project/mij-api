@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, exists, or_
+from sqlalchemy import desc, exists, or_, func
 from typing import Optional, List, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
@@ -153,6 +153,7 @@ def _create_and_save_message(
     body_text: str = "",
     status: int = 1,
     scheduled_at: datetime | None = None,
+    group_by: str | None = None,
 ) -> ConversationMessages:
     """
     メッセージを作成・保存する共通関数
@@ -166,6 +167,7 @@ def _create_and_save_message(
         moderation=1,  # デフォルト: 承認済み
         status=status,
         scheduled_at=scheduled_at,
+        group_by=group_by,
     )
     db.add(message)
     db.flush()
@@ -185,6 +187,7 @@ def create_message(
     sender_admin_id: UUID | None = None,
     body_text: str = "",
     status: int = 1,
+    group_by: str | None = None,
 ) -> ConversationMessages:
     """
     メッセージを作成
@@ -201,6 +204,7 @@ def create_message(
         sender_admin_id=sender_admin_id,
         body_text=body_text,
         status=status,
+        group_by=group_by,
     )
 
 
@@ -212,6 +216,7 @@ def create_bulk_message(
     body_text: str = "",
     status: int = 1,
     scheduled_at: datetime | None = None,
+    group_by: str = "",
 ) -> ConversationMessages:
     """
     一斉送信メッセージを作成
@@ -225,6 +230,7 @@ def create_bulk_message(
         body_text=body_text,
         status=status,
         scheduled_at=scheduled_at,
+        group_by=group_by,
     )
 
 
@@ -310,7 +316,11 @@ def delete_message(db: Session, message_id: UUID) -> bool:
 
 
 def mark_as_read(db: Session, conversation_id: UUID, user_id: UUID, message_id: UUID):
-    """メッセージを既読にする（管理人用）"""
+    """メッセージを既読にする"""
+    from app.core.logger import Logger
+    logger = Logger.get_logger()
+
+    # 既存のparticipantレコードを取得
     participant = (
         db.query(ConversationParticipants)
         .filter(
@@ -321,8 +331,14 @@ def mark_as_read(db: Session, conversation_id: UUID, user_id: UUID, message_id: 
     )
 
     if participant:
+        logger.info(f"Marking message {message_id} as read for user {user_id} in conversation {conversation_id}")
         participant.last_read_message_id = message_id
+        participant.updated_at = func.now()
         db.commit()
+        db.refresh(participant)
+        logger.info(f"Successfully marked message as read. last_read_message_id={participant.last_read_message_id}")
+    else:
+        logger.warning(f"Participant not found for user {user_id} in conversation {conversation_id}")
 
 
 def get_unread_count(db: Session, conversation_id: UUID, user_id: UUID) -> int:
@@ -625,7 +641,9 @@ def get_user_conversations(
                         .scalar_subquery()
                     ),
                     ConversationMessages.sender_user_id != user_id,
-                    ConversationMessages.deleted_at.is_(None)
+                    ConversationMessages.deleted_at.is_(None),
+                    ConversationMessages.status != ConversationMessageStatus.PENDING,  # status=2を除外
+                    ConversationMessages.status != ConversationMessageStatus.INACTIVE,  # status=0を除外
                 )
                 .count()
             )
@@ -636,7 +654,9 @@ def get_user_conversations(
                 .filter(
                     ConversationMessages.conversation_id == conv.conversation_id,
                     ConversationMessages.sender_user_id != user_id,
-                    ConversationMessages.deleted_at.is_(None)
+                    ConversationMessages.deleted_at.is_(None),
+                    ConversationMessages.status != ConversationMessageStatus.PENDING,  # status=2を除外
+                    ConversationMessages.status != ConversationMessageStatus.INACTIVE,  # status=0を除外
                 )
                 .count()
             )

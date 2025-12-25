@@ -65,6 +65,12 @@ class ProfileGachaResponse(BaseModel):
     amount: int
     created_at: datetime
 
+class TopBuyerResponse(BaseModel):
+    """購入金額上位ユーザー情報"""
+    profile_name: str
+    username: Optional[str] = None
+    avatar_url: Optional[str] = None
+
 class UserProfileResponse(BaseModel):
     id: UUID
     profile_name: str
@@ -81,6 +87,7 @@ class UserProfileResponse(BaseModel):
     plans: List[ProfilePlanResponse]
     individual_purchases: List[ProfilePurchaseResponse]
     gacha_items: List[ProfileGachaResponse]
+    top_buyers: Optional[List[TopBuyerResponse]] = []
 
 class UserOGPResponse(BaseModel):
     """ユーザーOGP情報レスポンス"""

@@ -25,6 +25,7 @@ class ConversationMessages(Base):
     sender_admin_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("admins.id"), nullable=True)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=True, default=1)
     type: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    group_by: Mapped[str] = mapped_column(Text, nullable=True)
     body_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     parent_message_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("conversation_messages.id"), nullable=True)
     moderation: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)

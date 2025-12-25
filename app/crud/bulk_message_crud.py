@@ -4,11 +4,12 @@ from sqlalchemy import func, distinct, cast
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from uuid import UUID
 import uuid
+import json
 from typing import List, Dict, Optional
 from datetime import datetime
 from sqlalchemy.types import String
 from app.constants.enums import ConversationMessageStatus
-
+from app.services.s3.ecs_task import run_ecs_task
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
 from app.models.plans import Plans
@@ -26,7 +27,10 @@ from app.constants.enums import (
     ConversationMessageStatus
 )
 from app.crud import conversations_crud, message_assets_crud
-
+from app.services.s3.client import scheduler_client
+import os
+from app.core.logger import Logger
+logger = Logger.get_logger()
 
 def get_bulk_message_recipients(db: Session, creator_user_id: UUID) -> Dict:
     """
@@ -194,6 +198,7 @@ def send_bulk_messages(
     """
     sent_count = 0
     group_by = str(uuid.uuid4())
+    message_ids = []
     for user_id in target_user_ids:
         # 会話を取得または作成（type=2のDM）
         conversation = conversations_crud.get_or_create_dm_conversation(
@@ -210,8 +215,10 @@ def send_bulk_messages(
                 sender_user_id=creator_user_id,
                 body_text=message_text,
                 status=ConversationMessageStatus.PENDING,
-                scheduled_at=scheduled_at
+                scheduled_at=scheduled_at,
+                group_by=group_by
             )
+            message_ids.append(message.id)
         else:
             message = conversations_crud.create_bulk_message(
                 db=db,
@@ -219,8 +226,8 @@ def send_bulk_messages(
                 sender_user_id=creator_user_id,
                 body_text=message_text,
                 status=ConversationMessageStatus.ACTIVE,
+                group_by=group_by
             )
-
 
 
         # アセットがある場合はmessage_assetレコードを作成
@@ -231,9 +238,8 @@ def send_bulk_messages(
                 asset_type=asset_type,
                 storage_key=asset_storage_key,
                 status=MessageAssetStatus.PENDING,
-                group_by=group_by,
             )
 
         sent_count += 1
 
-    return sent_count
+    return sent_count, message_ids, group_by

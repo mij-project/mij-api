@@ -335,6 +335,7 @@ def _update_or_create_user_provider(
         cardbrand: カードブランド
         cardnumber: カード番号
         yuko: 有効期限
+        main_card: メインカードかどうか
     """
     if not send_id:
         return
@@ -845,6 +846,7 @@ def _send_chip_payment_notifications_for_buyer(
 
     # メッセージテキスト取得
     message_text = None
+    conversation_id = None
     if message_id:
         try:
             message = db.query(ConversationMessages).filter(
@@ -852,9 +854,19 @@ def _send_chip_payment_notifications_for_buyer(
             ).first()
             if message:
                 message_text = message.body_text
+                conversation_id = message.conversation_id
         except Exception as e:
             logger.error(f"Failed to get message {message_id}: {e}")
 
+    if chip_message_id:
+        try:
+            chip_message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(chip_message_id)
+            ).first()
+            if chip_message:
+                conversation_id = chip_message.conversation_id
+        except Exception as e:
+            logger.error(f"Failed to get chip message {chip_message_id}: {e}")
     # チップ金額計算（手数料除く）
     payment_amount = money if money else 0
 
@@ -875,7 +887,10 @@ def _send_chip_payment_notifications_for_buyer(
         title = "チップの送信に失敗しました"
         subtitle = "チップの送信に失敗しました"
 
-    notification_redirect_url = f"/profile?username={recipient_profile.username}"
+    if conversation_id:
+        notification_redirect_url = f"/message/conversation/{conversation_id}"
+    else:
+        notification_redirect_url = f"/profile?username={recipient_profile.username}"
 
     # メール送信
     try:
@@ -970,6 +985,7 @@ def _send_chip_payment_notifications_for_seller(
 
     # メッセージテキスト取得
     message_text = None
+    conversation_id = None
     if message_id:
         try:
             message = db.query(ConversationMessages).filter(
@@ -977,8 +993,19 @@ def _send_chip_payment_notifications_for_seller(
             ).first()
             if message:
                 message_text = message.body_text
+                conversation_id = message.conversation_id
         except Exception as e:
             logger.error(f"Failed to get message {message_id}: {e}")
+
+    if chip_message_id:
+        try:
+            chip_message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(chip_message_id)
+            ).first()
+            if chip_message:
+                conversation_id = chip_message.conversation_id
+        except Exception as e:
+            logger.error(f"Failed to get chip message {chip_message_id}: {e}")
 
     # チップ金額計算
     payment_amount = payment.payment_amount if payment.payment_amount else 0
@@ -1006,7 +1033,10 @@ def _send_chip_payment_notifications_for_seller(
     # 通知内容を作成
     title = f"{buyer_name}さんからチップが届きました"
     subtitle = f"{buyer_name}さんからチップが届きました"
-    notification_redirect_url = "/account/sale"
+    if conversation_id:
+        notification_redirect_url = f"/message/conversation/{conversation_id}"
+    else:
+        notification_redirect_url = "/account/sale"
 
     # アバターURLの取得
     avatar_url = "https://logo.mijfans.jp/bimi/logo.svg"
@@ -1018,6 +1048,7 @@ def _send_chip_payment_notifications_for_seller(
         frontend_url = os.environ.get("FRONTEND_URL", "https://mijfans.jp")
         sender_profile_url = f"{frontend_url}/profile?username={buyer_profile.username}" if buyer_profile else ""
 
+        sales_url = f"{frontend_url}/message/conversation/{conversation_id}" if conversation_id else f"{frontend_url}/account/sale"
         send_chip_payment_seller_success_email(
             to=recipient_user.email,
             sender_name=buyer_name,
@@ -1027,7 +1058,7 @@ def _send_chip_payment_notifications_for_seller(
             payment_date=payment_date,
             has_message=bool(message_text),
             message_text=message_text,
-            sales_url=f"{frontend_url}/account/sale",
+            sales_url=sales_url,
         )
     except Exception as e:
         logger.error(f"Failed to send chip payment seller email: {e}")
@@ -1098,6 +1129,9 @@ def _handle_chip_payment_success(
     transaction: PaymentTransactions,
     payment_amount: int,
     sendid: Optional[str] = None,
+    cardbrand: Optional[str] = None,
+    cardnumber: Optional[str] = None,
+    yuko: Optional[str] = None,
 ) -> Payments:
     """
     チップ決済成功時の処理
@@ -1170,6 +1204,7 @@ def _handle_chip_payment_success(
 
     # チップ金額（手数料除く）
     chip_amount = int(payment_amount / 1.1)
+    
 
     # paymentsレコード作成
     payment = payments_crud.create_payment(
@@ -1186,6 +1221,10 @@ def _handle_chip_payment_success(
         payment_price=chip_amount,
         status=PaymentStatus.SUCCEEDED,
         platform_fee=creator_info.platform_fee_percent,
+    )
+
+    _update_or_create_user_provider(
+        db, transaction, sendid, cardbrand, cardnumber, yuko, True
     )
 
     return payment
@@ -1355,6 +1394,9 @@ async def payment_webhook(
                     transaction=transaction,
                     payment_amount=payment_amount,
                     sendid=sendid,
+                    cardbrand=cardbrand,
+                    cardnumber=cardnumber,
+                    yuko=yuko,
                 )
             else:
                 payment = _handle_successful_payment(

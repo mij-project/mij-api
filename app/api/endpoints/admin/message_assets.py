@@ -85,7 +85,7 @@ def get_message_assets(
         responses.append(
             AdminMessageAssetListResponse(
                 id=asset.id,
-                group_by=asset.group_by,
+                group_by=group["group_by"],
                 type=message.type,
                 conversation_id=message.conversation_id,
                 status=asset.status,
@@ -151,7 +151,7 @@ def get_message_asset_detail(
 
     return AdminMessageAssetDetailResponse(
         id=asset.id,
-        group_by=asset.group_by,
+        group_by=message.group_by,
         type=message.type,
         status=asset.status,
         asset_type=asset.asset_type,
@@ -212,9 +212,11 @@ def reject_message_asset(
     - 送信者への通知を送信
     """
     # 代表的なアセットを取得（メッセージ情報取得のため）
+    # ConversationMessages.group_byでフィルタリング
     asset = (
         db.query(MessageAssets)
-        .filter(MessageAssets.group_by == group_by)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.group_by == group_by)
         .order_by(MessageAssets.created_at.asc())
         .first()
     )
