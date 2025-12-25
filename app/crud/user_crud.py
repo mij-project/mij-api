@@ -9,6 +9,7 @@ from sqlalchemy import select, desc, func, update, asc, case
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone
 from uuid import UUID
+from app.models.creators import Creators
 from app.constants.enums import (
     AccountType,
     AccountStatus,
@@ -401,3 +402,10 @@ def create_super_user(db: Session, email: str, password: str, name: str) -> User
     db.add(user)
     db.flush()
     return user
+
+
+def get_creator_by_user_id(db: Session, user_id: str) -> Creators:
+    """
+    ユーザーIDによるクリエイター情報取得
+    """
+    return db.scalar(select(Creators).where(Creators.user_id == user_id))

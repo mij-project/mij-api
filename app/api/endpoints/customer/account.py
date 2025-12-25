@@ -34,6 +34,9 @@ from app.schemas.account import (
     LikedPostsListResponse,
     BoughtPostsResponse,
 )
+from app.schemas.message_asset import (
+    UserMessageAssetsListResponse,
+)
 from app.schemas.profile_image import (
     ProfileImageSubmissionCreate,
     ProfileImageSubmissionResponse,
@@ -68,7 +71,7 @@ from app.crud.profile_crud import (
     update_profile,
     exist_profile_by_username,
 )
-from app.crud import profile_image_crud
+from app.crud import profile_image_crud, message_assets_crud
 from app.services.email.send_email import send_email_verification
 from app.services.s3.keygen import account_asset_key
 from app.services.s3.presign import presign_put_public
@@ -249,12 +252,28 @@ def get_account_info(
             single_purchases_data=single_purchases_data,
         )
 
+        # メッセージアセット情報を取得（カウント数のみ）
+        counts = message_assets_crud.get_user_message_assets_counts(db, current_user.id)
+        pending_count = counts['pending_count']
+        reject_count = counts['reject_count']
+        reserved_count = counts['reserved_count']
+
+        message_assets_info = UserMessageAssetsListResponse(
+            pending_message_assets=[],
+            reject_message_assets=[],
+            reserved_message_assets=[],
+            pending_count=pending_count,
+            reject_count=reject_count,
+            reserved_count=reserved_count,
+        )
+
         return AccountInfoResponse(
             profile_info=profile_info,
             social_info=social_info,
             posts_info=posts_info,
             sales_info=sales_info,
             plan_info=plan_info,
+            message_assets_info=message_assets_info,
         )
     except Exception as e:
         logger.error(f"アカウント情報取得エラーが発生しました: {e}", exc_info=True)
@@ -292,6 +311,14 @@ def get_account_info(
                 subscribed_plan_details=[],
                 single_purchases_count=0,
                 single_purchases_data=[],
+            ),
+            message_assets_info=UserMessageAssetsListResponse(
+                pending_message_assets=[],
+                reject_message_assets=[],
+                reserved_message_assets=[],
+                pending_count=0,
+                reject_count=0,
+                reserved_count=0,
             ),
         )
 

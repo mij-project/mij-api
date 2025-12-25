@@ -40,10 +40,16 @@ async def get_gvm_report(
         "single_gmv_overalltime": gmv_reports_overalltime["single_gmv_overalltime"]
         if gmv_reports_overalltime
         else 0,
+        "chip_gmv_overalltime": gmv_reports_overalltime["chip_gmv_overalltime"]
+        if gmv_reports_overalltime
+        else 0,
         "plan_count_overalltime": gmv_reports_overalltime["plan_count_overalltime"]
         if gmv_reports_overalltime
         else 0,
         "single_count_overalltime": gmv_reports_overalltime["single_count_overalltime"]
+        if gmv_reports_overalltime
+        else 0,
+        "chip_count_overalltime": gmv_reports_overalltime["chip_count_overalltime"]
         if gmv_reports_overalltime
         else 0,
         "gmv_period": gmv_reports_period["gmv_period"] if gmv_reports_period else 0,

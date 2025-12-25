@@ -1,0 +1,191 @@
+# 予約メッセージ送信バッチ
+
+予約送信されたメッセージを指定時刻に送信し、受信者に通知（DB通知 + メール通知）を送るバッチ処理です。
+
+## 機能概要
+
+1. **予約メッセージの送信**
+   - 環境変数で指定されたメッセージIDのリストを取得
+   - 各メッセージのステータスを「送信済み」に更新
+
+2. **通知の送信**
+   - 会話参加者のうち、送信者以外の全員に通知を送信
+   - ユーザー設定（`user_settings.settings.message`）がfalseの場合は通知をスキップ
+   - 通知がミュートされている参加者にはスキップ
+
+3. **DB通知**
+   - `notifications`テーブルに通知を挿入
+   - 通知タイプ: `2` (users -> users)
+   - ペイロード内容: 送信者名、アバター、会話へのリンク等
+
+4. **メール通知**
+   - HTMLメールを送信
+   - テンプレート: `mailtemplates/new_message.html`
+
+## 環境変数
+
+| 変数名 | 必須 | 説明 | 例 |
+|--------|------|------|-----|
+| `MESSAGE_IDS_JSON` | ✅ | 送信するメッセージIDのJSON配列 | `["uuid1", "uuid2"]` |
+| `SENDER_USER_ID` | ✅ | 送信者のユーザーID（UUID） | `"550e8400-e29b-41d4-a716-446655440000"` |
+| `FRONTEND_URL` | ❌ | フロントエンドURL（メール内リンク用） | `"https://mijfans.jp"` |
+| `CDN_BASE_URL` | ❌ | CDNのベースURL（アバター画像用） | `"https://cdn.mijfans.jp"` |
+| `EMAIL_ENABLED` | ❌ | メール送信の有効/無効 | `"true"` / `"false"` |
+| `EMAIL_BACKEND` | ❌ | メールバックエンド | `"auto"` / `"mailhog"` / `"ses"` |
+| `MAIL_FROM` | ❌ | 送信元メールアドレス | `"no-reply@mijfans.jp"` |
+| `MAIL_FROM_NAME` | ❌ | 送信元名 | `"mijfans"` |
+
+## 実行方法
+
+### 基本的な実行
+
+```bash
+cd /Users/dkdk_23/workspace/02_mij-project/mij-project/apps/mij-api/batchs/batch-send-reservation-massage
+
+# 環境変数を設定して実行
+export MESSAGE_IDS_JSON='["6b8a2433-a257-4c2c-b51e-6ad2c5b4dd4c", "fc8b13ee-d384-43ab-8ecf-9f1273af4b37"]'
+export SENDER_USER_ID="06f82791-acae-4839-994f-edb8ff592d23"
+
+python main.py
+```
+
+### .envファイルを使った実行
+
+```bash
+# .envファイルを作成
+cat << EOF > .env
+MESSAGE_IDS_JSON='["58f1f044-4fca-45e5-a2ab-12faee8fc737"]'
+SENDER_USER_ID="550e8400-e29b-41d4-a716-446655440000"
+FRONTEND_URL="https://mijfans.jp"
+CDN_BASE_URL="https://cdn.mijfans.jp"
+EMAIL_ENABLED="true"
+EMAIL_BACKEND="ses"
+EOF
+
+# .envを読み込んで実行
+set -a && source .env && set +a && python main.py
+```
+
+## データフロー
+
+```
+1. MESSAGE_IDS_JSONから送信対象メッセージIDを取得
+   ↓
+2. 各メッセージIDに対して:
+   a. ConversationMessagesテーブルから会話情報を取得
+   b. conversation_participantsから受信者リストを取得（送信者を除く）
+   c. 各受信者について:
+      - user_settingsで「message」がtrueか確認
+      - notifications_mutedがfalseか確認
+      - 条件を満たす場合のみ通知送信
+   ↓
+3. 通知送信:
+   a. Notificationsテーブルに挿入
+   b. メール送信
+   ↓
+4. メッセージのstatusを「送信済み」(1)に更新
+   ↓
+5. DBコミット
+```
+
+## user_settings.settings の「message」設定
+
+`user_settings`テーブルの`settings`フィールド（JSONB型）で、メッセージ通知のON/OFFを制御します。
+
+```json
+{
+  "message": true   // メッセージ通知を受け取る
+}
+```
+
+```json
+{
+  "message": false  // メッセージ通知を受け取らない
+}
+```
+
+設定がない場合はデフォルトで`true`として扱われます。
+
+## 通知ペイロード構造
+
+```json
+{
+  "type": "new_message",
+  "title": "送信者名からメッセージが届きました",
+  "subtitle": "送信者名からメッセージが届きました",
+  "message": "送信者名からメッセージが届きました",
+  "avatar": "https://cdn.mijfans.jp/path/to/avatar.jpg",
+  "redirect_url": "/messages?conversation_id=xxxxx",
+  "conversation_id": "xxxxx-xxxxx-xxxxx",
+  "message_id": "yyyyy-yyyyy-yyyyy"
+}
+```
+
+## ログ出力例
+
+```json
+{"level": "INFO", "message": "START BATCH SEND RESERVATION MESSAGE"}
+{"level": "INFO", "message": "message_ids count=2"}
+{"level": "INFO", "message": "[SEND] conversation_id=d737265c-c9fe-46ca-b09c-bd62d753a725 message_id=58f1f044-4fca-45e5-a2ab-12faee8fc737"}
+{"level": "INFO", "message": "Notification inserted for user: user123"}
+{"level": "INFO", "message": "Email sent to: user@example.com"}
+{"level": "INFO", "message": "Done. sent=2, failed=0"}
+{"level": "INFO", "message": "END BATCH SEND RESERVATION MESSAGE"}
+```
+
+## エラーハンドリング
+
+- メッセージが存在しない場合: エラーログを出力してスキップ
+- 送信者IDが不正な形式の場合: エラーログを出力
+- 通知送信に失敗した場合: エラーログを出力して次の受信者へ進む
+- メールアドレスがない場合: 警告ログを出力してメール送信をスキップ
+
+## ディレクトリ構造
+
+```
+batch-send-reservation-massage/
+├── main.py                          # エントリーポイント
+├── send_reservation_message.py      # メイン処理ロジック
+├── README.md                        # このファイル
+├── common/
+│   ├── db_session.py               # DB接続
+│   ├── logger.py                   # ロガー
+│   ├── constants.py                # 定数
+│   └── email_service.py            # メール送信サービス
+├── models/
+│   ├── conversation_messages.py    # メッセージモデル
+│   ├── conversation_participants.py # 参加者モデル
+│   ├── conversations.py            # 会話モデル
+│   ├── user.py                     # ユーザーモデル
+│   ├── user_settings.py            # ユーザー設定モデル
+│   ├── profiles.py                 # プロフィールモデル
+│   └── notifications.py            # 通知モデル
+└── mailtemplates/
+    └── new_message.html            # メール通知HTMLテンプレート
+```
+
+## 注意事項
+
+1. **外部キー制約なし**: このバッチのモデルファイルは外部キー制約を使用していません（バッチ実行の安定性のため）
+2. **トランザクション**: すべてのメッセージ処理が完了後に一括コミットします
+3. **送信者ID必須**: `SENDER_USER_ID`環境変数が設定されていない場合、送信者情報が取得できません
+4. **メール送信**: 環境に応じて自動的にMailHog（開発環境）またはSES（本番環境）を使用します
+
+## トラブルシューティング
+
+### 通知が送信されない
+
+- `user_settings.settings.message`が`false`になっていないか確認
+- `conversation_participants.notifications_muted`が`true`になっていないか確認
+- ログで具体的なエラーメッセージを確認
+
+### メールが届かない
+
+- `EMAIL_ENABLED`が`true`になっているか確認
+- 受信者のメールアドレスが正しく設定されているか確認
+- SES設定（本番環境）またはMailHog起動（開発環境）を確認
+
+### 外部キーエラーが発生する
+
+- モデルファイルから`ForeignKey`が削除されているか確認
+- 他のバッチ（`batch-notification-newpost-arrival`）のモデルと同じ構造になっているか確認

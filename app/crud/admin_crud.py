@@ -1,18 +1,20 @@
 from typing import List, Optional, Dict, Any
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc
 from datetime import datetime, timezone
-
+from app.models.media_assets import MediaAssets
 from app.models.notifications import Notifications
 from app.models.user import Users
 from app.models.creators import Creators
 from app.models.identity import IdentityVerifications
 from app.models.posts import Posts
 from app.models.profiles import Profiles
-from app.models.media_assets import MediaAssets
+from app.models.message_assets import MessageAssets
+from app.models.conversation_messages import ConversationMessages
 from app.models.admins import Admins
 from app.models.profile_image_submissions import ProfileImageSubmissions
-from app.constants.enums import PostStatus, MediaAssetStatus
+from app.constants.enums import PostStatus, ProfileImageStatus, VerificationStatus, CreatorStatus, MessageAssetStatus, MediaAssetStatus
 import os
 
 from app.schemas.notification import NotificationType
@@ -128,31 +130,46 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
         # 基本統計
         total_users = db.query(Users).count()
         total_posts = db.query(Posts).count()
+
+        # メッセージアセット審査中件数（status=0が審査待ち、ConversationMessages.group_byでグループ化）
+        # ConversationMessagesとJOINして、ConversationMessages.group_byでグループ化し、その数をカウント
+        distinct_groups = (
+            db.query(ConversationMessages.group_by)
+            .select_from(MessageAssets)
+            .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+            .filter(
+                MessageAssets.status.in_([MessageAssetStatus.PENDING, MessageAssetStatus.RESUBMIT]),
+                ConversationMessages.group_by.isnot(None)
+            )
+            .distinct()
+            .subquery()
+        )
+        pending_message_assets = db.query(func.count()).select_from(distinct_groups).scalar() or 0
         
-        # 身分証申請中件数（status=1が申請中）
+        # 身分証申請中件数（status=1が承認待ち）
         pending_identity_verifications = (
             db.query(IdentityVerifications)
-            .filter(IdentityVerifications.status == 1).count()
+            .filter(IdentityVerifications.status == VerificationStatus.WAITING).count()
         )
         
-        # クリエイター申請中件数（status=1が申請中）
+        # クリエイター申請中件数（status=2が申請中）
         pending_creator_applications = (
             db.query(Creators)
-            .filter(Creators.status == 1)
+            .filter(Creators.status == CreatorStatus.APPLICATED)
             .count()
         )
         
         # 投稿申請中件数（審査待ちの投稿があると仮定してstatus=1）
         pending_post_reviews = (
             db.query(Posts)
-            .filter(Posts.status == 1)
+            .filter(Posts.status.in_([PostStatus.PENDING, PostStatus.RESUBMIT]))
             .count()
         )
 
         # プロフィール画像審査中件数（status=1が審査待ち）
         pending_profile_reviews = (
             db.query(ProfileImageSubmissions)
-            .filter(ProfileImageSubmissions.status == 1)
+            .filter(ProfileImageSubmissions.status == ProfileImageStatus.PENDING)
             .count()
         )
 
@@ -169,6 +186,7 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
             "pending_creator_applications": pending_creator_applications,
             "pending_post_reviews": pending_post_reviews,
             "pending_profile_reviews": pending_profile_reviews,
+            "pending_message_assets": pending_message_assets,
             "monthly_revenue": monthly_revenue,
             "active_subscriptions": active_subscriptions
         }
@@ -182,6 +200,7 @@ def get_dashboard_info(db: Session) -> Dict[str, Any]:
             "pending_creator_applications": 0,
             "pending_post_reviews": 0,
             "pending_profile_reviews": 0,
+            "pending_message_assets": 0,
             "monthly_revenue": 0,
             "active_subscriptions": 0
         }

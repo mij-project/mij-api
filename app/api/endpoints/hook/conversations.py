@@ -132,6 +132,8 @@ async def websocket_delusion_endpoint(
 
     if not user:
         logger.error("❌ Authentication failed, closing connection")
+        # WebSocket接続を受け入れてから閉じる必要がある
+        await websocket.accept()
         await websocket.close(code=4001, reason="Invalid token")
         return
 
@@ -229,12 +231,16 @@ async def websocket_admin_delusion_endpoint(
     # トークン検証（管理者テーブルから取得）
     admin = await get_admin_from_cookie(websocket, db)
     if not admin:  # 管理者認証チェック
+        # WebSocket接続を受け入れてから閉じる必要がある
+        await websocket.accept()
         await websocket.close(code=4003, reason="Admin access required")
         return
 
     # 会話の存在確認
     conversation = conversations_crud.get_conversation_by_id(db, UUID(conversation_id))
     if not conversation:
+        # WebSocket接続を受け入れてから閉じる必要がある
+        await websocket.accept()
         await websocket.close(code=4004, reason="Conversation not found")
         return
 
@@ -312,4 +318,135 @@ async def websocket_admin_delusion_endpoint(
         manager.disconnect(websocket, conversation_id)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket, conversation_id)
+
+
+@router.websocket("/conversations/{conversation_id}")
+async def websocket_conversation_endpoint(
+    websocket: WebSocket, conversation_id: str, db: Session = Depends(get_db)
+):
+    """
+    DM用WebSocketエンドポイント
+    - Cookieからトークンを取得
+    - 指定された会話に接続（参加者のみ）
+    - リアルタイムでメッセージを送受信
+    """
+    # トークン検証
+    user = await get_user_from_cookie(websocket, db)
+
+    if not user:
+        logger.error("❌ Authentication failed, closing connection")
+        await websocket.accept()
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # ユーザーがこの会話に参加しているか確認
+    if not conversations_crud.is_user_in_conversation(db, UUID(conversation_id), user.id):
+        logger.error(f"❌ User {user.id} is not participant of conversation {conversation_id}")
+        await websocket.accept()
+        await websocket.close(code=4002, reason="Access denied to this conversation")
+        return
+
+    # 会話の存在確認
+    conversation = conversations_crud.get_conversation_by_id(db, UUID(conversation_id))
+    if not conversation:
+        await websocket.accept()
+        await websocket.close(code=4004, reason="Conversation not found")
+        return
+
+    # WebSocket接続を確立
+    await manager.connect(websocket, conversation_id)
+
+    try:
+        # 接続成功メッセージを送信
+        connection_message = {
+            "type": "connected",
+            "conversation_id": conversation_id,
+            "message": "Connected to conversation",
+        }
+        await websocket.send_json(connection_message)
+
+        # メッセージの受信ループ
+        while True:
+            # クライアントからのメッセージを受信
+            data = await websocket.receive_json()
+
+            message_type = data.get("type")
+
+            if message_type == "message":
+                # テキストメッセージの送信
+                body_text = data.get("body_text")
+
+                if not body_text:
+                    error_msg = {"type": "error", "message": "body_text is required"}
+                    logger.error(f"❌ Sending error: {error_msg}")
+                    await websocket.send_json(error_msg)
+                    continue
+
+                # メッセージをDBに保存
+                logger.info(f"💾 Saving message to DB...")
+                message = conversations_crud.create_message(
+                    db=db,
+                    conversation_id=UUID(conversation_id),
+                    sender_user_id=user.id,
+                    body_text=body_text,
+                )
+                logger.info(f"✅ Message saved with ID: {message.id}")
+
+                # 送信者のアバター情報を取得
+                sender_avatar = None
+                if user.profile and user.profile.avatar_url:
+                    sender_avatar = f"{BASE_URL}/{user.profile.avatar_url}"
+
+                # 会話に接続している全員に配信
+                broadcast_data = {
+                    "type": "new_message",
+                    "message": {
+                        "id": str(message.id),
+                        "conversation_id": str(message.conversation_id),
+                        "sender_user_id": str(message.sender_user_id)
+                        if message.sender_user_id
+                        else None,
+                        "sender_admin_id": None,
+                        "type": message.type,
+                        "body_text": message.body_text,
+                        "created_at": message.created_at.isoformat(),
+                        "updated_at": message.updated_at.isoformat(),
+                        "sender_username": user.profile_name
+                        if hasattr(user, "profile_name")
+                        else None,
+                        "sender_avatar": sender_avatar,
+                        "sender_profile_name": user.profile_name
+                        if hasattr(user, "profile_name")
+                        else None,
+                    },
+                }
+                await manager.broadcast_to_conversation(conversation_id, broadcast_data)
+
+            elif message_type == "mark_read":
+                # 既読マーク
+                message_id = data.get("message_id")
+                if message_id:
+                    conversations_crud.mark_as_read(
+                        db=db,
+                        conversation_id=UUID(conversation_id),
+                        user_id=user.id,
+                        message_id=UUID(message_id),
+                    )
+                    await websocket.send_json(
+                        {"type": "read_confirmed", "message_id": message_id}
+                    )
+
+            elif message_type == "ping":
+                # Ping/Pongでコネクション維持
+                await websocket.send_json({"type": "pong"})
+
+    except WebSocketDisconnect:
+        logger.info(f"🔌 User {user.id} disconnected from conversation {conversation_id}")
+        manager.disconnect(websocket, conversation_id)
+    except Exception as e:
+        logger.error(f"❌ WebSocket error: {e}")
+        import traceback
+
+        traceback.print_exc()
         manager.disconnect(websocket, conversation_id)

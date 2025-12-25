@@ -5,7 +5,9 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from app.models.payments import Payments
 from datetime import datetime, timezone
-
+from app.constants.enums import PaymentType, PaymentStatus
+from typing import List
+from sqlalchemy import func
 
 def create_payment(
     db: Session,
@@ -73,3 +75,50 @@ def create_free_payment(
     db.add(payment)
     db.flush()
     return payment
+
+def get_payment_by_user_id(
+    db: Session,
+    user_id: UUID,
+    partner_user_id: UUID,
+    payment_type: int,
+) -> Payments:
+    """
+    ユーザーの決済履歴を取得
+    """
+    has_chip_history = db.query(Payments).filter(
+        Payments.payment_type == PaymentType.CHIP,
+        Payments.status == PaymentStatus.SUCCEEDED,
+        (
+            (Payments.buyer_user_id == user_id) & (Payments.seller_user_id == partner_user_id)
+        ) | (
+            (Payments.buyer_user_id == partner_user_id) & (Payments.seller_user_id == user_id)
+        )
+    ).first() is not None
+    return has_chip_history
+
+def get_top_buyers_by_user_id(
+    db: Session,
+    user_id: UUID,
+) -> List[Payments]:
+    """
+    ユーザーの購入金額上位3名を取得
+    3件ない場合は空配列を返す
+    """
+    top_buyers_query = (
+        db.query(
+            Payments.buyer_user_id,
+            func.sum(Payments.payment_amount).label("total_amount")
+        )
+        .filter(
+            Payments.seller_user_id == user_id,
+            Payments.status == PaymentStatus.SUCCEEDED
+        )
+        .group_by(Payments.buyer_user_id)
+        .order_by(func.sum(Payments.payment_amount).desc())
+        .limit(3)
+    )
+    top_buyers_results = top_buyers_query.all()
+    # 3件ない場合は空配列を返す
+    if len(top_buyers_results) < 3:
+        return []
+    return top_buyers_results

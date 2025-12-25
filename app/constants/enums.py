@@ -252,6 +252,7 @@ class PaymentTransactionType:
     SINGLE = 1 # 単品購入
     SUBSCRIPTION = 2 # プラン購読
     FREE = 3 # 0円決済（無料）
+    CHIP = 4 # 投げ銭
 
 
 class PaymentTransactionStatus:
@@ -269,9 +270,10 @@ class SubscriptionStatus:
     EXPIRED = 3 # キャンセル
 
 class TransactionType:
-    PAYMENT_ORIGIN_BATCH = "B" # バッチからのリクエスト 
+    PAYMENT_ORIGIN_BATCH = "B" # バッチからのリクエスト
     PAYMENT_ORIGIN_FRONT = "F" # フロントエンドからのリクエスト
     PAYMENT_ORIGIN_FREE = "G" # 0円決済（無料）
+    PAYMENT_ORIGIN_CHIP = "C" # 投げ銭
 
 class PaymentStatus:
     PENDING = 1 # 保留
@@ -291,8 +293,31 @@ class WithdrawStatus:
 class PaymentType:
     PLAN = 2 # サブスクリプション
     SINGLE = 1 # 単品購入
+    CHIP = 3 # 投げ銭
 
 class UserBankAccountType:
     NORMAL = 1 # 普通
     CURRENT = 2 # 当座
     SAVINGS = 3 # 貯蓄
+
+
+class ConversationMessageType:
+    SYSTEM = 0 # システムメッセージ
+    USER = 1 # メッセージ
+    CHIP = 2 # チップメッセージ
+    BULK = 3 # 一斉送信メッセージ
+
+class ConversationMessageStatus:
+    INACTIVE = 0 # 無効
+    ACTIVE = 1 # 有効
+    PENDING = 2 # 予約送信
+
+class MessageAssetStatus:
+    PENDING = 0 # 審査待ち
+    APPROVED = 1 # 承認済み
+    REJECTED = 2 # 拒否
+    RESUBMIT = 3 # 再申請
+
+class MessageAssetType:
+    IMAGE = 1 # 画像
+    VIDEO = 2 # 動画
