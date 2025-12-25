@@ -126,7 +126,7 @@ def _update_ecs_task_schedule(schedule_name: str, scheduled_at: datetime, group_
         raise
 
 
-@router.get("/", response_model=UserMessageAssetsListResponse)
+@router.get("", response_model=UserMessageAssetsListResponse)
 def get_my_message_assets(
     status: Optional[int] = Query(None, description="0=審査中, 1=承認済み, 2=拒否"),
     skip: int = Query(0, ge=0),
