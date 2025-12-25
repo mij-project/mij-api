@@ -335,6 +335,7 @@ def get_user_profile_by_username_endpoint(
             links=profile.links if profile else None,
             post_count=post_count,
             follower_count=profile_data["follower_count"],
+            is_creator=(user.role == 2),  # AccountType.CREATOR
             posts=profile_posts,
             plans=profile_plans,
             individual_purchases=profile_purchases,

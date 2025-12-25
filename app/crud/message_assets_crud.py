@@ -210,6 +210,70 @@ def delete_message_asset(db: Session, asset_id: UUID) -> bool:
     return True
 
 
+def delete_message_assets_by_group_by(
+    db: Session,
+    group_by: str,
+    user_id: UUID
+) -> bool:
+    """
+    group_byで紐づくすべてのmessage_assetsを物理削除
+
+    Args:
+        db: データベースセッション
+        group_by: グループ識別子
+        user_id: 送信者のユーザーID
+
+    Returns:
+        削除成功の場合True、失敗の場合False
+    """
+    from app.core.logger import Logger
+    logger = Logger.get_logger()
+
+    try:
+        # group_byで紐づくすべてのメッセージIDを取得
+        message_ids = (
+            db.query(ConversationMessages.id)
+            .filter(
+                ConversationMessages.group_by == group_by,
+                ConversationMessages.sender_user_id == user_id
+            )
+            .all()
+        )
+
+        if not message_ids:
+            logger.warning(f"[delete_message_assets_by_group_by] No conversation_messages found for group_by={group_by}, user_id={user_id}")
+            return False
+
+        # message_idsをリストに変換
+        message_id_list = [msg_id[0] for msg_id in message_ids]
+
+        # まず、削除対象のmessage_assetsを確認
+        assets_to_delete = (
+            db.query(MessageAssets)
+            .filter(MessageAssets.message_id.in_(message_id_list))
+            .all()
+        )
+
+        if not assets_to_delete:
+            logger.warning(f"[delete_message_assets_by_group_by] No message_assets found for message_ids={message_id_list}")
+            return False
+
+        # すべてのmessage_idsに紐づくmessage_assetsを物理削除
+        deleted_count = (
+            db.query(MessageAssets)
+            .filter(MessageAssets.message_id.in_(message_id_list))
+            .delete(synchronize_session=False)
+        )
+
+        db.commit()
+        return deleted_count > 0
+
+    except Exception as e:
+        logger.error(f"Failed to delete message assets by group_by: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
 def get_user_message_assets(
     db: Session,
     user_id: UUID,

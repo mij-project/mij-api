@@ -786,3 +786,51 @@ def get_or_create_dm_conversation(
     db.refresh(conversation)
 
     return conversation
+
+
+def get_unread_conversation_count(db: Session, user_id: UUID) -> int:
+    """
+    未読メッセージがある会話の数を取得
+    - 自分以外が送った最新メッセージで、まだ既読にしていない会話をカウント
+    - last_read_message_id と last_message_id を比較して判定
+    """
+    # ユーザーが参加している全ての会話を取得
+    participants = (
+        db.query(ConversationParticipants)
+        .join(Conversations, ConversationParticipants.conversation_id == Conversations.id)
+        .filter(
+            ConversationParticipants.user_id == user_id,
+            Conversations.is_active == True,
+            Conversations.deleted_at.is_(None),
+        )
+        .all()
+    )
+
+    unread_count = 0
+
+    for participant in participants:
+        conversation = participant.conversation
+
+        # 最後のメッセージがない場合はスキップ
+        if not conversation.last_message_id:
+            continue
+
+        # 既に既読済みの場合はスキップ
+        if participant.last_read_message_id == conversation.last_message_id:
+            continue
+
+        # 最後のメッセージを取得
+        last_message = (
+            db.query(ConversationMessages)
+            .filter(
+                ConversationMessages.id == conversation.last_message_id,
+                ConversationMessages.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+        # 最後のメッセージが存在し、送信者が自分以外の場合にカウント
+        if last_message and last_message.sender_user_id != user_id:
+            unread_count += 1
+
+    return unread_count

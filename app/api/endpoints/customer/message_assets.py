@@ -828,8 +828,29 @@ def resubmit_message_asset_by_group_by(
                 sender_user_id=current_user.id
             )
 
-        # ファイル更新またはテキストのみ更新
-        if request.is_new_file_selected:
+        # ファイル削除の場合（asset_storage_keyがNone）
+        if request.asset_storage_key is None and request.asset_type is None:
+            # message_assetsを物理削除（エラーはログ記録のみ）
+            try:
+                deleted = message_assets_crud.delete_message_assets_by_group_by(
+                    db=db,
+                    group_by=group_by,
+                    user_id=current_user.id
+                )
+                if not deleted:
+                    logger.warning(f"No message assets found to delete for group_by: {group_by}")
+            except Exception as e:
+                logger.error(f"Failed to delete message assets for group_by {group_by}: {e}")
+
+            # テキストのみ更新
+            updated_asset = message_assets_crud.update_message_text_by_group_by(
+                db=db,
+                group_by=group_by,
+                user_id=current_user.id,
+                message_text=request.message_text,
+            )
+        # ファイル更新の場合
+        elif request.is_new_file_selected:
             _delete_old_asset_file(asset)
             updated_asset = message_assets_crud.resubmit_message_asset_by_group_by_with_file(
                 db=db,
@@ -839,6 +860,7 @@ def resubmit_message_asset_by_group_by(
                 new_asset_type=request.asset_type,
                 message_text=request.message_text,
             )
+        # テキストのみ更新
         else:
             updated_asset = message_assets_crud.update_message_text_by_group_by(
                 db=db,

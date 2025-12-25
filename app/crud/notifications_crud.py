@@ -189,3 +189,47 @@ def add_notification_for_message_asset_rejection(
         logger.error(f"Add notification for message asset rejection error: {e}")
         db.rollback()
         pass
+
+
+def add_notification_for_new_message(
+    db: Session,
+    recipient_user_id: UUID,
+    sender_profile_name: str,
+    sender_avatar_url: Optional[str],
+    message_preview: str,
+    conversation_id: UUID,
+) -> None:
+    """
+    新しいメッセージ受信時の通知を追加
+
+    Args:
+        db: データベースセッション
+        recipient_user_id: 通知先ユーザーID（受信者）
+        sender_profile_name: 送信者の表示名
+        sender_avatar_url: 送信者のアバターURL
+        message_preview: メッセージのプレビューテキスト
+        conversation_id: 会話ID
+    """
+    try:
+        notification = Notifications(
+            user_id=recipient_user_id,
+            type=NotificationType.USERS,
+            payload={
+                "type": "message",
+                "title": "新しいメッセージが届きました",
+                "subtitle": f"{sender_profile_name}さんからメッセージが届きました",
+                "message": message_preview,
+                "avatar": sender_avatar_url or "https://logo.mijfans.jp/bimi/logo.svg",
+                "redirect_url": f"/message/conversation/{conversation_id}",
+            },
+            is_read=False,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(notification)
+        db.commit()
+        logger.info(f"New message notification sent to user {recipient_user_id} from {sender_profile_name}")
+    except Exception as e:
+        logger.error(f"Add notification for new message error: {e}")
+        db.rollback()
+        pass

@@ -5,16 +5,18 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from typing import List
 from uuid import UUID
 import uuid
+from app.services.email.send_email import send_message_notification_email
+from app.models.profiles import Profiles
 from app.schemas.conversation import MessageAssetInfo
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
-from app.crud import conversations_crud, user_crud, profile_crud, payments_crud, subscriptions_crud, message_assets_crud
+from app.crud import conversations_crud, user_crud, profile_crud, payments_crud, subscriptions_crud, message_assets_crud, notifications_crud
 from app.models.conversation_participants import ConversationParticipants
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
 from app.models.plans import Plans
-from app.constants.enums import PaymentType, PaymentStatus, SubscriptionStatus, MessageAssetStatus
+from app.constants.enums import PaymentType, PaymentStatus, SubscriptionStatus, MessageAssetStatus, AccountType
 from app.schemas.conversation import (
     MessageCreate,
     MessageResponse,
@@ -25,6 +27,7 @@ from app.schemas.message_asset import (
     PresignedUrlRequest,
     PresignedUrlResponse,
 )
+from app.api.commons.function import CommonFunction
 from app.services.s3 import presign, keygen
 from app.constants.enums import MessageAssetType
 import logging
@@ -333,18 +336,19 @@ def get_conversation_messages(
         # 条件1: チップ送信履歴の確認（双方向）
         has_chip_history = payments_crud.get_payment_by_user_id(db, current_user.id, partner_user_id, PaymentType.CHIP)
 
-        # 条件2: DM解放プラン加入の確認
-        # order_typeが1(plan_id)の場合のみ、order_idをUUIDにキャストしてplansテーブルと結合
-        has_dm_plan = subscriptions_crud.get_subscription_by_user_id(db, current_user.id, partner_user_id)
+        # 条件2: DM解放プラン加入の確認（双方向）
+        # current_userがpartner_userのDM解放プランに加入している
+        has_dm_plan_to_partner = subscriptions_crud.get_subscription_by_user_id(db, current_user.id, partner_user_id)
+        # partner_userがcurrent_userのDM解放プランに加入している
+        has_dm_plan_from_partner = subscriptions_crud.get_subscription_by_user_id(db, partner_user_id, current_user.id)
         # どちらか一方を満たせばメッセージ送信可能
-        can_send_message = has_chip_history or has_dm_plan
+        can_send_message = has_chip_history or has_dm_plan_to_partner or has_dm_plan_from_partner
 
     # ユーザーの役割情報を取得
-    from app.constants.enums import AccountType
-    current_user_is_creator = current_user.account_type == AccountType.CREATOR
+    current_user_is_creator = current_user.role == AccountType.CREATOR
     partner_user_is_creator = False
     if partner_user_id and partner_user:
-        partner_user_is_creator = partner_user.account_type == AccountType.CREATOR
+        partner_user_is_creator = partner_user.role == AccountType.CREATOR
 
     return ConversationMessagesResponse(
         messages=message_responses,
@@ -413,6 +417,76 @@ def send_conversation_message(
             cdn_url=None,  # 審査待ちの場合はnull
             storage_key=message_asset.storage_key,
         )
+
+    
+
+    # 通知処理（ベストエフォート - エラーでもメッセージ送信は成功とする）
+    try:
+        # 受信者を取得（送信者以外の参加者）
+        recipients = db.query(ConversationParticipants).filter(
+            ConversationParticipants.conversation_id == conversation_id,
+            ConversationParticipants.user_id != current_user.id
+        ).all()
+
+        # 送信者のプロフィール情報を取得
+        sender_profile = db.query(Profiles).filter(Profiles.user_id == current_user.id).first()
+        sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
+
+        # メッセージプレビューを生成
+        if message_data.body_text:
+            message_preview = message_data.body_text[:50] if len(message_data.body_text) > 50 else message_data.body_text
+        else:
+            # アセットのみの場合
+            if message_asset:
+                if message_asset.asset_type == MessageAssetType.IMAGE:
+                    message_preview = "画像を送信しました"
+                elif message_asset.asset_type == MessageAssetType.VIDEO:
+                    message_preview = "動画を送信しました"
+                else:
+                    message_preview = "メディアファイルを送信しました"
+            else:
+                message_preview = ""
+
+        # 各受信者に通知とメールを送信
+        for recipient in recipients:
+            need_to_send_notification = CommonFunction.get_user_need_to_send_notification(db, recipient.user_id, "userMessages")
+            if not need_to_send_notification:
+                continue
+
+            recipient_user = db.query(Users).filter(Users.id == recipient.user_id).first()
+            if not recipient_user:
+                continue
+
+            notifications_crud.add_notification_for_new_message(
+                db=db,
+                recipient_user_id=recipient_user.id,
+                sender_profile_name=current_user.profile_name or "Unknown User",
+                sender_avatar_url=sender_avatar_url,
+                message_preview=message_preview,
+                conversation_id=conversation_id,
+            )
+
+            # メール通知を送信
+            if recipient_user.email:
+                logger.info(f"Attempting to send email notification to {recipient_user.email} for message {message.id}")
+                conversation_url = f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation/{conversation_id}"
+
+                recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
+                recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
+
+                send_message_notification_email(
+                    to=recipient_user.email,
+                    sender_name=current_user.profile_name or "Unknown User",
+                    recipient_name=recipient_name or "User",
+                    message_preview=message_preview,
+                    conversation_url=conversation_url,
+                )
+                logger.info(f"Email notification call completed for {recipient_user.email}")
+            else:
+                logger.info(f"Recipient user {recipient_user.id} has no email address, skipping email notification")
+    except Exception as e:
+        # 通知エラーはログに記録するが、メッセージ送信は成功とする
+        logger.error(f"Failed to send notification for message {message.id}: {e}")
 
     return MessageResponse(
         id=message.id,
@@ -485,6 +559,19 @@ def get_or_create_conversation_with_user(
         "conversation_id": str(conversation.id),
         "partner_user_id": str(partner_user_id),
     }
+
+
+@router.get("/unread-count")
+def get_unread_conversation_count(
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    未読メッセージがある会話の数を取得
+    - 自分以外が送った最新メッセージがある会話をカウント
+    """
+    unread_count = conversations_crud.get_unread_conversation_count(db, current_user.id)
+    return {"unread_count": unread_count}
 
 
 # ========== メッセージアセット用エンドポイント ==========

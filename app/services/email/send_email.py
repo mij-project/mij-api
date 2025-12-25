@@ -643,3 +643,42 @@ def send_chip_payment_seller_success_email(
         ctx=ctx,
         tags={"category": "chip_payment_seller"},
     )
+
+
+def send_message_notification_email(
+    to: str,
+    sender_name: str | None = None,
+    recipient_name: str | None = None,
+    message_preview: str | None = None,
+    conversation_url: str | None = None,
+) -> None:
+    """メッセージ通知メール"""
+    logger.info(f"[send_message_notification_email] Called with to={to}, sender_name={sender_name}")
+
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        logger.warning(f"[send_message_notification_email] EMAIL_ENABLED is False, skipping email to {to}")
+        return
+
+    subject = f"【mijfans】{sender_name}さんから新しいメッセージが届きました"
+    ctx = {
+        "brand": "mijfans",
+        "sender_name": sender_name or "",
+        "recipient_name": recipient_name or "",
+        "message_preview": message_preview or "",
+        "conversation_url": conversation_url or os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+
+    logger.info(f"[send_message_notification_email] Sending email to {to} with subject: {subject}")
+
+    try:
+        send_templated_email(
+            to=to,
+            subject=subject,
+            template_html="message_notification.html",
+            ctx=ctx,
+            tags={"category": "message_notification"},
+        )
+        logger.info(f"[send_message_notification_email] Email sent successfully to {to}")
+    except Exception as e:
+        logger.error(f"[send_message_notification_email] Failed to send email to {to}: {e}", exc_info=True)

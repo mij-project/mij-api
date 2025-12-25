@@ -84,6 +84,7 @@ class UserProfileResponse(BaseModel):
     website_url: Optional[str] = None
     post_count: int
     follower_count: int
+    is_creator: bool = False
     posts: List[ProfilePostResponse]
     plans: List[ProfilePlanResponse]
     individual_purchases: List[ProfilePurchaseResponse]
