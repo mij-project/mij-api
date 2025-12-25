@@ -1261,6 +1261,7 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
                 "description": plan.description,
                 "price": plan.price,
                 "type": plan.type,
+                "open_dm_flg": plan.open_dm_flg,
                 "post_count": post_count,
                 "plan_post": [
                     {"description": post.description, "thumbnail_url": post.storage_key}

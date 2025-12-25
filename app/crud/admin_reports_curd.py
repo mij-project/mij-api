@@ -36,8 +36,7 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.PLAN),
-                            & (Payments.payment_type == 2),
+                            & (Payments.payment_type == PaymentType.PLAN),
                             Payments.payment_amount,
                         ),
                         else_=0,
@@ -51,8 +50,7 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.SINGLE),
-                            & (Payments.payment_type == 1),
+                            & (Payments.payment_type == PaymentType.SINGLE),
                             Payments.payment_amount,
                         ),
                         else_=0,
@@ -60,14 +58,27 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                 ),
                 0,
             ).label("single_gmv_overalltime"),
+            # Chip GMV all-time (SUCCEEDED & CHIP)
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.CHIP),
+                            Payments.payment_amount,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("chip_gmv_overalltime"),
             # Plan COUNT all-time (SUCCEEDED & PLAN)
             func.coalesce(
                 func.sum(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.PLAN),
-                            & (Payments.payment_type == 2),
+                            & (Payments.payment_type == PaymentType.PLAN),
                             1,
                         ),
                         else_=0,
@@ -81,8 +92,7 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.SINGLE),
-                            & (Payments.payment_type == 1),
+                            & (Payments.payment_type == PaymentType.SINGLE),
                             1,
                         ),
                         else_=0,
@@ -90,6 +100,20 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                 ),
                 0,
             ).label("single_count_overalltime"),
+            # Chip COUNT all-time (SUCCEEDED & CHIP)
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.CHIP),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("chip_count_overalltime"),
         )
 
         row = db.execute(stmt).one()
@@ -98,8 +122,10 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
             "gmv_overalltime": row.gmv_overalltime,
             "plan_gmv_overalltime": row.plan_gmv_overalltime,
             "single_gmv_overalltime": row.single_gmv_overalltime,
+            "chip_gmv_overalltime": row.chip_gmv_overalltime,
             "plan_count_overalltime": row.plan_count_overalltime,
             "single_count_overalltime": row.single_count_overalltime,
+            "chip_count_overalltime": row.chip_count_overalltime,
         }
     except Exception as e:
         logger.error(f"Error getting revenue reports: {e}")

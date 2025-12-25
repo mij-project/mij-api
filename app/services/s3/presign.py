@@ -1,19 +1,56 @@
 # app/services/s3/presign.py
 from typing import Literal, Optional, Union, List
+import boto3
 from .client import (
-    s3_client, 
+    s3_client,
     INGEST_BUCKET,
     KMS_ALIAS_INGEST,
     ASSETS_BUCKET_NAME,
     KYC_BUCKET_NAME,
-    KMS_ALIAS_KYC, 
+    KMS_ALIAS_KYC,
     MEDIA_BUCKET_NAME,
     KMS_ALIAS_MEDIA,
     TEMP_VIDEO_BUCKET_NAME,
+    MESSAGE_ASSETS_BUCKET_NAME,
+    KMS_ALIAS_MESSAGE_ASSETS,
 )
 from app.schemas.video_temp import CompletedPart
 
-Resource = Literal["ingest", "identity", "public", "media", "temp-video"]
+Resource = Literal["ingest", "identity", "public", "media", "temp-video", "message-assets"]
+
+# KMSクライアント（キャッシュ）
+_kms_client = None
+
+def _get_kms_client():
+    """KMSクライアントを取得（シングルトン）"""
+    global _kms_client
+    if _kms_client is None:
+        _kms_client = boto3.client('kms')
+    return _kms_client
+
+def _resolve_kms_key_arn(key_id: str) -> str:
+    """
+    KMSキーIDまたはエイリアスをARNに変換
+
+    Args:
+        key_id: KMSキーID、エイリアス、またはARN
+
+    Returns:
+        str: KMS Key ARN
+    """
+    # すでにARNの場合はそのまま返す
+    if key_id.startswith('arn:aws:kms:'):
+        return key_id
+
+    # エイリアスまたはKey IDをARNに変換
+    try:
+        kms = _get_kms_client()
+        response = kms.describe_key(KeyId=key_id)
+        return response['KeyMetadata']['Arn']
+    except Exception as e:
+        # エラー時はそのまま返す（既存の動作を維持）
+        print(f"Warning: Failed to resolve KMS key ARN for {key_id}: {e}")
+        return key_id
 
 def _bucket_and_kms(resource: Resource):
     if resource == "ingest":
@@ -26,6 +63,8 @@ def _bucket_and_kms(resource: Resource):
         return MEDIA_BUCKET_NAME, KMS_ALIAS_MEDIA
     elif resource == "temp-video":
         return TEMP_VIDEO_BUCKET_NAME
+    elif resource == "message-assets":
+        return MESSAGE_ASSETS_BUCKET_NAME, KMS_ALIAS_MESSAGE_ASSETS
     raise ValueError("unknown resource")
 
 def presign_put(
@@ -292,12 +331,14 @@ def complete_multipart_temp_video(
 def multipart_create(resource: Resource, key: str, content_type: str) -> dict:
     bucket, kms_alias = _bucket_and_kms(resource)
     client = s3_client()
+    # KMSエイリアスをARNに変換
+    kms_key_arn = _resolve_kms_key_arn(kms_alias)
     resp = client.create_multipart_upload(
         Bucket=bucket,
         Key=key,
         ContentType=content_type,
         ServerSideEncryption="aws:kms",
-        SSEKMSKeyId=kms_alias,
+        SSEKMSKeyId=kms_key_arn,
     )
     return {"upload_id": resp["UploadId"]}
 

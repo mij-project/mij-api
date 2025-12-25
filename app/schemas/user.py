@@ -41,6 +41,7 @@ class ProfilePostResponse(BaseModel):
 class ProfilePlanResponse(BaseModel):
     id: UUID
     name: str
+    open_dm_flg: Optional[bool] = False
     description: Optional[str] = None
     price: int
     currency: str = "JPY"
@@ -65,6 +66,12 @@ class ProfileGachaResponse(BaseModel):
     amount: int
     created_at: datetime
 
+class TopBuyerResponse(BaseModel):
+    """購入金額上位ユーザー情報"""
+    profile_name: str
+    username: Optional[str] = None
+    avatar_url: Optional[str] = None
+
 class UserProfileResponse(BaseModel):
     id: UUID
     profile_name: str
@@ -77,10 +84,12 @@ class UserProfileResponse(BaseModel):
     website_url: Optional[str] = None
     post_count: int
     follower_count: int
+    is_creator: bool = False
     posts: List[ProfilePostResponse]
     plans: List[ProfilePlanResponse]
     individual_purchases: List[ProfilePurchaseResponse]
     gacha_items: List[ProfileGachaResponse]
+    top_buyers: Optional[List[TopBuyerResponse]] = []
 
 class UserOGPResponse(BaseModel):
     """ユーザーOGP情報レスポンス"""

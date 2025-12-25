@@ -55,6 +55,7 @@ def get_dashboard_stats(
         pending_identity_verifications=stats["pending_identity_verifications"],
         pending_post_reviews=stats["pending_post_reviews"],
         pending_profile_reviews=stats["pending_profile_reviews"],
+        pending_message_assets=stats["pending_message_assets"],
         total_posts=stats["total_posts"],
         monthly_revenue=stats["monthly_revenue"],
         active_subscriptions=stats["active_subscriptions"]

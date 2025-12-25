@@ -1,0 +1,186 @@
+# app/schemas/message_asset.py
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from uuid import UUID
+from datetime import datetime
+
+
+class PresignedUrlRequest(BaseModel):
+    """Presigned URL取得リクエスト"""
+    asset_type: int = Field(..., ge=1, le=2, description="1=画像, 2=動画")
+    content_type: str = Field(..., description="MIMEタイプ（例: image/jpeg, video/mp4）")
+    file_extension: str = Field(..., max_length=10, description="ファイル拡張子（例: jpg, mp4）")
+
+
+class PresignedUrlResponse(BaseModel):
+    """Presigned URL取得レスポンス"""
+    storage_key: str
+    upload_url: str
+    expires_in: int
+    required_headers: dict
+
+
+class MessageAssetCreate(BaseModel):
+    """メッセージアセット作成リクエスト（メッセージ送信時）"""
+    asset_storage_key: Optional[str] = Field(None, description="S3ストレージキー")
+    asset_type: Optional[int] = Field(None, ge=1, le=2, description="1=画像, 2=動画")
+
+
+class MessageAssetResponse(BaseModel):
+    """メッセージアセットレスポンス"""
+    id: UUID
+    status: int  # 0=審査待ち, 1=承認済み, 2=拒否
+    asset_type: int  # 1=画像, 2=動画
+    storage_key: str
+    cdn_url: Optional[str] = None  # 承認済みの場合のみCloudFront URL
+    reject_comments: Optional[str] = None  # 拒否時のコメント
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MessageAssetApproveRequest(BaseModel):
+    """メッセージアセット承認リクエスト（管理画面用）"""
+    pass  # リクエストボディ不要
+
+
+class MessageAssetRejectRequest(BaseModel):
+    """メッセージアセット拒否リクエスト（管理画面用）"""
+    reject_comments: str = Field(..., min_length=1, max_length=500, description="拒否理由")
+
+
+class MessageAssetResubmitRequest(BaseModel):
+    """メッセージアセット再申請リクエスト（ユーザー用）"""
+    message_text: Optional[str] = Field(None, max_length=1000, description="メッセージ本文（オプション）")
+    asset_storage_key: Optional[str] = Field(None, description="新しいアセットのS3ストレージキー（Noneの場合は画像削除）")
+    asset_type: Optional[int] = Field(None, ge=1, le=2, description="1=画像, 2=動画（Noneの場合は画像削除）")
+    scheduled_at: Optional[datetime] = Field(None, description="予約送信日時（予約送信の場合のみ）")
+    is_new_file_selected: bool = Field(False, description="新しいファイルが選択されたかどうか（予約送信の場合のみ）")
+
+
+
+class UserMessageAssetResponse(BaseModel):
+    """ユーザーのメッセージアセットレスポンス（一覧用）"""
+    id: UUID
+    message_id: UUID
+    type: int
+    group_by: str
+    conversation_id: UUID
+    asset_type: Optional[int] = None  # 1=画像, 2=動画（テキストのみの場合はNone）
+    storage_key: Optional[str] = None
+    cdn_url: Optional[str] = None
+    reject_comments: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    # メッセージ情報
+    message_text: Optional[str] = None
+    scheduled_at: Optional[datetime] = None  # 予約送信時刻
+    recipient_count: Optional[int] = None  # 送信先数（一斉送信の場合）
+
+    # 相手の情報
+    partner_user_id: Optional[UUID] = None
+    partner_username: Optional[str] = None
+    partner_profile_name: Optional[str] = None
+    partner_avatar: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserMessageAssetDetailResponse(BaseModel):
+    """ユーザーのメッセージアセット詳細レスポンス"""
+    id: UUID
+    message_id: UUID
+    group_by: str
+    type: int
+    conversation_id: UUID
+    status: int  # 0=審査待ち, 1=承認済み, 2=拒否
+    message_status: Optional[int] = None  # conversation_messageのstatus（1=送信済み, 3=予約中など）
+    asset_type: Optional[int] = None  # 1=画像, 2=動画（テキストのみの場合はNone）
+    storage_key: Optional[str] = None
+    cdn_url: Optional[str] = None
+    reject_comments: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    # メッセージ全文
+    message_text: Optional[str] = None
+    message_created_at: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None  # 予約送信時刻
+
+    # 相手の情報
+    partner_user_id: Optional[UUID] = None
+    partner_username: Optional[str] = None
+    partner_profile_name: Optional[str] = None
+    partner_avatar: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserMessageAssetsListResponse(BaseModel):
+    """ユーザーのメッセージアセット一覧レスポンス"""
+    pending_message_assets: List[UserMessageAssetResponse] = []
+    reject_message_assets: List[UserMessageAssetResponse] = []
+    reserved_message_assets: List[UserMessageAssetResponse] = []
+    pending_count: int = 0
+    reject_count: int = 0
+    reserved_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class AdminMessageAssetListResponse(BaseModel):
+    """管理者用メッセージアセット一覧レスポンス（group_byでグループ化）"""
+    id: UUID
+    group_by: str
+    type: int
+    conversation_id: UUID
+    status: int  # 0=審査待ち, 1=承認済み, 2=拒否
+    asset_type: int  # 1=画像, 2=動画
+    storage_key: str
+    cdn_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    # メッセージ情報
+    message_text: Optional[str] = None
+
+    # 送信者情報
+    sender_user_id: Optional[UUID] = None
+    sender_username: Optional[str] = None
+    sender_profile_name: Optional[str] = None
+    sender_avatar: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminMessageAssetDetailResponse(BaseModel):
+    """管理者用メッセージアセット詳細レスポンス"""
+    id: UUID
+    group_by: str
+    type: int
+    status: int  # 0=審査待ち, 1=承認済み, 2=拒否
+    asset_type: int  # 1=画像, 2=動画
+    group_by: str
+    storage_key: str
+    cdn_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    # メッセージ情報
+    message_text: Optional[str] = None
+    message_created_at: Optional[datetime] = None
+
+    # 送信者情報
+    sender_user_id: Optional[UUID] = None
+    sender_username: Optional[str] = None
+    sender_profile_name: Optional[str] = None
+    sender_avatar: Optional[str] = None
+    class Config:
+        from_attributes = True

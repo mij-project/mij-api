@@ -329,6 +329,8 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
         "id": plan.id,
         "name": plan.name,
         "description": plan.description,
+        "open_dm_flg": plan.open_dm_flg,
+        "welcome_message": plan.welcome_message,
         "price": plan.price,
         "type": plan.type,
         "creator_id": creator_info.id if creator_info else None,
