@@ -591,8 +591,30 @@ def get_user_conversations(
             (ConversationParticipants.last_read_message_id != Conversations.last_message_id)
         )
 
-    # 全体件数を取得
-    total = query.count()
+    # 最終メッセージがある会話のみをカウントするためのサブクエリ
+    messages_with_valid_status = (
+        db.query(ConversationMessages.conversation_id)
+        .filter(
+            ConversationMessages.deleted_at.is_(None),
+            or_(
+                ConversationMessages.status != 0,
+                ConversationMessages.status.is_(None)
+            ),
+            ConversationMessages.status != ConversationMessageStatus.PENDING,
+        )
+        .group_by(ConversationMessages.conversation_id)
+        .subquery()
+    )
+    
+    # 最終メッセージがある会話のみをフィルタリング
+    query_with_message = query.filter(
+        Conversations.id.in_(
+            db.query(messages_with_valid_status.c.conversation_id)
+        )
+    )
+    
+    # 全体件数を取得（最終メッセージがある会話のみ）
+    total = query_with_message.count()
 
     # ソート
     if sort == "last_message_asc":
@@ -627,6 +649,9 @@ def get_user_conversations(
             if last_message:
                 last_message_text = last_message.body_text
 
+        # 最終メッセージがない場合は除外
+        if not last_message:
+            continue
 
         # 未読件数を計算
         unread_count = 0

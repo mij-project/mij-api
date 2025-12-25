@@ -41,6 +41,7 @@ class ProfilePostResponse(BaseModel):
 class ProfilePlanResponse(BaseModel):
     id: UUID
     name: str
+    open_dm_flg: Optional[bool] = False
     description: Optional[str] = None
     price: int
     currency: str = "JPY"

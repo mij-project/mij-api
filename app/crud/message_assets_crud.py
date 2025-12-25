@@ -786,21 +786,40 @@ def get_user_message_assets_counts(
     reject_count = db.query(func.count()).select_from(reject_subquery).scalar() or 0
 
     # 予約送信（message status=PENDING）のグループ数をカウント
-    # conversation_messages.group_byでグループ化してカウント
-    reserved_subquery = (
+    # 審査中・拒否されたアセットを持つgroup_byを取得（別タブに表示されるため除外）
+    group_by_with_pending_or_rejected_assets = (
         db.query(ConversationMessages.group_by)
-        .outerjoin(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
+        .join(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
         .filter(
             ConversationMessages.sender_user_id == user_id,
             ConversationMessages.status == ConversationMessageStatus.PENDING,
             ConversationMessages.type == ConversationMessageType.BULK,
             ConversationMessages.deleted_at.is_(None),
-            ConversationMessages.group_by.isnot(None)
+            ConversationMessages.group_by.isnot(None),
+            # 審査中・再申請中・拒否されたアセットを持つものを除外
+            MessageAssets.status.in_([
+                MessageAssetStatus.PENDING,
+                MessageAssetStatus.RESUBMIT,
+                MessageAssetStatus.REJECTED
+            ])
         )
-        # message_assetsがある場合は審査中でないものに限定、ない場合は全てカウント
+        .distinct()
+        .subquery()
+    )
+
+    # 予約中のgroup_byを取得（審査中・拒否されたアセットを持つものを除外）
+    reserved_subquery = (
+        db.query(ConversationMessages.group_by)
         .filter(
-            (MessageAssets.id.is_(None)) |  # message_assetsがない場合
-            (MessageAssets.status.notin_([MessageAssetStatus.PENDING, MessageAssetStatus.RESUBMIT]))  # または審査済み
+            ConversationMessages.sender_user_id == user_id,
+            ConversationMessages.status == ConversationMessageStatus.PENDING,
+            ConversationMessages.type == ConversationMessageType.BULK,
+            ConversationMessages.deleted_at.is_(None),
+            ConversationMessages.group_by.isnot(None),
+            # 審査中・拒否されたアセットを持つgroup_byを除外
+            ~ConversationMessages.group_by.in_(
+                db.query(group_by_with_pending_or_rejected_assets.c.group_by)
+            )
         )
         .distinct()
         .subquery()
@@ -864,9 +883,33 @@ def get_reserved_bulk_messages(
     )
 
     # 代表メッセージを取得
+    # 審査中・拒否されたアセットを持つメッセージは除外（それらは別タブに表示）
+    messages_with_pending_or_rejected_assets_subquery = (
+        db.query(ConversationMessages.id)
+        .join(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
+        .filter(
+            ConversationMessages.sender_user_id == user_id,
+            ConversationMessages.status == ConversationMessageStatus.PENDING,
+            # 審査中・再申請中・拒否されたアセットを除外
+            MessageAssets.status.in_([
+                MessageAssetStatus.PENDING,
+                MessageAssetStatus.RESUBMIT,
+                MessageAssetStatus.REJECTED
+            ])
+        )
+        .distinct()
+        .subquery()
+    )
+
     messages = (
         db.query(ConversationMessages)
-        .filter(ConversationMessages.id.in_(representative_message_ids_query))
+        .filter(
+            ConversationMessages.id.in_(representative_message_ids_query),
+            # 審査中・拒否されたアセットを持つメッセージは除外
+            ~ConversationMessages.id.in_(
+                db.query(messages_with_pending_or_rejected_assets_subquery.c.id)
+            )
+        )
         .order_by(ConversationMessages.scheduled_at.desc())
         .offset(skip)
         .limit(limit)
@@ -931,6 +974,159 @@ def get_reserved_bulk_messages(
         })
 
     return result
+
+
+def resubmit_message_asset_by_group_by_with_file(
+    db: Session,
+    group_by: str,
+    user_id: UUID,
+    new_storage_key: str,
+    new_asset_type: int,
+    message_text: Optional[str] = None
+) -> Optional[MessageAssets]:
+    """
+    group_byで同じグループの全メッセージアセットを一括再申請/更新（ファイル更新を含む）
+    - 拒否されたメッセージの再申請
+    - 予約送信メッセージの更新（assetsがない場合も対応）
+
+    Args:
+        db: データベースセッション
+        group_by: グループ化キー
+        user_id: ユーザーID（権限チェック用）
+        new_storage_key: 新しいS3ストレージキー
+        new_asset_type: 新しいアセットタイプ（1=画像, 2=動画）
+        message_text: メッセージ本文（オプション）
+
+    Returns:
+        更新された代表的なMessageAssetsオブジェクト or None
+    """
+    # group_byで同じグループの全アセットを取得（ConversationMessages.group_byでフィルタリング）
+    assets = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(
+            ConversationMessages.group_by == group_by,
+            ConversationMessages.sender_user_id == user_id
+        )
+        .all()
+    )
+
+    # assetsが存在する場合は更新
+    if assets:
+        # 拒否されたメッセージの場合のみステータスチェック
+        first_asset = assets[0]
+        if first_asset.status == MessageAssetStatus.REJECTED:
+            # 拒否されたメッセージの再申請
+            for asset in assets:
+                asset.storage_key = new_storage_key
+                asset.asset_type = new_asset_type
+                asset.status = MessageAssetStatus.RESUBMIT
+                asset.reject_comments = None
+        else:
+            # 予約送信の更新など
+            # 新しいファイルで更新
+            for asset in assets:
+                asset.storage_key = new_storage_key
+                asset.asset_type = new_asset_type
+    else:
+        # assetsが存在しない場合（テキストのみ→画像追加）
+        # group_byに紐づく全てのメッセージを取得して、新しいアセットを作成
+        messages = (
+            db.query(ConversationMessages)
+            .filter(
+                ConversationMessages.group_by == group_by,
+                ConversationMessages.sender_user_id == user_id
+            )
+            .all()
+        )
+
+        # 各メッセージに対して新しいアセットを作成
+        for message in messages:
+            new_asset = MessageAssets(
+                message_id=message.id,
+                status=MessageAssetStatus.PENDING,  # 審査待ち
+                asset_type=new_asset_type,
+                storage_key=new_storage_key,
+            )
+            db.add(new_asset)
+
+    # メッセージ本文も更新する場合（group_byの全メッセージを更新）
+    if message_text is not None:
+        messages = (
+            db.query(ConversationMessages)
+            .filter(
+                ConversationMessages.group_by == group_by,
+                ConversationMessages.sender_user_id == user_id
+            )
+            .all()
+        )
+        for message in messages:
+            message.body_text = message_text
+
+    db.commit()
+
+    # 代表的なアセット1件を返す（最初に作成されたもの）
+    representative_asset = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.group_by == group_by)
+        .order_by(MessageAssets.created_at.asc())
+        .first()
+    )
+
+    if representative_asset:
+        db.refresh(representative_asset)
+
+    return representative_asset
+
+
+def update_message_text_by_group_by(
+    db: Session,
+    group_by: str,
+    user_id: UUID,
+    message_text: Optional[str] = None
+) -> Optional[MessageAssets]:
+    """
+    group_byで同じグループのメッセージ本文のみを更新（ファイル更新なし）
+
+    Args:
+        db: データベースセッション
+        group_by: グループ化キー
+        user_id: ユーザーID（権限チェック用）
+        message_text: メッセージ本文（オプション）
+
+    Returns:
+        代表的なMessageAssetsオブジェクト or None（アセットが存在しない場合）
+    """
+    # メッセージ本文を更新する場合（group_byの全メッセージを更新）
+    if message_text is not None:
+        messages = (
+            db.query(ConversationMessages)
+            .filter(
+                ConversationMessages.group_by == group_by,
+                ConversationMessages.sender_user_id == user_id
+            )
+            .all()
+        )
+        for message in messages:
+            message.body_text = message_text
+
+    db.commit()
+
+    # 代表的なアセット1件を返す（最初に作成されたもの）
+    # アセットが存在しない場合はNoneを返す
+    representative_asset = (
+        db.query(MessageAssets)
+        .join(ConversationMessages, MessageAssets.message_id == ConversationMessages.id)
+        .filter(ConversationMessages.group_by == group_by)
+        .order_by(MessageAssets.created_at.asc())
+        .first()
+    )
+
+    if representative_asset:
+        db.refresh(representative_asset)
+
+    return representative_asset
 
 
 def resubmit_message_asset_by_group_by(

@@ -57,6 +57,7 @@ class MessageAssetResubmitRequest(BaseModel):
     asset_storage_key: Optional[str] = Field(None, description="新しいアセットのS3ストレージキー（Noneの場合は画像削除）")
     asset_type: Optional[int] = Field(None, ge=1, le=2, description="1=画像, 2=動画（Noneの場合は画像削除）")
     scheduled_at: Optional[datetime] = Field(None, description="予約送信日時（予約送信の場合のみ）")
+    is_new_file_selected: bool = Field(False, description="新しいファイルが選択されたかどうか（予約送信の場合のみ）")
 
 
 

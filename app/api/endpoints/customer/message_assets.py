@@ -1,7 +1,7 @@
 # app/api/endpoints/customer/message_assets.py
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
 import json
@@ -12,6 +12,7 @@ from app.models.user import Users
 from app.models.conversation_messages import ConversationMessages
 from app.models.conversations import Conversations
 from app.models.conversation_participants import ConversationParticipants
+from app.models.reservation_message import ReservationMessage
 from app.models.profiles import Profiles
 from app.crud import message_assets_crud, user_crud, profile_crud
 from app.schemas.message_asset import (
@@ -205,12 +206,14 @@ def get_my_message_assets(
         # CDN URL設定
         cdn_url = f"{BASE_URL}/{asset.storage_key}"
 
-        # 予約送信（status=2）かつ審査中（PENDINGまたはRESUBMIT）の場合はpending_responsesに入れる
-        is_reserved = message.status == ConversationMessageStatus.PENDING
+        # アセットのステータスに基づいて分類
         is_pending_asset = asset.status == MessageAssetStatus.PENDING or asset.status == MessageAssetStatus.RESUBMIT
+        is_approved_asset = asset.status == MessageAssetStatus.APPROVED
+        is_rejected_asset = asset.status == MessageAssetStatus.REJECTED
+        is_scheduled = message.scheduled_at is not None
 
-        if is_reserved and is_pending_asset:
-            # 予約送信で審査中の場合
+        # 審査中（PENDING または RESUBMIT）の場合は「審査中」タブに表示（予約送信の有無は関係ない）
+        if is_pending_asset:
             pending_responses.append(
                 UserMessageAssetResponse(
                     id=asset.id,
@@ -225,14 +228,15 @@ def get_my_message_assets(
                     created_at=asset.created_at,
                     updated_at=asset.updated_at,
                     message_text=message.body_text,
+                    scheduled_at=message.scheduled_at if is_scheduled else None,
                     partner_user_id=partner_user_id,
                     partner_username=partner_username,
                     partner_profile_name=partner_profile_name,
                     partner_avatar=partner_avatar,
                 )
             )
-        elif is_reserved and not is_pending_asset:
-            # 予約送信で審査中でない場合
+        # 承認済み（APPROVED）で予約送信が設定されている場合は「予約中」タブに表示
+        elif is_approved_asset and is_scheduled:
             reserved_responses.append(
                 UserMessageAssetResponse(
                     id=asset.id,
@@ -254,31 +258,9 @@ def get_my_message_assets(
                     partner_avatar=partner_avatar,
                 )
             )
-            processed_reserved_group_bys.add(message.group_by if message.group_by else str(message.id))  # 処理済みとしてマーク
-        elif asset.status == MessageAssetStatus.PENDING or asset.status == MessageAssetStatus.RESUBMIT:
-            # 通常の審査中（予約送信でない）
-            pending_responses.append(
-                UserMessageAssetResponse(
-                    id=asset.id,
-                    message_id=asset.message_id,
-                    type=message.type,
-                    group_by=message.group_by if message.group_by else str(message.id),
-                    conversation_id=message.conversation_id,
-                    asset_type=asset.asset_type,
-                    storage_key=asset.storage_key,
-                    cdn_url=cdn_url,
-                    reject_comments=asset.reject_comments,
-                    created_at=asset.created_at,
-                    updated_at=asset.updated_at,
-                    message_text=message.body_text,
-                    partner_user_id=partner_user_id,
-                    partner_username=partner_username,
-                    partner_profile_name=partner_profile_name,
-                    partner_avatar=partner_avatar,
-                )
-            )
-        elif asset.status == MessageAssetStatus.REJECTED:
-            # 拒否されたもの
+            processed_reserved_group_bys.add(message.group_by if message.group_by else str(message.id))
+        # 拒否（REJECTED）の場合は「拒否」タブに表示
+        elif is_rejected_asset:
             reject_responses.append(
                 UserMessageAssetResponse(
                     id=asset.id,
@@ -512,6 +494,232 @@ def get_message_asset_upload_url_by_group_by(
         raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
 
 
+def _update_reservation_schedule(
+    db: Session,
+    group_by: str,
+    scheduled_at: datetime,
+    sender_user_id: UUID
+) -> None:
+    """
+    予約送信スケジュールを更新
+
+    Args:
+        db: データベースセッション
+        group_by: グループ化キー
+        scheduled_at: 新しい予約送信日時
+        sender_user_id: 送信者ユーザーID
+
+    Raises:
+        HTTPException: スケジュール更新に失敗した場合
+    """
+    
+    reservation_message = (
+        db.query(ReservationMessage)
+        .filter(ReservationMessage.group_by == group_by)
+        .first()
+    )
+
+    if not reservation_message:
+        return
+
+    try:
+        _update_ecs_task_schedule(
+            schedule_name=reservation_message.event_bridge_name,
+            scheduled_at=scheduled_at,
+            group_by=group_by,
+            sender_user_id=sender_user_id
+        )
+
+        reservation_message.scheduled_at = scheduled_at
+
+        db.query(ConversationMessages).filter(
+            ConversationMessages.group_by == group_by,
+            ConversationMessages.sender_user_id == sender_user_id
+        ).update({"scheduled_at": scheduled_at})
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update EventBridge schedule: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"予約送信スケジュールの更新に失敗しました: {str(e)}"
+        )
+
+
+def _delete_old_asset_file(asset) -> None:
+    """
+    古いS3ファイルを削除
+
+    Args:
+        asset: 削除対象のアセット（Noneの場合は何もしない）
+    """
+    if not asset:
+        return
+
+    try:
+        delete_object(resource="message-assets", key=asset.storage_key)
+    except Exception as e:
+        logger.warning(f"Failed to delete old S3 object: {asset.storage_key}, error: {e}")
+
+
+def _get_message_for_response(
+    db: Session,
+    updated_asset,
+    group_by: str,
+    user_id: UUID,
+    is_new_file_selected: bool
+) -> ConversationMessages:
+    """
+    レスポンス用のメッセージ情報を取得
+
+    Args:
+        db: データベースセッション
+        updated_asset: 更新されたアセット（Noneの可能性あり）
+        group_by: グループ化キー
+        user_id: ユーザーID
+        is_new_file_selected: 新しいファイルが選択されたかどうか
+
+    Returns:
+        メッセージ情報
+
+    Raises:
+        HTTPException: メッセージが見つからない場合
+    """
+    if updated_asset:
+        message = (
+            db.query(ConversationMessages)
+            .filter(ConversationMessages.id == updated_asset.message_id)
+            .first()
+        )
+        if message:
+            return message
+
+    if is_new_file_selected:
+        raise HTTPException(status_code=500, detail="Failed to resubmit message asset")
+
+    message = (
+        db.query(ConversationMessages)
+        .filter(
+            ConversationMessages.group_by == group_by,
+            ConversationMessages.sender_user_id == user_id
+        )
+        .order_by(ConversationMessages.created_at.asc())
+        .first()
+    )
+
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    return message
+
+
+def _get_partner_info(
+    db: Session,
+    message: ConversationMessages,
+    conversation: Conversations,
+    current_user_id: UUID
+) -> Tuple[Optional[UUID], Optional[str], Optional[str], Optional[str]]:
+    """
+    パートナー情報を取得（DMの場合のみ）
+
+    Args:
+        db: データベースセッション
+        message: メッセージ情報
+        conversation: 会話情報
+        current_user_id: 現在のユーザーID
+
+    Returns:
+        (partner_user_id, partner_username, partner_profile_name, partner_avatar)
+    """
+    if message.type != ConversationMessageType.USER:
+        return None, None, None, None
+
+    partner_participant = (
+        db.query(ConversationParticipants)
+        .filter(
+            ConversationParticipants.conversation_id == conversation.id,
+            ConversationParticipants.user_id != current_user_id,
+        )
+        .first()
+    )
+
+    if not partner_participant:
+        return None, None, None, None
+
+    partner_user_id = partner_participant.user_id
+    partner_user = user_crud.get_user_by_id(db, partner_user_id)
+    
+    if not partner_user:
+        return partner_user_id, None, None, None
+
+    partner_profile = profile_crud.get_profile_by_user_id(db, partner_user_id)
+    partner_avatar = (
+        f"{BASE_URL}/{partner_profile.avatar_url}"
+        if partner_profile and partner_profile.avatar_url
+        else None
+    )
+
+    return (
+        partner_user_id,
+        partner_user.profile_name,
+        partner_user.profile_name,
+        partner_avatar
+    )
+
+
+def _build_resubmit_response(
+    updated_asset,
+    message: ConversationMessages,
+    partner_user_id: Optional[UUID],
+    partner_username: Optional[str],
+    partner_profile_name: Optional[str],
+    partner_avatar: Optional[str]
+) -> UserMessageAssetDetailResponse:
+    """
+    再申請レスポンスを構築
+
+    Args:
+        updated_asset: 更新されたアセット（Noneの可能性あり）
+        message: メッセージ情報
+        partner_user_id: パートナーユーザーID
+        partner_username: パートナーユーザー名
+        partner_profile_name: パートナープロフィール名
+        partner_avatar: パートナーアバターURL
+
+    Returns:
+        レスポンスオブジェクト
+    """
+    message_status = (
+        message.status
+        if message.status is not None
+        else ConversationMessageStatus.ACTIVE
+    )
+
+    return UserMessageAssetDetailResponse(
+        id=updated_asset.id if updated_asset else message.id,
+        message_id=updated_asset.message_id if updated_asset else message.id,
+        group_by=message.group_by if message.group_by else str(message.id),
+        type=message.type,
+        conversation_id=message.conversation_id,
+        status=updated_asset.status if updated_asset else MessageAssetStatus.APPROVED,
+        message_status=message_status,
+        asset_type=updated_asset.asset_type if updated_asset else None,
+        storage_key=updated_asset.storage_key if updated_asset else None,
+        cdn_url=None,  # 再申請後は審査中なのでnull
+        reject_comments=updated_asset.reject_comments if updated_asset else None,
+        created_at=updated_asset.created_at if updated_asset else message.created_at,
+        updated_at=updated_asset.updated_at if updated_asset else message.updated_at,
+        message_text=message.body_text,
+        message_created_at=message.created_at,
+        scheduled_at=message.scheduled_at,
+        partner_user_id=partner_user_id,
+        partner_username=partner_username,
+        partner_profile_name=partner_profile_name,
+        partner_avatar=partner_avatar,
+    )
+
+
 @router.put("/{group_by}/resubmit", response_model=UserMessageAssetDetailResponse)
 def resubmit_message_asset_by_group_by(
     group_by: str,
@@ -527,7 +735,7 @@ def resubmit_message_asset_by_group_by(
     - 予約送信の場合、scheduled_atを更新してEventBridgeスケジュールを更新
     """
     try:
-        # group_byでアセット詳細を取得（権限チェック）
+        # 権限チェック：group_byでアセット詳細を取得
         detail = message_assets_crud.get_message_asset_detail_by_group_by_for_user(
             db, group_by, current_user.id
         )
@@ -536,130 +744,73 @@ def resubmit_message_asset_by_group_by(
             raise HTTPException(status_code=404, detail="Message asset not found")
 
         asset = detail["asset"]
-        message = detail["message"]
         conversation = detail["conversation"]
 
-        # 予約送信の更新処理（scheduled_atがリクエストに含まれている場合）
+        # 予約送信スケジュールの更新
         if request.scheduled_at is not None:
-            # reservation_messageからevent_bridge_nameを取得
-            from app.models.reservation_message import ReservationMessage
-            reservation_message = (
-                db.query(ReservationMessage)
-                .filter(ReservationMessage.group_by == group_by)
-                .first()
+            # フロントエンドから送られてきたscheduled_atは既にUTC
+            # タイムゾーン情報がない場合は明示的にUTCとして扱う
+            scheduled_at_utc = request.scheduled_at
+            if scheduled_at_utc.tzinfo is None:
+                scheduled_at_utc = scheduled_at_utc.replace(tzinfo=timezone.utc)
+
+            _update_reservation_schedule(
+                db=db,
+                group_by=group_by,
+                scheduled_at=scheduled_at_utc,
+                sender_user_id=current_user.id
             )
 
-            if reservation_message:
-                # EventBridgeスケジュールを更新
-                try:
-                    _update_ecs_task_schedule(
-                        schedule_name=reservation_message.event_bridge_name,
-                        scheduled_at=request.scheduled_at,
-                        group_by=group_by,
-                        sender_user_id=current_user.id
-                    )
+        # ファイル更新またはテキストのみ更新
+        if request.is_new_file_selected:
+            _delete_old_asset_file(asset)
+            updated_asset = message_assets_crud.resubmit_message_asset_by_group_by_with_file(
+                db=db,
+                group_by=group_by,
+                user_id=current_user.id,
+                new_storage_key=request.asset_storage_key,
+                new_asset_type=request.asset_type,
+                message_text=request.message_text,
+            )
+        else:
+            updated_asset = message_assets_crud.update_message_text_by_group_by(
+                db=db,
+                group_by=group_by,
+                user_id=current_user.id,
+                message_text=request.message_text,
+            )
 
-                    # reservation_message.scheduled_atを更新
-                    reservation_message.scheduled_at = request.scheduled_at
-
-                    # conversation_messages.scheduled_atを更新（group_by全体）
-                    db.query(ConversationMessages).filter(
-                        ConversationMessages.group_by == group_by,
-                        ConversationMessages.sender_user_id == current_user.id
-                    ).update({"scheduled_at": request.scheduled_at})
-
-                    db.commit()
-
-                except Exception as e:
-                    db.rollback()
-                    logger.error(f"Failed to update EventBridge schedule: {e}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"予約送信スケジュールの更新に失敗しました: {str(e)}"
-                    )
-
-        # 古いS3ファイルを削除（assetが存在し、新しいファイルがアップロードされる場合のみ）
-        if asset and asset.storage_key and request.asset_storage_key and request.asset_storage_key != asset.storage_key:
-            try:
-                delete_object(resource="message-assets", key=asset.storage_key)
-            except Exception as e:
-                # S3削除失敗してもログに記録してDB更新は続行
-                logger.warning(f"Failed to delete old S3 object: {asset.storage_key}, error: {e}")
-
-        # group_byで同じグループの全アセットを一括再申請/更新
-        updated_asset = message_assets_crud.resubmit_message_asset_by_group_by(
+        # メッセージ情報を取得
+        message = _get_message_for_response(
             db=db,
+            updated_asset=updated_asset,
             group_by=group_by,
             user_id=current_user.id,
-            new_storage_key=request.asset_storage_key,
-            new_asset_type=request.asset_type,
-            message_text=request.message_text,
+            is_new_file_selected=request.is_new_file_selected
         )
 
-        if not updated_asset:
-            raise HTTPException(status_code=500, detail="Failed to resubmit message asset")
-
-        # メッセージ情報を再取得（本文が更新された可能性があるため）
-        message = (
-            db.query(ConversationMessages)
-            .filter(ConversationMessages.id == updated_asset.message_id)
-            .first()
-        )
-
-        # 相手の情報を取得（DM（type=1）の場合のみ）
-        partner_user_id = None
-        partner_username = None
-        partner_profile_name = None
-        partner_avatar = None
-
-        if message.type == ConversationMessageType.USER:
-            partner_participant = (
-                db.query(ConversationParticipants)
-                .filter(
-                    ConversationParticipants.conversation_id == conversation.id,
-                    ConversationParticipants.user_id != current_user.id,
-                )
-                .first()
+        # パートナー情報を取得
+        partner_user_id, partner_username, partner_profile_name, partner_avatar = (
+            _get_partner_info(
+                db=db,
+                message=message,
+                conversation=conversation,
+                current_user_id=current_user.id
             )
+        )
 
-            if partner_participant:
-                partner_user_id = partner_participant.user_id
-                partner_user = user_crud.get_user_by_id(db, partner_user_id)
-                if partner_user:
-                    partner_username = partner_user.profile_name
-                    partner_profile_name = partner_user.profile_name
-                    partner_profile = profile_crud.get_profile_by_user_id(db, partner_user_id)
-                    if partner_profile and partner_profile.avatar_url:
-                        partner_avatar = f"{BASE_URL}/{partner_profile.avatar_url}"
-
-        # CDN URL（再申請後は審査中なのでnull）
-        cdn_url = None
-
-        # conversation_messageのステータスを取得
-        message_status = message.status if message.status is not None else ConversationMessageStatus.ACTIVE
-
-        return UserMessageAssetDetailResponse(
-            id=updated_asset.id if updated_asset else message.id,
-            message_id=updated_asset.message_id if updated_asset else message.id,
-            group_by=message.group_by if message.group_by else str(message.id),
-            type=message.type,
-            conversation_id=message.conversation_id,
-            status=updated_asset.status if updated_asset else MessageAssetStatus.APPROVED,
-            message_status=message_status,
-            asset_type=updated_asset.asset_type if updated_asset else None,
-            storage_key=updated_asset.storage_key if updated_asset else None,
-            cdn_url=cdn_url,
-            reject_comments=updated_asset.reject_comments if updated_asset else None,
-            created_at=updated_asset.created_at if updated_asset else message.created_at,
-            updated_at=updated_asset.updated_at if updated_asset else message.updated_at,
-            message_text=message.body_text,
-            message_created_at=message.created_at,
-            scheduled_at=message.scheduled_at,
+        # レスポンスを構築
+        return _build_resubmit_response(
+            updated_asset=updated_asset,
+            message=message,
             partner_user_id=partner_user_id,
             partner_username=partner_username,
             partner_profile_name=partner_profile_name,
-            partner_avatar=partner_avatar,
+            partner_avatar=partner_avatar
         )
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to resubmit message asset: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to resubmit message asset: {e}")

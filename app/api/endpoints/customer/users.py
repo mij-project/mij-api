@@ -230,6 +230,7 @@ def get_user_profile_by_username_endpoint(
                     id=plan.id,
                     name=plan.name,
                     description=plan.description,
+                    open_dm_flg=plan.open_dm_flg,
                     price=plan.price,
                     currency="JPY",  # 通貨は固定（必要に応じてDBから取得）
                     type=plan.type,
