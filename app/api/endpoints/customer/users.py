@@ -214,7 +214,7 @@ def get_user_profile_by_username_endpoint(
                         Subscriptions.user_id == current_user.id,
                         Subscriptions.order_id == str(plan.id),
                         Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-                        Subscriptions.status == SubscriptionStatus.ACTIVE,  # 1=ACTIVE
+                        Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # 1=ACTIVE
                     )
                     .first()
                     is not None

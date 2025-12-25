@@ -113,7 +113,7 @@ def check_viewing_rights(db: Session, post_id: str, user_id: str | None) -> bool
         db.query(Subscriptions)
         .filter(
             Subscriptions.user_id == user_id,
-            Subscriptions.status == 1,  # active
+            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # active
             Subscriptions.order_id.in_(valid_order_ids),
             or_(
                 Subscriptions.access_end.is_(None),

@@ -295,7 +295,7 @@ def get_plan_detail(db: Session, plan_id: UUID, current_user_id: UUID) -> dict:
             Subscriptions.user_id == current_user_id,
             Subscriptions.order_id == str(plan_id),
             Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-            Subscriptions.status == 1,  # 1=ACTIVE (視聴権限あり)
+            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # 1=ACTIVE (視聴権限あり)
         )
         .first() is not None
     )
