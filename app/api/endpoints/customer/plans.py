@@ -1,3 +1,4 @@
+import math
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.models.plans import PostPlans
@@ -23,7 +24,6 @@ from app.schemas.plan import (
 from app.crud.plan_crud import (
     create_plan,
     delete_plan,
-    update_plan,
     request_plan_deletion,
     get_user_plans,
     get_plan_detail,
@@ -36,13 +36,18 @@ from app.crud.plan_crud import (
 )
 from app.models.plans import Plans
 from app.crud.post_crud import get_posts_by_plan_id
-from app.constants.enums import PlanStatus, PriceType, PostType
-from app.crud.price_crud import create_price
+from app.constants.enums import PostType
 from uuid import UUID
 from typing import Optional
 import os
 import time
 from app.core.logger import Logger
+from app.crud.time_sale_crud import check_exists_plan_time_sale_in_period_by_plan_id, create_plan_time_sale_by_plan_id, get_plan_time_sale_by_plan_id
+from app.schemas.post_plan_timesale import (
+    PaginatedPlanTimeSaleResponse,
+    PlanTimeSaleResponse,
+    PlanTimeSaleCreateRequest,
+)
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -448,26 +453,28 @@ def get_posts_for_plan(
 def _update_plan_with_retry(db: Session, plan_id: UUID, update_data: dict) -> Plans:
     """プランを更新する（決済処理でロックがかかっている可能性があるので、ロックをかけてから更新し、リトライする）"""
     from datetime import datetime, timezone
-    
+
     for retry_count in range(10):
         try:
             # プランレコードに対してロックをかける
-            plan = db.query(Plans).filter(
-                Plans.id == plan_id,
-                Plans.deleted_at.is_(None)
-            ).with_for_update().first()
-            
+            plan = (
+                db.query(Plans)
+                .filter(Plans.id == plan_id, Plans.deleted_at.is_(None))
+                .with_for_update()
+                .first()
+            )
+
             if not plan:
                 raise HTTPException(status_code=404, detail="プランが見つかりません")
-            
+
             # プランを更新
             for key, value in update_data.items():
                 if hasattr(plan, key) and value is not None:
                     setattr(plan, key, value)
-            
+
             plan.updated_at = datetime.now(timezone.utc)
             db.flush()  # 変更をフラッシュ
-            
+
             return plan
         except HTTPException:
             raise  # HTTPExceptionは再発生させる
@@ -479,3 +486,63 @@ def _update_plan_with_retry(db: Session, plan_id: UUID, update_data: dict) -> Pl
             else:
                 logger.error("プラン更新が10回失敗しました", e)
                 raise
+
+
+@router.get("/{plan_id}/plan-time-sale", response_model=PaginatedPlanTimeSaleResponse)
+def get_plan_time_sale(
+    plan_id: UUID,
+    page: int = 1,
+    limit: int = 20,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    プランの価格時間販売情報を取得
+    """
+    rows, total = get_plan_time_sale_by_plan_id(db, plan_id, page, limit)
+    total_pages = math.ceil((total - 1) / limit)
+    time_sales = []
+    for row in rows:
+        time_sales.append(
+            PlanTimeSaleResponse(
+                id=str(row.TimeSale.id),
+                post_id=str(row.TimeSale.post_id) if row.TimeSale.post_id else None,
+                plan_id=str(row.TimeSale.plan_id),
+                price_id=str(row.TimeSale.price_id) if row.TimeSale.price_id else None,
+                start_date=row.TimeSale.start_date if row.TimeSale.start_date else None,
+                end_date=row.TimeSale.end_date if row.TimeSale.end_date else None,
+                sale_percentage=row.TimeSale.sale_percentage,
+                max_purchase_count=row.TimeSale.max_purchase_count
+                if row.TimeSale.max_purchase_count
+                else None,
+                purchase_count=row.purchase_count,
+                is_active=row.is_active,
+                is_expired=row.is_expired,
+                created_at=row.TimeSale.created_at if row.TimeSale.created_at else None,
+            )
+        )
+    return PaginatedPlanTimeSaleResponse(
+        time_sales=time_sales,
+        total=total,
+        total_pages=total_pages,
+        page=page,
+        limit=limit,
+        has_next=page < total_pages,
+    )
+
+@router.post("/{plan_id}/create-plan-time-sale")
+async def create_plan_time_sale(
+    plan_id: str,
+    payload: PlanTimeSaleCreateRequest,
+    db: Session = Depends(get_db),  
+    current_user: Users = Depends(get_current_user),
+):
+    """価格時間販売情報を作成する"""
+    if payload.start_date and payload.end_date:
+        if check_exists_plan_time_sale_in_period_by_plan_id(db, plan_id, payload.start_date, payload.end_date):
+            raise HTTPException(status_code=400, detail="Plan time sale already exists")
+    
+    time_sale = create_plan_time_sale_by_plan_id(db, plan_id, payload, current_user)
+    if not time_sale:
+        raise HTTPException(status_code=500, detail="Can not create price time sale")
+    return {"message": "ok"}

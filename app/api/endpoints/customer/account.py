@@ -137,7 +137,11 @@ def get_account_info(
                 thumbnail_key,
                 duration_sec,
                 created_at,
+                price_id,
+                post_price,
+                post_currency,
             ) = post_tuple
+            
             liked_post = LikedPostResponse(
                 id=post.id,
                 description=post.description,
@@ -149,6 +153,7 @@ def get_account_info(
                 duration_sec=duration_sec,
                 created_at=created_at,
                 updated_at=post.updated_at,
+                is_time_sale=post.is_time_sale,
             )
             liked_posts.append(liked_post)
 
@@ -717,6 +722,7 @@ def get_bookmarks(
             post_price,
             post_currency,
             bookmarked_at,
+            price_id,
         ) in bookmarks_data:
             # 動画時間をフォーマット
             duration = None
@@ -740,6 +746,9 @@ def get_bookmarks(
                 created_at=bookmarked_at,
                 price=int(post_price) if post_price else None,
                 currency=post_currency or "JPY",
+                sale_percentage=post.price_sale_percentage,
+                end_date=post.price_sale_end_date,
+                is_time_sale=post.is_time_sale,
             )
             bookmarks.append(bookmark)
 
@@ -773,6 +782,7 @@ def get_likes(
             post_price,
             post_currency,
             liked_at,
+            price_id,
         ) in liked_posts_data:
             # 動画時間をフォーマット
             duration = None
@@ -796,6 +806,9 @@ def get_likes(
                 created_at=liked_at,
                 price=int(post_price) if post_price else None,
                 currency=post_currency or "JPY",
+                sale_percentage=post.price_sale_percentage,
+                end_date=post.price_sale_end_date,
+                is_time_sale=post.is_time_sale,
             )
             liked_posts.append(liked_post)
 

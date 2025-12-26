@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PostType
+from app.crud.time_sale_crud import get_post_sale_flag_map
 from app.db.base import get_db
 from app.crud.creator_crud import (
     get_ranking_creators_categories_detail,
@@ -110,6 +111,7 @@ def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
                 duration=get_video_duration(post.duration_sec)
                 if post.Posts.post_type == PostType.VIDEO and post.duration_sec
                 else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+                is_time_sale=post.Posts.is_time_sale,
             )
             for idx, post in enumerate(ranking_posts_all_time)
         ],
@@ -131,6 +133,7 @@ def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
                 duration=get_video_duration(post.duration_sec)
                 if post.Posts.post_type == PostType.VIDEO and post.duration_sec
                 else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+                is_time_sale=post.Posts.is_time_sale,
             )
             for idx, post in enumerate(ranking_posts_monthly)
         ],
@@ -152,6 +155,7 @@ def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
                 duration=get_video_duration(post.duration_sec)
                 if post.Posts.post_type == PostType.VIDEO and post.duration_sec
                 else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+                is_time_sale=post.Posts.is_time_sale,
             )
             for idx, post in enumerate(ranking_posts_weekly)
         ],
@@ -173,6 +177,7 @@ def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
                 duration=get_video_duration(post.duration_sec)
                 if post.Posts.post_type == PostType.VIDEO and post.duration_sec
                 else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+                is_time_sale=post.Posts.is_time_sale,
             )
             for idx, post in enumerate(ranking_posts_daily)
         ],
@@ -197,11 +202,11 @@ def _get_ranking_posts_categories(db: Session) -> RankingCategoriesResponse:
 
     response = {
         "all_time": __arrange_ranking_posts_categories(
-            ranking_posts_categories_all_time
+            db, ranking_posts_categories_all_time
         ),
-        "daily": __arrange_ranking_posts_categories(ranking_posts_categories_daily),
-        "weekly": __arrange_ranking_posts_categories(ranking_posts_categories_weekly),
-        "monthly": __arrange_ranking_posts_categories(ranking_posts_categories_monthly),
+        "daily": __arrange_ranking_posts_categories(db, ranking_posts_categories_daily),
+        "weekly": __arrange_ranking_posts_categories(db, ranking_posts_categories_weekly),
+        "monthly": __arrange_ranking_posts_categories(db, ranking_posts_categories_monthly),
     }
     return RankingCategoriesResponse(
         all_time=response["all_time"],
@@ -211,9 +216,10 @@ def _get_ranking_posts_categories(db: Session) -> RankingCategoriesResponse:
     )
 
 
-def __arrange_ranking_posts_categories(ranking_posts_categories: list) -> dict:
+def __arrange_ranking_posts_categories(db: Session, ranking_posts_categories: list) -> dict:
     grouped: dict[str, RankingPostsCategoriesResponse] = {}
-
+    post_ids = [row.post_id for row in ranking_posts_categories if getattr(row, "post_id", None)]
+    sale_map = get_post_sale_flag_map(db, post_ids)
     for row in ranking_posts_categories:
         if not row.profile_name:
             continue
@@ -227,7 +233,8 @@ def __arrange_ranking_posts_categories(ranking_posts_categories: list) -> dict:
                 category_name=category_name,
                 posts=[],
             )
-
+        # is_time_sale = get_post_sale_flag_map(db, [row.post_id])[row.post_id]
+        is_time_sale = bool(sale_map.get(row.post_id, False))
         grouped[category_id].posts.append(
             RankingPostsCategoriesDetailResponse(
                 id=str(row.post_id),
@@ -246,6 +253,7 @@ def __arrange_ranking_posts_categories(ranking_posts_categories: list) -> dict:
                 duration=get_video_duration(row.duration_sec)
                 if row.post_type == PostType.VIDEO and row.duration_sec
                 else ("画像" if row.post_type == PostType.IMAGE else ""),
+                is_time_sale=is_time_sale,
             )
         )
 
@@ -351,6 +359,7 @@ def _get_ranking_posts_overall_detail(
                 duration=get_video_duration(post.duration_sec)
                 if post.Posts.post_type == PostType.VIDEO and post.duration_sec
                 else ("画像" if post.Posts.post_type == PostType.IMAGE else ""),
+                is_time_sale=post.Posts.is_time_sale,
             )
             for idx, post in enumerate(result)
         ],
@@ -377,19 +386,19 @@ def _get_ranking_posts_categories_detail(
         RankingCategoriesResponse: Ranking posts
     """
     if term == "all_time":
-        result = get_ranking_posts_detail_categories_all_time(
+        result, post_sale_map = get_ranking_posts_detail_categories_all_time(
             db, category, page, per_page
         )
     elif term == "monthly":
-        result = get_ranking_posts_detail_categories_monthly(
+        result, post_sale_map = get_ranking_posts_detail_categories_monthly(
             db, category, page, per_page
         )
     elif term == "weekly":
-        result = get_ranking_posts_detail_categories_weekly(
+        result, post_sale_map = get_ranking_posts_detail_categories_weekly(
             db, category, page, per_page
         )
     elif term == "daily":
-        result = get_ranking_posts_detail_categories_daily(db, category, page, per_page)
+        result, post_sale_map = get_ranking_posts_detail_categories_daily(db, category, page, per_page)
     else:
         raise HTTPException(status_code=400, detail="Invalid terms")
 
@@ -419,6 +428,7 @@ def _get_ranking_posts_categories_detail(
                 duration=get_video_duration(row.duration_sec)
                 if row.post_type == PostType.VIDEO and row.duration_sec
                 else ("画像" if row.post_type == PostType.IMAGE else ""),
+                is_time_sale=bool(post_sale_map.get(row.post_id, False)),
             )
         )
     responsePosts = sorted(responsePosts, key=lambda x: x.likes_count, reverse=True)

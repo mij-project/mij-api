@@ -43,6 +43,7 @@ def get_top_page_data(
             ) for c in top_categories],
             ranking_posts=[RankingPostResponse(
                 id=str(p.Posts.id),
+                is_time_sale=p.Posts.is_time_sale,
                 post_type=p.Posts.post_type,
                 title=p.Posts.description,
                 thumbnail=f"{BASE_URL}/{p.thumbnail_key}" if p.thumbnail_key else None,
@@ -79,6 +80,7 @@ def get_top_page_data(
             new_creators=[],
             recent_posts=[RecentPostResponse(
                 id=str(p.Posts.id),
+                is_time_sale=p.Posts.is_time_sale,
                 post_type=p.Posts.post_type,
                 title=p.Posts.description,
                 thumbnail=f"{BASE_URL}/{p.thumbnail_key}" if p.thumbnail_key else None,

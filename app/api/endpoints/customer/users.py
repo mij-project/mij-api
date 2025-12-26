@@ -187,7 +187,6 @@ def get_user_profile_by_username_endpoint(
                 is_reserved = True
             else:
                 is_reserved = False
-
             profile_posts.append(
                 ProfilePostResponse(
                     id=post.id,
@@ -202,6 +201,9 @@ def get_user_profile_by_username_endpoint(
                     price=price,
                     currency=currency,
                     is_reserved=is_reserved,
+                    is_time_sale=post.is_time_sale,
+                    sale_percentage=post.price_sale_percentage,
+                    end_date=post.price_sale_end_date,
                 )
             )
 
@@ -224,7 +226,7 @@ def get_user_profile_by_username_endpoint(
                     .first()
                     is not None
                 )
-
+            
             profile_plans.append(
                 ProfilePlanResponse(
                     id=plan.id,
@@ -243,6 +245,8 @@ def get_user_profile_by_username_endpoint(
                         for post in plan_details.get("plan_post", [])
                     ],
                     is_subscribed=is_subscribed,
+                    is_time_sale=plan.is_time_sale,
+                    time_sale_info=plan.time_sale_info,
                 )
             )
 
@@ -288,6 +292,9 @@ def get_user_profile_by_username_endpoint(
                     price=price,
                     currency=currency,
                     is_reserved=is_reserved,
+                    is_time_sale=post.is_time_sale,
+                    sale_percentage=post.price_sale_percentage,
+                    end_date=post.price_sale_end_date,
                 )
             )
 

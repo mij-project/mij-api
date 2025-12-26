@@ -419,8 +419,8 @@ def get_creators_sales_by_period(
             )
             .where(
                 Withdraws.status == WithdrawStatus.COMPLETED,
-                Withdraws.created_at >= start_naive,
-                Withdraws.created_at <= end_naive,
+                # Withdraws.created_at >= start_naive,
+                # Withdraws.created_at <= end_naive,
             )
             .group_by(Withdraws.user_id)
             .subquery()
@@ -440,8 +440,8 @@ def get_creators_sales_by_period(
                         WithdrawStatus.PENDING,
                     ]
                 ),
-                Withdraws.created_at >= start_naive,
-                Withdraws.created_at <= end_naive,
+                # Withdraws.created_at >= start_naive,
+                # Withdraws.created_at <= end_naive,
             )
             .group_by(Withdraws.user_id)
             .subquery()
