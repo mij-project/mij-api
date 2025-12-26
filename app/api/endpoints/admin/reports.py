@@ -52,6 +52,26 @@ async def get_gvm_report(
         "chip_count_overalltime": gmv_reports_overalltime["chip_count_overalltime"]
         if gmv_reports_overalltime
         else 0,
+        "plan_amount_gt0_count_overalltime": gmv_reports_overalltime[
+            "plan_amount_gt0_count_overalltime"
+        ]
+        if gmv_reports_overalltime
+        else 0,
+        "single_amount_gt0_count_overalltime": gmv_reports_overalltime[
+            "single_amount_gt0_count_overalltime"
+        ]
+        if gmv_reports_overalltime
+        else 0,
+        "plan_amount_zero_count_overalltime": gmv_reports_overalltime[
+            "plan_amount_zero_count_overalltime"
+        ]
+        if gmv_reports_overalltime
+        else 0,
+        "single_amount_zero_count_overalltime": gmv_reports_overalltime[
+            "single_amount_zero_count_overalltime"
+        ]
+        if gmv_reports_overalltime
+        else 0,
         "gmv_period": gmv_reports_period["gmv_period"] if gmv_reports_period else 0,
         "plan_gmv_period": gmv_reports_period["plan_gmv_period"]
         if gmv_reports_period
@@ -63,6 +83,32 @@ async def get_gvm_report(
         if gmv_reports_period
         else 0,
         "single_count_period": gmv_reports_period["single_count_period"]
+        if gmv_reports_period
+        else 0,
+        "plan_amount_gt0_count_period": gmv_reports_period[
+            "plan_amount_gt0_count_period"
+        ]
+        if gmv_reports_period
+        else 0,
+        "single_amount_gt0_count_period": gmv_reports_period[
+            "single_amount_gt0_count_period"
+        ]
+        if gmv_reports_period
+        else 0,
+        "plan_amount_zero_count_period": gmv_reports_period[
+            "plan_amount_zero_count_period"
+        ]
+        if gmv_reports_period
+        else 0,
+        "single_amount_zero_count_period": gmv_reports_period[
+            "single_amount_zero_count_period"
+        ]
+        if gmv_reports_period
+        else 0,
+        "chip_count_period": gmv_reports_period["chip_count_period"]
+        if gmv_reports_period
+        else 0,
+        "chip_gmv_period": gmv_reports_period["chip_gmv_period"]
         if gmv_reports_period
         else 0,
     }

@@ -16,6 +16,8 @@ logger = Logger.get_logger()
 
 def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
     try:
+        amt = func.coalesce(Payments.payment_amount, 0)
+
         stmt = select(
             # GMV all-time (SUCCEEDED)
             func.coalesce(
@@ -114,6 +116,64 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
                 ),
                 0,
             ).label("chip_count_overalltime"),
+            # --- NEW: Single amount breakdown (SUCCEEDED & SINGLE) ---
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.SINGLE)
+                            & (amt == 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("single_amount_zero_count_overalltime"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.SINGLE)
+                            & (amt > 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("single_amount_gt0_count_overalltime"),
+            # --- NEW: Plan amount breakdown (SUCCEEDED & PLAN) ---
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.PLAN)
+                            & (amt == 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("plan_amount_zero_count_overalltime"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.PLAN)
+                            & (amt > 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("plan_amount_gt0_count_overalltime"),
         )
 
         row = db.execute(stmt).one()
@@ -126,6 +186,11 @@ def get_gmv_overalltime_report(db: Session) -> Optional[dict]:
             "plan_count_overalltime": row.plan_count_overalltime,
             "single_count_overalltime": row.single_count_overalltime,
             "chip_count_overalltime": row.chip_count_overalltime,
+            # NEW
+            "single_amount_zero_count_overalltime": row.single_amount_zero_count_overalltime,
+            "single_amount_gt0_count_overalltime": row.single_amount_gt0_count_overalltime,
+            "plan_amount_zero_count_overalltime": row.plan_amount_zero_count_overalltime,
+            "plan_amount_gt0_count_overalltime": row.plan_amount_gt0_count_overalltime,
         }
     except Exception as e:
         logger.error(f"Error getting revenue reports: {e}")
@@ -145,6 +210,8 @@ def get_gmv_period_report(
             Payments.created_at <= end_date,
         ]
 
+        amt = func.coalesce(Payments.payment_amount, 0)
+
         stmt = select(
             # GMV in period
             func.coalesce(
@@ -159,14 +226,13 @@ def get_gmv_period_report(
                 ),
                 0,
             ).label("gmv_period"),
-            # Plan GMV in period
+            # Plan GMV in period (SUCCEEDED & PLAN)
             func.coalesce(
                 func.sum(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.PLAN),
-                            & (Payments.payment_type == 2),
+                            & (Payments.payment_type == PaymentType.PLAN),
                             Payments.payment_amount,
                         ),
                         else_=0,
@@ -174,14 +240,13 @@ def get_gmv_period_report(
                 ),
                 0,
             ).label("plan_gmv_period"),
-            # Single GMV in period
+            # Single GMV in period (SUCCEEDED & SINGLE)
             func.coalesce(
                 func.sum(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.SINGLE),
-                            & (Payments.payment_type == 1),
+                            & (Payments.payment_type == PaymentType.SINGLE),
                             Payments.payment_amount,
                         ),
                         else_=0,
@@ -189,14 +254,27 @@ def get_gmv_period_report(
                 ),
                 0,
             ).label("single_gmv_period"),
-            # Plan COUNT in period
+            # Chip GMV in period (SUCCEEDED & CHIP)
             func.coalesce(
                 func.sum(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.PLAN),
-                            & (Payments.payment_type == 2),
+                            & (Payments.payment_type == PaymentType.CHIP),
+                            Payments.payment_amount,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("chip_gmv_period"),
+            # Plan COUNT in period (SUCCEEDED & PLAN)
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.PLAN),
                             1,
                         ),
                         else_=0,
@@ -204,14 +282,13 @@ def get_gmv_period_report(
                 ),
                 0,
             ).label("plan_count_period"),
-            # Single COUNT in period
+            # Single COUNT in period (SUCCEEDED & SINGLE)
             func.coalesce(
                 func.sum(
                     case(
                         (
                             (Payments.status == PaymentStatus.SUCCEEDED)
-                            # & (Payments.payment_type == PaymentType.SINGLE),
-                            & (Payments.payment_type == 1),
+                            & (Payments.payment_type == PaymentType.SINGLE),
                             1,
                         ),
                         else_=0,
@@ -219,6 +296,91 @@ def get_gmv_period_report(
                 ),
                 0,
             ).label("single_count_period"),
+            # Chip COUNT in period (SUCCEEDED & CHIP)
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.CHIP),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("chip_count_period"),
+            # --- amount breakdown: SINGLE ---
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.SINGLE)
+                            & (amt == 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("single_amount_zero_count_period"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.SINGLE)
+                            & (amt > 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("single_amount_gt0_count_period"),
+            # --- amount breakdown: PLAN ---
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.PLAN)
+                            & (amt == 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("plan_amount_zero_count_period"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.PLAN)
+                            & (amt > 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("plan_amount_gt0_count_period"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (Payments.status == PaymentStatus.SUCCEEDED)
+                            & (Payments.payment_type == PaymentType.CHIP),
+                            Payments.payment_amount,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("chip_gmv_period")
         ).where(*conditions)
 
         row = db.execute(stmt).one()
@@ -227,8 +389,14 @@ def get_gmv_period_report(
             "gmv_period": row.gmv_period,
             "plan_gmv_period": row.plan_gmv_period,
             "single_gmv_period": row.single_gmv_period,
+            "chip_gmv_period": row.chip_gmv_period,
             "plan_count_period": row.plan_count_period,
             "single_count_period": row.single_count_period,
+            "chip_count_period": row.chip_count_period,
+            "single_amount_zero_count_period": row.single_amount_zero_count_period,
+            "single_amount_gt0_count_period": row.single_amount_gt0_count_period,
+            "plan_amount_zero_count_period": row.plan_amount_zero_count_period,
+            "plan_amount_gt0_count_period": row.plan_amount_gt0_count_period,
         }
     except Exception as e:
         logger.error(f"Error getting revenue period reports: {e}")

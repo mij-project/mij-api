@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func, desc, case
 from typing import List, Optional, Tuple
 from uuid import UUID
 
+from app.crud.time_sale_crud import get_post_sale_flag_map
 from app.models.user import Users
 from app.models.profiles import Profiles
 from app.models.posts import Posts
@@ -133,6 +135,8 @@ def search_creators(
             .order_by(Posts.creator_user_id, desc(Posts.created_at))
         ).all()
 
+        post_ids = [p.id for p in recent_posts_query]
+        post_sale_map = get_post_sale_flag_map(db, post_ids)
         # クリエイターIDごとに最新投稿をグループ化
         posts_by_creator = {}
         for post in recent_posts_query:
@@ -141,7 +145,7 @@ def search_creators(
                 posts_by_creator[creator_id] = []
             if len(posts_by_creator[creator_id]) < 5:
                 posts_by_creator[creator_id].append(
-                    {"id": str(post.id), "thumbnail_url": post.thumbnail_url}
+                    {"id": str(post.id), "thumbnail_url": post.thumbnail_url, "is_time_sale": bool(post_sale_map.get(post.id, False))}
                 )
 
         # 結果に最新投稿を追加
@@ -328,7 +332,14 @@ def search_posts(
 
     results = base_query.limit(limit).offset(offset).all()
 
-    return results, total
+    post_ids = [r.id for r in results]
+    sale_map = get_post_sale_flag_map(db, post_ids)
+    enriched_results = [
+        SimpleNamespace(**r._mapping, is_time_sale=bool(sale_map.get(r.id, False)))
+        for r in results
+    ]
+
+    return enriched_results, total
 
 
 def search_hashtags(

@@ -28,7 +28,7 @@ async def get_category_by_slug(
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
 
-        posts, total = get_posts_by_category_slug(db, slug, page, per_page)
+        posts, total, post_sale_map = get_posts_by_category_slug(db, slug, page, per_page)
         next_page, previous_page, has_next, has_previous = __process_pagination(
             posts, page, per_page
         )
@@ -54,6 +54,7 @@ async def get_category_by_slug(
                     if post.post_type == PostType.VIDEO and post.duration_sec
                     else ("画像" if post.post_type == PostType.IMAGE else ""),
                     category_name=category.name,
+                    is_time_sale=bool(post_sale_map.get(post.post_id, False)),
                 )
             )
         return PaginatedPostCategoryResponse(
