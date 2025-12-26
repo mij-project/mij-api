@@ -181,7 +181,7 @@ async def get_new_conversations_unread(
 @router.get("/list")
 def get_user_conversations(
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=1000),
     search: str = Query(None),
     sort: str = Query("last_message_desc"),
     unread_only: bool = Query(False),
@@ -260,13 +260,16 @@ def get_conversation_messages(
         partner_user_id = participants.user_id
         # 相手のユーザー情報とプロフィールを取得
         partner_user = user_crud.get_user_by_id(db, partner_user_id)
+        partner_profile_username = None
         if partner_user:
             partner_username = partner_user.profile_name
             partner_profile_name = partner_user.profile_name
-            # プロフィールから相手のアバターを取得
+            # プロフィールから相手のusernameとアバターを取得
             partner_profile = profile_crud.get_profile_by_user_id(db, partner_user_id)
-            if partner_profile and partner_profile.avatar_url:
-                partner_avatar = f"{BASE_URL}/{partner_profile.avatar_url}"
+            if partner_profile:
+                partner_profile_username = partner_profile.username
+                if partner_profile.avatar_url:
+                    partner_avatar = f"{BASE_URL}/{partner_profile.avatar_url}"
 
     # メッセージレスポンスを構築
     message_responses = []
@@ -355,6 +358,7 @@ def get_conversation_messages(
         partner_user_id=partner_user_id,
         partner_username=partner_username,
         partner_profile_name=partner_profile_name,
+        partner_profile_username=partner_profile_username,
         partner_avatar=partner_avatar,
         can_send_message=can_send_message,
         current_user_is_creator=current_user_is_creator,
@@ -466,8 +470,9 @@ def send_conversation_message(
                 conversation_id=conversation_id,
             )
 
-            # メール通知を送信
-            if recipient_user.email:
+            # メール通知を送信（通知可否情報を取得してから送信）
+            need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(db, recipient_user.id, "message")
+            if need_to_send_email_notification and recipient_user.email:
                 logger.info(f"Attempting to send email notification to {recipient_user.email} for message {message.id}")
                 conversation_url = f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation/{conversation_id}"
 
@@ -483,7 +488,10 @@ def send_conversation_message(
                 )
                 logger.info(f"Email notification call completed for {recipient_user.email}")
             else:
-                logger.info(f"Recipient user {recipient_user.id} has no email address, skipping email notification")
+                if not need_to_send_email_notification:
+                    logger.info(f"Email notification disabled for user {recipient_user.id}, skipping email notification")
+                else:
+                    logger.info(f"Recipient user {recipient_user.id} has no email address, skipping email notification")
     except Exception as e:
         # 通知エラーはログに記録するが、メッセージ送信は成功とする
         logger.error(f"Failed to send notification for message {message.id}: {e}")

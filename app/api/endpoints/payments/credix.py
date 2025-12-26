@@ -258,7 +258,7 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
                 raise HTTPException(status_code=404, detail="Price not found")
             # 元の価格を保持し、手数料込みの金額を計算（DBの値は更新しない）
             original_price = price.price
-            money = math.ceil(original_price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
+            money = math.floor(original_price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.price_id
             transaction_type = PaymentTransactionType.SINGLE
         else:  # subscription
@@ -271,7 +271,7 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
                 raise HTTPException(status_code=404, detail="Plan not found")
             # 元の価格を保持し、手数料込みの金額を計算（DBの値は更新しない）
             original_price = plan.price
-            money = math.ceil(original_price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
+            money = math.floor(original_price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.plan_id
             transaction_type = PaymentTransactionType.SUBSCRIPTION
 

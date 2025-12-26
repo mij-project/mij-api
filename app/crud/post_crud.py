@@ -31,7 +31,7 @@ from app.models.plans import Plans, PostPlans
 from app.models.prices import Prices
 from app.models.media_rendition_jobs import MediaRenditionJobs
 from app.models.subscriptions import Subscriptions
-from app.constants.enums import PostType
+from app.constants.enums import PostType, SubscriptionType, SubscriptionStatus
 from app.schemas.user_settings import UserSettingsType
 from app.services.email.send_email import (
     send_post_approval_email,
@@ -646,7 +646,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     # 有効なsubscriptionの条件
     valid_subscription_filter = and_(
         Subscriptions.user_id == user_id,
-        Subscriptions.status == 1,  # active
+        Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # active
         or_(Subscriptions.access_end.is_(None), Subscriptions.access_end > now),
     )
 
@@ -662,7 +662,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             Prices.id == func.cast(Subscriptions.order_id, PG_UUID(as_uuid=True)),
         )
         .filter(valid_subscription_filter)
-        .filter(Subscriptions.order_type == 1)
+        .filter(Subscriptions.order_type == SubscriptionType.PLAN)
     )
 
     # order_type=2: subscriptions → plans → post_plans → posts の経路でpost_idとplan_nameを取得
@@ -677,7 +677,7 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         )
         .join(PostPlans, PostPlans.plan_id == Plans.id)
         .filter(valid_subscription_filter)
-        .filter(Subscriptions.order_type == 2)
+        .filter(Subscriptions.order_type == SubscriptionType.SINGLE)
     )
 
     # 両方をUNION ALLして（重複は後でGROUP BYで処理）
@@ -717,7 +717,6 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         )
         .outerjoin(Likes, Posts.id == Likes.post_id)
         .outerjoin(Comments, Posts.id == Comments.post_id)
-        .filter(Posts.deleted_at.is_(None))
         .group_by(
             Posts.id,
             Users.profile_name,
@@ -1172,7 +1171,7 @@ def update_post_status(
 def _get_post_and_creator_info(db: Session, post_id: str) -> tuple:
     """投稿とクリエイター情報を取得"""
     post = (
-        db.query(Posts).filter(Posts.id == post_id, Posts.deleted_at.is_(None)).first()
+        db.query(Posts).filter(Posts.id == post_id).first()
     )
 
     if not post:

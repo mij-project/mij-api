@@ -682,3 +682,46 @@ def send_message_notification_email(
         logger.info(f"[send_message_notification_email] Email sent successfully to {to}")
     except Exception as e:
         logger.error(f"[send_message_notification_email] Failed to send email to {to}: {e}", exc_info=True)
+
+
+def send_message_content_approval_email(to: str, display_name: str | None = None, redirect_url: str | None = None) -> None:
+    """メッセージコンテンツ承認メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】送信したメッセージが承認されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "message_url": redirect_url or f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="message_content_notification.html",
+        ctx=ctx,
+        tags={"category": "message_content_approval"},
+    )
+
+
+def send_message_content_rejection_email(to: str, display_name: str | None = None, reject_comments: str | None = None, group_by: str | None = None) -> None:
+    """メッセージコンテンツ拒否メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】送信したメッセージが拒否されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "reject_comments": reject_comments or "申請内容を再度ご確認ください。",
+        "message_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/message/{group_by}" if group_by else f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="message_content_notification.html",
+        ctx=ctx,
+        tags={"category": "message_content_rejection"},
+    )

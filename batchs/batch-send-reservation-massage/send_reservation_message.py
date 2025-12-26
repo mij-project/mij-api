@@ -15,6 +15,7 @@ from models.user import Users
 from models.user_settings import UserSettings
 from models.profiles import Profiles
 from models.notifications import Notifications
+from models.reservation_message import ReservationMessage
 
 # 予約送信メッセージのステータス
 CONVERSATION_MESSAGE_STATUS_PENDING = 2 # 予約中
@@ -138,7 +139,10 @@ class SendReservationMessage:
         送信済みに更新（冪等性：pendingのものだけ更新したいならロック/条件更新も可）
         """
         msg.status = CONVERSATION_MESSAGE_STATUS_SENT
-        msg.updated_at = self._now()
+
+        # 予約メッセージのスケジュール時間を更新
+        reservation_message = self.db.query(ReservationMessage).filter(ReservationMessage.group_by == msg.group_by).first()
+        msg.updated_at = reservation_message.scheduled_at
         
         # 会話のlast_message_idとlast_message_atを更新
         conversation = self.db.query(Conversations).filter(Conversations.id == msg.conversation_id).first()

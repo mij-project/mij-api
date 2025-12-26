@@ -157,6 +157,7 @@ def add_notification_for_message_asset_rejection(
     db: Session,
     user_id: UUID,
     reject_comments: str,
+    group_by: str,
 ) -> None:
     """
     メッセージアセット拒否時の通知を追加
@@ -165,6 +166,7 @@ def add_notification_for_message_asset_rejection(
         db: データベースセッション
         user_id: 通知先ユーザーID（メッセージ送信者）
         reject_comments: 拒否理由コメント
+        group_by: メッセージグループID
     """
     try:
         notification = Notifications(
@@ -176,7 +178,7 @@ def add_notification_for_message_asset_rejection(
                 "subtitle": "メッセージに含まれる画像/動画が審査で拒否されました",
                 "message": f"拒否理由: {reject_comments}",
                 "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
-                "redirect_url": "/messages",
+                "redirect_url": f"/account/message/{group_by}",
             },
             is_read=False,
             created_at=datetime.now(timezone.utc),
@@ -231,5 +233,41 @@ def add_notification_for_new_message(
         logger.info(f"New message notification sent to user {recipient_user_id} from {sender_profile_name}")
     except Exception as e:
         logger.error(f"Add notification for new message error: {e}")
+        db.rollback()
+        pass
+
+
+def add_notification_for_message_content_approval(
+    db: Session,
+    user_id: UUID,
+) -> None:
+    """
+    メッセージコンテンツ承認時の通知を追加
+
+    Args:
+        db: データベースセッション
+        user_id: 通知先ユーザーID（メッセージ送信者）
+    """
+    try:
+        notification = Notifications(
+            user_id=user_id,
+            type=NotificationType.USERS,
+            payload={
+                "type": "message_content_approval",
+                "title": "送信したメッセージが承認されました",
+                "subtitle": "メッセージに含まれる画像/動画が審査で承認されました",
+                "message": "メッセージが承認されました",
+                "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
+                "redirect_url": "/message/conversation-list",
+            },
+            is_read=False,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(notification)
+        db.commit()
+        logger.info(f"Message content approval notification sent to user {user_id}")
+    except Exception as e:
+        logger.error(f"Add notification for message content approval error: {e}")
         db.rollback()
         pass
