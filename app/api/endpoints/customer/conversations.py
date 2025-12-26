@@ -335,23 +335,36 @@ def get_conversation_messages(
 
     # メッセージ送信権限の判定
     can_send_message = False
-    if partner_user_id:
-        # 条件1: チップ送信履歴の確認（双方向）
-        has_chip_history = payments_crud.get_payment_by_user_id(db, current_user.id, partner_user_id, PaymentType.CHIP)
+    has_dm_plan_to_partner = False
+    has_dm_plan_from_partner = False
+    has_chip_history_to_partner = False
+    has_chip_history_from_partner = False
 
-        # 条件2: DM解放プラン加入の確認（双方向）
-        # current_userがpartner_userのDM解放プランに加入している
-        has_dm_plan_to_partner = subscriptions_crud.get_subscription_by_user_id(db, current_user.id, partner_user_id)
-        # partner_userがcurrent_userのDM解放プランに加入している
-        has_dm_plan_from_partner = subscriptions_crud.get_subscription_by_user_id(db, partner_user_id, current_user.id)
+    if partner_user_id:
+        # チップ送信履歴の確認（双方向）
+        has_chip_history_to_partner = bool(payments_crud.get_payment_by_user_id(db, current_user.id, partner_user_id, PaymentType.CHIP))
+        has_chip_history_from_partner = bool(payments_crud.get_payment_by_user_id(db, partner_user_id, current_user.id, PaymentType.CHIP))
+
+        # DM解放プラン加入の確認（双方向）
+        # current_userがpartner_userのDM解放プランに加入している（open_dm_flg=true）
+        has_dm_plan_to_partner = bool(subscriptions_crud.get_dm_release_plan_subscription(db, current_user.id, partner_user_id))
+        # partner_userがcurrent_userのDM解放プランに加入している（open_dm_flg=true）
+        has_dm_plan_from_partner = bool(subscriptions_crud.get_dm_release_plan_subscription(db, partner_user_id, current_user.id))
+
         # どちらか一方を満たせばメッセージ送信可能
-        can_send_message = has_chip_history or has_dm_plan_to_partner or has_dm_plan_from_partner
+        can_send_message = has_chip_history_to_partner or has_dm_plan_to_partner or has_dm_plan_from_partner or has_chip_history_from_partner
 
     # ユーザーの役割情報を取得
     current_user_is_creator = current_user.role == AccountType.CREATOR
     partner_user_is_creator = False
     if partner_user_id and partner_user:
         partner_user_is_creator = partner_user.role == AccountType.CREATOR
+
+    # クリエイター ⇔ クリエイター 用フラグ
+    # 購入されている側：相手がプラン加入（任意のプラン） OR チップ送信
+    is_current_user_seller = bool(subscriptions_crud.get_subscription_by_user_id(db, partner_user_id, current_user.id)) or has_chip_history_from_partner
+    # 購入者側：自分がDM解放プラン購入（open_dm_flg=true） OR チップ送信
+    is_current_user_buyer = has_dm_plan_to_partner or has_chip_history_to_partner
 
     return ConversationMessagesResponse(
         messages=message_responses,
@@ -363,6 +376,12 @@ def get_conversation_messages(
         can_send_message=can_send_message,
         current_user_is_creator=current_user_is_creator,
         partner_user_is_creator=partner_user_is_creator,
+        has_dm_plan_to_partner=has_dm_plan_to_partner,
+        has_dm_plan_from_partner=has_dm_plan_from_partner,
+        has_chip_history_to_partner=has_chip_history_to_partner,
+        has_chip_history_from_partner=has_chip_history_from_partner,
+        is_current_user_seller=is_current_user_seller,
+        is_current_user_buyer=is_current_user_buyer,
     )
 
 

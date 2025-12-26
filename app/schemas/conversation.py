@@ -95,6 +95,15 @@ class ConversationMessagesResponse(BaseModel):
     can_send_message: bool = False
     current_user_is_creator: bool = False
     partner_user_is_creator: bool = False
+    # DM解放プラン購入状況
+    has_dm_plan_to_partner: bool = False  # 現在のユーザーが相手のDM解放プランを購入している
+    has_dm_plan_from_partner: bool = False  # 相手が現在のユーザーのDM解放プランを購入している
+    # チップ送信履歴
+    has_chip_history_to_partner: bool = False  # 現在のユーザーが相手へチップを送信した
+    has_chip_history_from_partner: bool = False  # 相手が現在のユーザーへチップを送信した
+    # クリエイター ⇔ クリエイター 用フラグ
+    is_current_user_seller: bool = False  # 購入されている側（相手がプラン加入 OR チップ送信）
+    is_current_user_buyer: bool = False  # 購入者側（自分がプラン購入 OR チップ送信）
 
     class Config:
         from_attributes = True
