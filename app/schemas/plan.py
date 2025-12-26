@@ -70,7 +70,9 @@ class PlanPostResponse(BaseModel):
     created_at: datetime
     price: Optional[int] = None
     currency: Optional[str] = None
-
+    is_time_sale: Optional[bool] = False
+    sale_percentage: Optional[int] = None
+    end_date: Optional[datetime] = None
     class Config:
         from_attributes = True
 
@@ -97,7 +99,8 @@ class PlanDetailResponse(BaseModel):
     welcome_message: Optional[str] = None
     subscriptions_count: int
     plan_post: Optional[List[PlanPostInfo]] = []
-
+    is_time_sale: Optional[bool] = False
+    time_sale_info: Optional[dict] = None
     class Config:
         from_attributes = True
 

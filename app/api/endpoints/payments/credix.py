@@ -5,24 +5,24 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 
+from app.crud.time_sale_crud import get_active_plan_timesale, get_active_price_timesale
 from app.db.base import get_db
 from app.schemas.credix import (
     CredixSessionRequest,
     CredixSessionResponse,
-    CredixPaymentResultResponse,
     PurchaseType
 )
 from app.services.credix import credix_client
 from app.api.commons.utils import generate_sendid
-from app.crud import payment_transactions_crud, user_providers_crud, providers_crud, price_crud, plan_crud
+from app.crud import payment_transactions_crud, user_providers_crud, providers_crud
 from app.deps.auth import get_current_user_optional
 from app.models.user import Users
-from app.models.providers import Providers
+# from app.models.providers import Providers
 from app.models.plans import Plans
 from app.models.prices import Prices
 from app.constants.number import PaymentPlanPlatformFeePercent
 from app.constants.enums import PaymentTransactionType, TransactionType
-from app.constants.messages import CredixMessage    
+# from app.constants.messages import CredixMessage    
 from app.core.logger import Logger
 import os
 import math
@@ -52,7 +52,7 @@ async def create_credix_session(
         credix_provider = providers_crud.get_provider_by_code(db, "credix")
         if not credix_provider:
             raise HTTPException(status_code=500, detail="CREDIX provider not found in database")
-
+            
         # user_providersテーブル確認
         user_provider = user_providers_crud.get_user_provider(
             db=db,
@@ -255,8 +255,17 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
             price = db.query(Prices).filter(Prices.id == request.price_id).with_for_update().first()
             if not price:
                 raise HTTPException(status_code=404, detail="Price not found")
-            # 元の価格を保持し、手数料込みの金額を計算（DBの値は更新しない）
             original_price = price.price
+            # Check TimeSale Information
+            if request.is_time_sale:
+                price_time_sale_info = get_active_price_timesale(db, price.post_id, price.id)
+                if price_time_sale_info and price_time_sale_info["is_active"] and (not price_time_sale_info["is_expired"]):
+                    original_price = math.ceil(original_price - original_price * price_time_sale_info["sale_percentage"] / 100)
+                elif price_time_sale_info and price_time_sale_info["is_active"] and price_time_sale_info["is_expired"]:
+                    raise HTTPException(status_code=400, detail="タイムセール期限過ぎました、または限定人数を超えました。申し訳ございませんが、再度リロードして、購入してください。")
+                else:
+                    raise HTTPException(status_code=400, detail="タイムセール期限過ぎました、または限定人数を超えました。申し訳ございませんが、再度リロードして、購入してください。")
+
             money = math.ceil(original_price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.price_id
             transaction_type = PaymentTransactionType.SINGLE
@@ -270,6 +279,15 @@ def _set_money(request: CredixSessionRequest, db: Session) -> tuple[int, str, in
                 raise HTTPException(status_code=404, detail="Plan not found")
             # 元の価格を保持し、手数料込みの金額を計算（DBの値は更新しない）
             original_price = plan.price
+            # Check TimeSale Information
+            if request.is_time_sale:
+                plan_time_sale_info = get_active_plan_timesale(db, plan.id)
+                if plan_time_sale_info and plan_time_sale_info["is_active"] and (not plan_time_sale_info["is_expired"]):
+                    original_price = math.ceil(original_price - original_price * plan_time_sale_info["sale_percentage"] / 100)
+                elif plan_time_sale_info and plan_time_sale_info["is_active"] and plan_time_sale_info["is_expired"]:
+                    raise HTTPException(status_code=400, detail="タイムセール期限過ぎました、または限定人数を超えました。申し訳ございませんが、再度リロードして、購入してください。")
+                else:
+                    raise HTTPException(status_code=400, detail="タイムセール期限過ぎました、または限定人数を超えました。申し訳ございませんが、再度リロードして、購入してください。")
             money = math.ceil(original_price * (1 + PaymentPlanPlatformFeePercent.DEFAULT / 100))
             order_id = request.plan_id
             transaction_type = PaymentTransactionType.SUBSCRIPTION

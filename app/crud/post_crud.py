@@ -1,3 +1,4 @@
+import math
 import os
 from operator import or_
 from fastapi import HTTPException
@@ -5,6 +6,12 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy import cast, distinct, func, desc, and_, BigInteger, union_all, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.crud.subscriptions_crud import check_viewing_rights
+from app.crud.time_sale_crud import (
+    get_active_plan_timesale_map,
+    get_active_price_timesale,
+    get_active_price_timesale_pairs,
+    get_post_sale_flag_map,
+)
 from app.models import Payments, UserSettings
 from app.models.genres import Genres
 from app.models.notifications import Notifications
@@ -264,7 +271,10 @@ def get_posts_by_category_slug(
         .all()
     )
 
-    return result, total
+    post_ids = [row.post_id for row in result]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+
+    return result, total, post_sale_map
 
 
 def _build_post_status_query(
@@ -426,6 +436,7 @@ def get_post_detail_by_id(db: Session, post_id: str, user_id: str | None) -> dic
         "categories": categories,
         "price": sale_info["price"],
         "plans": sale_info["plans"],
+        "plan_timesale_map": sale_info["plan_timesale_map"],
         **media_info,
     }
 
@@ -500,7 +511,7 @@ def get_liked_posts_by_user_id(
     """
     ユーザーがいいねした投稿を取得（top_crud.pyの121-126行目の項目と合わせる）
     """
-    return (
+    posts = (
         db.query(
             Posts,
             Users.profile_name,
@@ -509,6 +520,9 @@ def get_liked_posts_by_user_id(
             ThumbnailAssets.storage_key.label("thumbnail_key"),
             ThumbnailAssets.duration_sec.label("duration_sec"),
             Likes.created_at.label("created_at"),
+            Prices.id.label("price_id"),
+            Prices.price.label("post_price"),
+            Prices.currency.label("post_currency"),
         )
         .join(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
@@ -518,6 +532,7 @@ def get_liked_posts_by_user_id(
             (Posts.id == ThumbnailAssets.post_id)
             & (ThumbnailAssets.kind == MediaAssetKind.THUMBNAIL),
         )
+        .outerjoin(Prices, Posts.id == Prices.post_id)
         .filter(Likes.user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
@@ -529,18 +544,86 @@ def get_liked_posts_by_user_id(
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
             Likes.created_at,
+            Prices.id,
+            Prices.price,
+            Prices.currency,
         )
         .order_by(desc(Likes.created_at))  # いいねした日時の新しい順
         .limit(limit)
         .all()
     )
 
+    post_ids = [row[0].id for row in posts]
+    post_plan_rows = (
+        db.query(PostPlans.post_id, PostPlans.plan_id)
+        .filter(PostPlans.post_id.in_(post_ids))
+        .all()
+    )
+    post_to_plan_ids: dict[str, list[str]] = {}
+    all_plan_ids = set()
+    for post_id, plan_id in post_plan_rows:
+        post_to_plan_ids.setdefault(str(post_id), []).append(str(plan_id))
+        all_plan_ids.add(plan_id)
+    plan_ts_map = get_active_plan_timesale_map(db, all_plan_ids)
+
+    price_pairs = []
+    for row in posts:
+        post_obj = row[0]
+        price_id = row.price_id
+        price = row.post_price
+        if price_id and price and int(price) > 0:
+            price_pairs.append((post_obj.id, price_id))
+
+    active_price_pairs = get_active_price_timesale_pairs(db, price_pairs)
+    post_sale_map: dict[str, bool] = {}
+
+    for row in posts:
+        post_obj = row[0]
+        pid = str(post_obj.id)
+
+        # price sale
+        has_price_sale = False
+        if row.price_id and row.post_price and int(row.post_price) > 0:
+            has_price_sale = (pid, str(row.price_id)) in active_price_pairs
+
+        # plan sale
+        has_plan_sale = False
+        plan_ids = post_to_plan_ids.get(pid, [])
+        for plan_id in plan_ids:
+            if (
+                (plan_id in plan_ts_map)
+                and (plan_ts_map[plan_id]["is_active"])
+                and (not plan_ts_map[plan_id]["is_expired"])
+            ):
+                has_plan_sale = True
+                break
+
+        post_sale_map[pid] = has_price_sale or has_plan_sale
+
+    for row in posts:
+        id = str(row[0].id)
+        if id in post_sale_map and post_sale_map[id]:
+            is_time_sale = True
+        else:
+            is_time_sale = False
+        sale_percentage = None
+        end_date = None
+        price_ts = [x for x in active_price_pairs if x[0] == id]
+        if price_ts:
+            sale_percentage = price_ts[0][2]
+            end_date = price_ts[0][3]
+        row[0].is_time_sale = is_time_sale
+        row[0].price_sale_percentage = sale_percentage
+        row[0].price_sale_end_date = end_date
+
+    return posts
+
 
 def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     """
     ユーザーがブックマークした投稿を取得
     """
-    return (
+    posts = (
         db.query(
             Posts,
             Users.profile_name,
@@ -554,6 +637,7 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             func.min(Prices.price).label("post_price"),
             func.min(Prices.currency).label("post_currency"),
             Bookmarks.created_at.label("bookmarked_at"),
+            Prices.id.label("price_id"),
         )
         .join(Bookmarks, Posts.id == Bookmarks.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
@@ -578,17 +662,83 @@ def get_bookmarked_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             ThumbnailAssets.storage_key,
             ThumbnailAssets.duration_sec,
             Bookmarks.created_at,
+            Prices.id,
         )
         .order_by(desc(Bookmarks.created_at))
         .all()
     )
+
+    post_ids = [row[0].id for row in posts]
+    post_plan_rows = (
+        db.query(PostPlans.post_id, PostPlans.plan_id)
+        .filter(PostPlans.post_id.in_(post_ids))
+        .all()
+    )
+    post_to_plan_ids: dict[str, list[str]] = {}
+    all_plan_ids = set()
+    for post_id, plan_id in post_plan_rows:
+        post_to_plan_ids.setdefault(str(post_id), []).append(str(plan_id))
+        all_plan_ids.add(plan_id)
+    plan_ts_map = get_active_plan_timesale_map(db, all_plan_ids)
+
+    price_pairs = []
+    for row in posts:
+        post_obj = row[0]
+        price_id = row.price_id
+        price = row.post_price
+        if price_id and price and int(price) > 0:
+            price_pairs.append((post_obj.id, price_id))
+
+    active_price_pairs = get_active_price_timesale_pairs(db, price_pairs)
+    post_sale_map: dict[str, bool] = {}
+
+    for row in posts:
+        post_obj = row[0]
+        pid = str(post_obj.id)
+
+        # price sale
+        has_price_sale = False
+        if row.price_id and row.post_price and int(row.post_price) > 0:
+            has_price_sale = (pid, str(row.price_id)) in active_price_pairs
+
+        # plan sale
+        has_plan_sale = False
+        plan_ids = post_to_plan_ids.get(pid, [])
+        for plan_id in plan_ids:
+            if (
+                (plan_id in plan_ts_map)
+                and (plan_ts_map[plan_id]["is_active"])
+                and (not plan_ts_map[plan_id]["is_expired"])
+            ):
+                has_plan_sale = True
+                break
+
+        post_sale_map[pid] = has_price_sale or has_plan_sale
+
+    for row in posts:
+        id = str(row[0].id)
+        if id in post_sale_map and post_sale_map[id]:
+            is_time_sale = True
+        else:
+            is_time_sale = False
+        sale_percentage = None
+        end_date = None
+        price_ts = [x for x in active_price_pairs if x[0] == id]
+        if price_ts:
+            sale_percentage = price_ts[0][2]
+            end_date = price_ts[0][3]
+        row[0].is_time_sale = is_time_sale
+        row[0].price_sale_percentage = sale_percentage
+        row[0].price_sale_end_date = end_date
+
+    return posts
 
 
 def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     """
     ユーザーがいいねした投稿一覧を取得（カード表示用）
     """
-    return (
+    posts = (
         db.query(
             Posts,
             Users.profile_name,
@@ -602,6 +752,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
             func.min(Prices.price).label("post_price"),
             func.min(Prices.currency).label("post_currency"),
             Likes.created_at.label("liked_at"),
+            Prices.id.label("price_id"),
         )
         .join(Likes, Posts.id == Likes.post_id)
         .join(Users, Posts.creator_user_id == Users.id)
@@ -618,6 +769,7 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .filter(Posts.status == PostStatus.APPROVED)
         .group_by(
             Posts.id,
+            Prices.id,
             Users.profile_name,
             Users.offical_flg,
             Profiles.username,
@@ -629,6 +781,70 @@ def get_liked_posts_list_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
         .order_by(desc(Likes.created_at))
         .all()
     )
+    post_ids = [row[0].id for row in posts]
+    post_plan_rows = (
+        db.query(PostPlans.post_id, PostPlans.plan_id)
+        .filter(PostPlans.post_id.in_(post_ids))
+        .all()
+    )
+    post_to_plan_ids: dict[str, list[str]] = {}
+    all_plan_ids = set()
+    for post_id, plan_id in post_plan_rows:
+        post_to_plan_ids.setdefault(str(post_id), []).append(str(plan_id))
+        all_plan_ids.add(plan_id)
+    plan_ts_map = get_active_plan_timesale_map(db, all_plan_ids)
+
+    price_pairs = []
+    for row in posts:
+        post_obj = row[0]
+        price_id = row.price_id
+        price = row.post_price
+        if price_id and price and int(price) > 0:
+            price_pairs.append((post_obj.id, price_id))
+
+    active_price_pairs = get_active_price_timesale_pairs(db, price_pairs)
+    post_sale_map: dict[str, bool] = {}
+
+    for row in posts:
+        post_obj = row[0]
+        pid = str(post_obj.id)
+
+        # price sale
+        has_price_sale = False
+        if row.price_id and row.post_price and int(row.post_price) > 0:
+            has_price_sale = (pid, str(row.price_id)) in active_price_pairs
+
+        # plan sale
+        has_plan_sale = False
+        plan_ids = post_to_plan_ids.get(pid, [])
+        for plan_id in plan_ids:
+            if (
+                (plan_id in plan_ts_map)
+                and (plan_ts_map[plan_id]["is_active"])
+                and (not plan_ts_map[plan_id]["is_expired"])
+            ):
+                has_plan_sale = True
+                break
+
+        post_sale_map[pid] = has_price_sale or has_plan_sale
+
+    for row in posts:
+        id = str(row[0].id)
+        if id in post_sale_map and post_sale_map[id]:
+            is_time_sale = True
+        else:
+            is_time_sale = False
+        sale_percentage = None
+        end_date = None
+        price_ts = [x for x in active_price_pairs if x[0] == id]
+        if price_ts:
+            sale_percentage = price_ts[0][2]
+            end_date = price_ts[0][3]
+        row[0].is_time_sale = is_time_sale
+        row[0].price_sale_percentage = sale_percentage
+        row[0].price_sale_end_date = end_date
+
+    return posts
 
 
 def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
@@ -747,7 +963,7 @@ def get_ranking_posts(db: Session, limit: int = 5):
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    return (
+    posts = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -787,6 +1003,11 @@ def get_ranking_posts(db: Session, limit: int = 5):
         .limit(limit)
         .all()
     )
+    post_ids = [row[0].id for row in posts]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in posts:
+        row[0].is_time_sale = post_sale_map.get(row[0].id, False)
+    return posts
 
 
 def get_recent_posts(db: Session, limit: int = 10):
@@ -818,8 +1039,8 @@ def get_recent_posts(db: Session, limit: int = 10):
             Posts.id.label("post_id"),
             func.row_number()
             .over(
-                partition_by=Profiles.user_id,    
-                order_by=func.random(),          
+                partition_by=Profiles.user_id,
+                order_by=func.random(),
             )
             .label("rn"),
         )
@@ -856,10 +1077,14 @@ def get_recent_posts(db: Session, limit: int = 10):
         .outerjoin(likes_sq, Posts.id == likes_sq.c.post_id)
         .filter(active_post_cond)
         .filter(ranked_sq.c.rn <= 2)
-        .order_by(func.random())   
+        .order_by(func.random())
         .limit(limit)
         .all()
     )
+    post_ids = [row[0].id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row[0].is_time_sale = post_sale_map.get(row[0].id, False)
     return rows
 
 
@@ -878,7 +1103,7 @@ def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -918,6 +1143,11 @@ def get_ranking_posts_overall_all_time(db: Session, limit: int = 500):
         .limit(limit)
         .all()
     )
+    post_ids = [row[0].id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row[0].is_time_sale = post_sale_map.get(row[0].id, False)
+    return rows
 
 
 def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
@@ -934,7 +1164,7 @@ def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -975,6 +1205,11 @@ def get_ranking_posts_overall_monthly(db: Session, limit: int = 50):
         .limit(limit)
         .all()
     )
+    post_ids = [row[0].id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row[0].is_time_sale = post_sale_map.get(row[0].id, False)
+    return rows
 
 
 def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
@@ -990,7 +1225,7 @@ def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -1032,6 +1267,12 @@ def get_ranking_posts_overall_weekly(db: Session, limit: int = 50):
         .all()
     )
 
+    post_ids = [row[0].id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row[0].is_time_sale = post_sale_map.get(row[0].id, False)
+    return rows
+
 
 def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
     """
@@ -1045,7 +1286,7 @@ def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -1086,6 +1327,11 @@ def get_ranking_posts_overall_daily(db: Session, limit: int = 50):
         .limit(limit)
         .all()
     )
+    post_ids = [row[0].id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row[0].is_time_sale = post_sale_map.get(row[0].id, False)
+    return rows
 
 
 # ========== 作成・更新・削除系 ==========
@@ -1192,7 +1438,7 @@ def _get_post_categories(db: Session, post_id: str) -> list:
         db.query(Categories)
         .join(PostCategories, Categories.id == PostCategories.category_id)
         .filter(PostCategories.post_id == post_id)
-        .filter(Categories.is_active == True)
+        .filter(Categories.is_active.is_(True))
         .all()
     )
 
@@ -1218,7 +1464,25 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
 
     # Priceテーブルから金額を取得
     price = db.query(Prices).filter(Prices.post_id == post_id).first()
-
+    if price is not None:
+        price.is_time_sale_active = False
+        price.time_sale_price = None
+        price.sale_percentage = None
+        price.end_date = None
+    if price:
+        price_time_sale = get_active_price_timesale(db, post_id, price.id)
+        if (
+            price_time_sale
+            and price_time_sale["is_active"]
+            and (not price_time_sale["is_expired"])
+        ):
+            sale_price = int(price.price) - math.ceil(
+                int(price.price) * price_time_sale["sale_percentage"] / 100
+            )
+            price.is_time_sale_active = True
+            price.time_sale_price = sale_price
+            price.sale_percentage = price_time_sale["sale_percentage"]
+            price.end_date = price_time_sale["end_date"]
     # Planテーブルからプラン金額を取得（post_plansテーブルを経由）
     plans_query = (
         db.query(Plans)
@@ -1226,7 +1490,8 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
         .filter(PostPlans.post_id == post_id)
         .all()
     )
-
+    plan_ids = [plan.id for plan in plans_query]
+    plan_timesale_map = get_active_plan_timesale_map(db, plan_ids)
     # プランにサムネイル情報を追加
     plans_with_thumbnails = []
     for plan in plans_query:
@@ -1269,7 +1534,11 @@ def _get_sale_info(db: Session, post_id: str) -> dict:
             }
         )
 
-    return {"price": price, "plans": plans_with_thumbnails}
+    return {
+        "price": price,
+        "plans": plans_with_thumbnails,
+        "plan_timesale_map": plan_timesale_map,
+    }
 
 
 def _get_media_info(db: Session, post_id: str, user_id: str | None) -> dict:
@@ -1928,7 +2197,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
     # 価格情報を取得（単品販売）
     single_price_data = (
         db.query(Prices.price)
-        .filter(Prices.post_id == post_id, Prices.is_active == True)
+        .filter(Prices.post_id == post_id, Prices.is_active.is_(True))
         .first()
     )
 
@@ -1991,6 +2260,7 @@ def get_post_by_id(db: Session, post_id: str) -> Dict[str, Any]:
         "plans": plans_list,
         # カテゴリー情報
     }
+
 
 def get_post_and_categories_by_id(db: Session, post_id: str) -> dict:
     """
@@ -2057,7 +2327,7 @@ def get_post_and_categories_by_id(db: Session, post_id: str) -> dict:
                 if row.MediaAssets.created_at
                 else None,
                 "updated_at": None,
-                "input_key": getattr(row, 'input_key', None),
+                "input_key": getattr(row, "input_key", None),
             }
 
             # 重複を避けるため、既に存在するかチェック
@@ -2076,7 +2346,7 @@ def get_post_and_categories_by_id(db: Session, post_id: str) -> dict:
     # 価格情報を取得（単品販売）
     single_price_data = (
         db.query(Prices.price)
-        .filter(Prices.post_id == post_id, Prices.is_active == True)
+        .filter(Prices.post_id == post_id, Prices.is_active.is_(True))
         .first()
     )
 
@@ -2253,7 +2523,10 @@ def get_ranking_posts_detail_categories_all_time(
         .all()
     )
 
-    return result
+    post_ids = [row.post_id for row in result]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+
+    return result, post_sale_map
 
 
 def get_ranking_posts_detail_categories_daily(
@@ -2347,7 +2620,10 @@ def get_ranking_posts_detail_categories_daily(
         .all()
     )
 
-    return result
+    post_ids = [row.post_id for row in result]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+
+    return result, post_sale_map
 
 
 def get_ranking_posts_detail_categories_weekly(
@@ -2441,7 +2717,10 @@ def get_ranking_posts_detail_categories_weekly(
         .all()
     )
 
-    return result
+    post_ids = [row.post_id for row in result]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+
+    return result, post_sale_map
 
 
 def get_ranking_posts_detail_categories_monthly(
@@ -2535,7 +2814,10 @@ def get_ranking_posts_detail_categories_monthly(
         .all()
     )
 
-    return result
+    post_ids = [row.post_id for row in result]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+
+    return result, post_sale_map
 
 
 # ========== ランキング用 各ジャンル==========
@@ -3051,7 +3333,7 @@ def get_ranking_posts_detail_overall_all_time(
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -3092,6 +3374,11 @@ def get_ranking_posts_detail_overall_all_time(
         .limit(limit)
         .all()
     )
+    post_ids = [row.Posts.id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row.Posts.is_time_sale = bool(post_sale_map.get(row.Posts.id, False))
+    return rows
 
 
 def get_ranking_posts_detail_overall_monthly(
@@ -3109,7 +3396,7 @@ def get_ranking_posts_detail_overall_monthly(
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
     offset = (page - 1) * limit
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -3151,6 +3438,11 @@ def get_ranking_posts_detail_overall_monthly(
         .limit(limit)
         .all()
     )
+    post_ids = [row.Posts.id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row.Posts.is_time_sale = bool(post_sale_map.get(row.Posts.id, False))
+    return rows
 
 
 def get_ranking_posts_detail_overall_weekly(
@@ -3168,7 +3460,7 @@ def get_ranking_posts_detail_overall_weekly(
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
     offset = (page - 1) * limit
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -3211,6 +3503,11 @@ def get_ranking_posts_detail_overall_weekly(
         .all()
     )
 
+    post_ids = [row.Posts.id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row.Posts.is_time_sale = bool(post_sale_map.get(row.Posts.id, False))
+    return rows
 
 def get_ranking_posts_detail_overall_daily(
     db: Session, page: int = 1, limit: int = 500
@@ -3227,7 +3524,7 @@ def get_ranking_posts_detail_overall_daily(
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
     offset = (page - 1) * limit
-    return (
+    rows = (
         db.query(
             Posts,
             func.count(Likes.post_id).label("likes_count"),
@@ -3269,7 +3566,11 @@ def get_ranking_posts_detail_overall_daily(
         .limit(limit)
         .all()
     )
-
+    post_ids = [row.Posts.id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row.Posts.is_time_sale = bool(post_sale_map.get(row.Posts.id, False))
+    return rows
 
 def add_notification_for_post(
     db: Session,

@@ -36,7 +36,7 @@ from app.api.endpoints.customer import (
     user_banks as customer_user_banks,
     subscriptions,
     user_provider,
-    advertising_agency_tracking
+    advertising_agency_tracking,
 )
 
 # Admin routes
@@ -139,9 +139,15 @@ api_router.include_router(
 api_router.include_router(
     customer_user_banks.router, prefix="/user-banks", tags=["User Banks"]
 )
-api_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
-api_router.include_router(user_provider.router, prefix="/user-provider", tags=["User Provider"])
-api_router.include_router(advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"])
+api_router.include_router(
+    subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"]
+)
+api_router.include_router(
+    user_provider.router, prefix="/user-provider", tags=["User Provider"]
+)
+api_router.include_router(
+    advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"]
+)
 
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])

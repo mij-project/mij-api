@@ -37,6 +37,9 @@ class ProfilePostResponse(BaseModel):
     currency: Optional[str] = "JPY"
     is_reserved: Optional[bool] = False
     is_expired: Optional[bool] = False
+    is_time_sale: Optional[bool] = False
+    sale_percentage: Optional[int] = None
+    end_date: Optional[datetime] = None
 
 class ProfilePlanResponse(BaseModel):
     id: UUID
@@ -48,6 +51,8 @@ class ProfilePlanResponse(BaseModel):
     post_count: Optional[int] = 0
     plan_post: Optional[List[Dict[str, str]]] = []
     is_subscribed: Optional[bool] = False  # 現在のユーザーが加入済みかどうか
+    is_time_sale: Optional[bool] = False
+    time_sale_info: Optional[dict] = None
 
 class ProfilePurchaseResponse(BaseModel):
     id: UUID
@@ -59,6 +64,9 @@ class ProfilePurchaseResponse(BaseModel):
     price: Optional[int] = None
     currency: Optional[str] = "JPY"
     is_reserved: Optional[bool] = False
+    is_time_sale: Optional[bool] = False
+    sale_percentage: Optional[int] = None
+    end_date: Optional[datetime] = None
 
 class ProfileGachaResponse(BaseModel):
     id: UUID

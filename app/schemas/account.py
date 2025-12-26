@@ -25,7 +25,7 @@ class LikedPostResponse(BaseModel):
     duration_sec: Optional[Decimal] = None
     created_at: datetime
     updated_at: datetime
-    
+    is_time_sale: Optional[bool] = None
     class Config:
         from_attributes = True
 
@@ -134,6 +134,10 @@ class PostCardResponse(BaseModel):
     price: Optional[int] = None
     currency: Optional[str] = None
     plan_name: Optional[str] = None  # プラン名（プラン購読の場合のみ）
+    price_id: Optional[str] = None
+    sale_percentage: Optional[int] = None
+    end_date: Optional[datetime] = None
+    is_time_sale: Optional[bool] = False
 
     class Config:
         from_attributes = True

@@ -18,6 +18,7 @@ class CredixSessionRequest(BaseModel):
     purchase_type: PurchaseType = Field(..., description="購入タイプ（single/subscription）")
     plan_id: Optional[str] = Field(None, description="プランID（サブスクリプションの場合）")
     price_id: Optional[str] = Field(None, description="価格ID（単発購入の場合）")
+    is_time_sale: bool = Field(False, description="時間販売の場合はTrue、それ以外はFalse")
 
 
 class CredixSessionResponse(BaseModel):
