@@ -8,7 +8,7 @@ from typing import Optional, List
 class RecentPostThumbnail(BaseModel):
     id: UUID
     thumbnail_url: Optional[str] = None
-
+    is_time_sale: Optional[bool] = False
     class Config:
         from_attributes = True
 
@@ -53,7 +53,7 @@ class PostSearchResult(BaseModel):
     video_duration: Optional[int] = None
     creator: PostCreatorInfo
     created_at: str
-
+    is_time_sale: Optional[bool] = False
     class Config:
         from_attributes = True
 

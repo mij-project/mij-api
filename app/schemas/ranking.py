@@ -13,6 +13,7 @@ class RankingPostsAllTimeResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     rank: int
     duration: Optional[str] = None
+    is_time_sale: Optional[bool] = False
 
 class RankingPostsMonthlyResponse(BaseModel):
     id: str
@@ -25,6 +26,7 @@ class RankingPostsMonthlyResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     rank: int
     duration: Optional[str] = None
+    is_time_sale: Optional[bool] = False
 
 class RankingPostsWeeklyResponse(BaseModel):
     id: str
@@ -37,7 +39,8 @@ class RankingPostsWeeklyResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     rank: int
     duration: Optional[str] = None
-    
+    is_time_sale: Optional[bool] = False
+
 class RankingPostsDailyResponse(BaseModel):
     id: str
     description: str
@@ -49,6 +52,8 @@ class RankingPostsDailyResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     rank: int
     duration: Optional[str] = None
+    is_time_sale: Optional[bool] = False
+
 class RankingOverallResponse(BaseModel):
     all_time: List[RankingPostsAllTimeResponse]
     monthly: List[RankingPostsMonthlyResponse]
@@ -68,6 +73,7 @@ class RankingPostsCategoriesDetailResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     rank: int
     duration: Optional[str] = None  
+    is_time_sale: Optional[bool] = False
 
 class RankingPostsCategoriesResponse(BaseModel):
     category_id: str
@@ -92,6 +98,7 @@ class RankingPostsDetailDailyResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     rank: int
     duration: Optional[str] = None
+    is_time_sale: Optional[bool] = False
 
 class RankingPostsDetailResponse(BaseModel):
     posts: List[RankingPostsDetailDailyResponse]
@@ -112,6 +119,7 @@ class RankingCreators(BaseModel):
     rank: int
     follower_ids: List[str] | List
     official: bool
+    is_time_sale: Optional[bool] = False
     
 class RankingCreatorsResponse(BaseModel):
     all_time: List [RankingCreators]

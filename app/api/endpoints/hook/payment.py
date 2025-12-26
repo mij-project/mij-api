@@ -2,6 +2,7 @@
 CREDIX決済Webhookエンドポイント
 """
 
+import math
 from fastapi import APIRouter, Query, Depends
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
@@ -33,8 +34,8 @@ from app.constants.enums import (
     SubscriptionStatus,
     TransactionType,
     ItemType,
-    ConversationType,
-    ParticipantType,
+    # ConversationType,
+    # ParticipantType,
     PaymentType,
     ConversationMessageStatus,
 )
@@ -50,10 +51,10 @@ from app.services.email.send_email import (
 from app.models.payment_transactions import PaymentTransactions
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
-from app.models.conversations import Conversations
-from app.models.conversation_participants import ConversationParticipants
+# from app.models.conversations import Conversations
+# from app.models.conversation_participants import ConversationParticipants
 from app.models.conversation_messages import ConversationMessages
-from datetime import datetime, timezone
+# from datetime import datetime, timezone
 import os
 
 CDN_BASE_URL = os.environ.get("CDN_BASE_URL")
@@ -146,7 +147,9 @@ def _get_payment_info(
         ValueError: 注文情報が見つからない場合
     """
     if transaction.type == PaymentTransactionType.SINGLE:
-        price, post, creator = price_crud.get_price_and_post_by_id(db, transaction.order_id)
+        price, post, creator = price_crud.get_price_and_post_by_id(
+            db, transaction.order_id
+        )
         if not price or not post:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
         contents_name = post.description
@@ -179,7 +182,9 @@ def _get_selling_info(
         ValueError: 注文情報が見つからない場合
     """
     if transaction.type == PaymentTransactionType.SINGLE:
-        price, post, creator = price_crud.get_price_and_post_by_id(db, transaction.order_id)
+        price, post, creator = price_crud.get_price_and_post_by_id(
+            db, transaction.order_id
+        )
         if not price or not post:
             raise ValueError(f"Price or post not found: {transaction.order_id}")
         seller_user_id = post.creator_user_id
@@ -418,11 +423,12 @@ def _handle_successful_payment(
             logger.error(str(e))
             raise
 
+        payment_price_from_credix = (payment_amount * 100 + 110 - 1) // 110
         # 決済レコードを作成
         payment = _create_payment_record(
             db=db,
             transaction=transaction,
-            payment_price=payment_price,
+            payment_price=payment_price_from_credix,
             seller_user_id=seller_user_id,
             platform_fee=platform_fee,
             payment_amount=payment_amount,
@@ -502,12 +508,12 @@ def _handle_failed_payment(
     except ValueError as e:
         logger.error(f"Failed to get order info: {e}")
         raise
-
+    payment_price_from_credix = (payment_amount * 100 + 110 - 1) // 110
     # 決済レコードを作成
     payment = _create_payment_record(
         db=db,
         transaction=transaction,
-        payment_price=payment_price,
+        payment_price=payment_price_from_credix,
         seller_user_id=seller_user_id,
         platform_fee=platform_fee,
         payment_amount=payment_amount,
@@ -1203,7 +1209,7 @@ def _handle_chip_payment_success(
 
 
     # チップ金額（手数料除く）
-    chip_amount = int(payment_amount / 1.1)
+    chip_amount = (payment_amount * 100 + 110 - 1) // 110
     
 
     # paymentsレコード作成
@@ -1258,7 +1264,7 @@ def _handle_chip_payment_failure(
         logger.error(f"Creator user not found: {recipient_user_id}")
         raise ValueError(f"Creator user not found: {recipient_user_id}")
 
-    chip_amount = int(payment_amount / 1.1)
+    chip_amount = (payment_amount * 100 + 110 - 1) // 110
 
     # chip_message_idがある場合、メッセージを削除
     if chip_message_id:

@@ -16,6 +16,7 @@ class PostCreatorResponse(BaseModel):
 
 class RankingPostResponse(BaseModel):
     id: str
+    is_time_sale: Optional[bool] = False
     post_type: int
     title: str
     thumbnail: Optional[str] = None
@@ -38,6 +39,7 @@ class CreatorResponse(BaseModel):
     
 class RecentPostResponse(BaseModel):
     id: str
+    is_time_sale: Optional[bool] = False
     post_type: int
     title: str
     thumbnail: Optional[str] = None
