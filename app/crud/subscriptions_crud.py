@@ -16,7 +16,6 @@ from app.models.plans import Plans, PostPlans
 from datetime import datetime, timezone
 from app.constants.enums import SubscriptionStatus, SubscriptionType, PaymentTransactionType
 
-
 def create_subscription(
     db: Session,
     access_type: int,  # 1=plan_subscription, 2=one_time_purchase
