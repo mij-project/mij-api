@@ -10,6 +10,7 @@ from app.deps.auth import get_current_admin_user
 from app.models.admins import Admins
 from app.models.conversation_messages import ConversationMessages
 from app.models.message_assets import MessageAssets
+from app.models.profiles import Profiles
 from app.crud import message_assets_crud
 from app.crud import notifications_crud, user_crud
 from app.schemas.message_asset import (
@@ -20,7 +21,12 @@ from app.schemas.message_asset import (
 )
 from app.constants.enums import MessageAssetStatus
 from app.services.s3 import client as s3_client
+from app.services.email.send_email import send_message_content_approval_email, send_message_content_rejection_email
+from app.api.commons.function import CommonFunction
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -177,11 +183,47 @@ def approve_message_asset(
     """
     メッセージアセットを承認（管理者用）
     - group_byでグループ化されたすべてのアセットを承認
+    - 送信者に通知とメールを送信
     """
     asset = message_assets_crud.approve_message_asset_by_group_by(db, group_by)
 
     if not asset:
         raise HTTPException(status_code=404, detail="Message asset not found")
+
+    # メッセージ情報を取得（送信者ID取得のため）
+    message = db.query(ConversationMessages).filter(
+        ConversationMessages.id == asset.message_id
+    ).first()
+
+    if message and message.sender_user_id:
+        sender_user_id = message.sender_user_id
+
+        # 通知可否判定
+        need_to_send_notification = CommonFunction.get_user_need_to_send_notification(
+            db, sender_user_id, "messageContentApprove"
+        )
+
+        if need_to_send_notification:
+            # ユーザー情報を取得
+            sender_user = user_crud.get_user_by_id(db, sender_user_id)
+
+            # アプリ内通知を作成
+            notifications_crud.add_notification_for_message_content_approval(
+                db=db,
+                user_id=sender_user_id,
+            )
+
+            # メール送信
+            if sender_user and sender_user.email:
+                try:
+                    send_message_content_approval_email(
+                        to=sender_user.email,
+                        display_name=sender_user.profile_name or "User",
+                        redirect_url=f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
+                    )
+                    logger.info(f"Approval email sent to {sender_user.email} for message asset {asset.id}")
+                except Exception as e:
+                    logger.error(f"Failed to send approval email to {sender_user.email}: {e}")
 
     # 承認済みなのでCDN URLを設定
     cdn_url = f"{MESSAGE_ASSETS_CDN_URL}/{asset.storage_key}"
@@ -209,7 +251,7 @@ def reject_message_asset(
     メッセージアセットを拒否（管理者用）
     - group_byでグループ化されたすべてのアセットを拒否
     - 拒否理由をコメントとして保存
-    - 送信者への通知を送信
+    - 送信者への通知とメール送信
     """
     # 代表的なアセットを取得（メッセージ情報取得のため）
     # ConversationMessages.group_byでフィルタリング
@@ -220,7 +262,7 @@ def reject_message_asset(
         .order_by(MessageAssets.created_at.asc())
         .first()
     )
-    
+
     if not asset:
         raise HTTPException(status_code=404, detail="Message asset not found")
 
@@ -245,12 +287,35 @@ def reject_message_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="Failed to reject message asset")
 
-    # 送信者への通知を作成
-    notifications_crud.add_notification_for_message_asset_rejection(
-        db=db,
-        user_id=sender_user_id,
-        reject_comments=request.reject_comments,
+    # 通知可否判定
+    need_to_send_notification = CommonFunction.get_user_need_to_send_notification(
+        db, sender_user_id, "messageContentApprove"
     )
+
+    if need_to_send_notification:
+        # ユーザー情報を取得
+        sender_user = user_crud.get_user_by_id(db, sender_user_id)
+
+        # アプリ内通知を作成
+        notifications_crud.add_notification_for_message_asset_rejection(
+            db=db,
+            user_id=sender_user_id,
+            reject_comments=request.reject_comments,
+            group_by=group_by,
+        )
+
+        # メール送信
+        if sender_user and sender_user.email:
+            try:
+                send_message_content_rejection_email(
+                    to=sender_user.email,
+                    display_name=sender_user.profile_name or "User",
+                    reject_comments=request.reject_comments,
+                    group_by=group_by,
+                )
+                logger.info(f"Rejection email sent to {sender_user.email} for message asset {asset.id}")
+            except Exception as e:
+                logger.error(f"Failed to send rejection email to {sender_user.email}: {e}")
 
     # レスポンスを保存
     response = MessageAssetResponse(

@@ -90,6 +90,7 @@ class ConversationMessagesResponse(BaseModel):
     partner_user_id: Optional[UUID] = None
     partner_username: Optional[str] = None
     partner_profile_name: Optional[str] = None
+    partner_profile_username: Optional[str] = None  # プロフィール遷移用（Profile.username）
     partner_avatar: Optional[str] = None
     can_send_message: bool = False
     current_user_is_creator: bool = False

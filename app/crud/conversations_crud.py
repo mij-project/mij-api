@@ -592,35 +592,35 @@ def get_user_conversations(
         )
 
     # 最終メッセージがある会話のみをカウントするためのサブクエリ
+    # status が NULL または PENDING (2) でないメッセージがある会話を取得
     messages_with_valid_status = (
         db.query(ConversationMessages.conversation_id)
         .filter(
             ConversationMessages.deleted_at.is_(None),
             or_(
-                ConversationMessages.status != 0,
-                ConversationMessages.status.is_(None)
-            ),
-            ConversationMessages.status != ConversationMessageStatus.PENDING,
+                ConversationMessages.status.is_(None),
+                ConversationMessages.status != ConversationMessageStatus.PENDING
+            )
         )
         .group_by(ConversationMessages.conversation_id)
         .subquery()
     )
-    
+
     # 最終メッセージがある会話のみをフィルタリング
-    query_with_message = query.filter(
+    query = query.filter(
         Conversations.id.in_(
             db.query(messages_with_valid_status.c.conversation_id)
         )
     )
-    
-    # 全体件数を取得（最終メッセージがある会話のみ）
-    total = query_with_message.count()
 
     # ソート
     if sort == "last_message_asc":
         query = query.order_by(Conversations.last_message_at.asc())
     else:  # last_message_desc (デフォルト)
         query = query.order_by(Conversations.last_message_at.desc())
+
+    # 全体件数を取得（最終メッセージがある会話のみ）
+    total = query.count()
 
     # ページネーション
     conversations = query.offset(skip).limit(limit).all()
@@ -638,10 +638,9 @@ def get_user_conversations(
                     ConversationMessages.conversation_id == conv.conversation_id,
                     ConversationMessages.deleted_at.is_(None),
                     or_(
-                        ConversationMessages.status != 0,
-                        ConversationMessages.status.is_(None)
-                    ),
-                    ConversationMessages.status != ConversationMessageStatus.PENDING,
+                        ConversationMessages.status.is_(None),
+                        ConversationMessages.status != ConversationMessageStatus.PENDING
+                    )
                 )
                 .order_by(ConversationMessages.created_at.desc())
                 .first()
@@ -667,8 +666,10 @@ def get_user_conversations(
                     ),
                     ConversationMessages.sender_user_id != user_id,
                     ConversationMessages.deleted_at.is_(None),
-                    ConversationMessages.status != ConversationMessageStatus.PENDING,  # status=2を除外
-                    ConversationMessages.status != ConversationMessageStatus.INACTIVE,  # status=0を除外
+                    or_(
+                        ConversationMessages.status.is_(None),
+                        ConversationMessages.status != ConversationMessageStatus.PENDING
+                    )
                 )
                 .count()
             )
@@ -680,8 +681,10 @@ def get_user_conversations(
                     ConversationMessages.conversation_id == conv.conversation_id,
                     ConversationMessages.sender_user_id != user_id,
                     ConversationMessages.deleted_at.is_(None),
-                    ConversationMessages.status != ConversationMessageStatus.PENDING,  # status=2を除外
-                    ConversationMessages.status != ConversationMessageStatus.INACTIVE,  # status=0を除外
+                    or_(
+                        ConversationMessages.status.is_(None),
+                        ConversationMessages.status != ConversationMessageStatus.PENDING
+                    )
                 )
                 .count()
             )
