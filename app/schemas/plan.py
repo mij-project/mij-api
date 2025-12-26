@@ -19,6 +19,7 @@ class PlanUpdateRequest(BaseModel):
     type: Optional[int] = Field(None, description="1=通常, 2=おすすめ")
     welcome_message: Optional[str] = Field(None, max_length=1000)
     post_ids: Optional[List[UUID]] = Field(None, description="プランに含める投稿IDリスト")
+    open_dm_flg: Optional[bool] = Field(None, description="DMを開放するかどうか")
     price: Optional[int] = Field(None, ge=0)
 
 class PlanResponse(BaseModel):
@@ -97,6 +98,7 @@ class PlanDetailResponse(BaseModel):
     is_subscribed: bool
     type: int = 1
     welcome_message: Optional[str] = None
+    open_dm_flg: Optional[bool] = None
     subscriptions_count: int
     plan_post: Optional[List[PlanPostInfo]] = []
     is_time_sale: Optional[bool] = False

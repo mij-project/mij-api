@@ -52,3 +52,10 @@ class CredixPaymentResultResponse(BaseModel):
     transaction_id: str = Field(..., description="トランザクションID")
     payment_id: Optional[str] = Field(None, description="決済ID")
     subscription_id: Optional[str] = Field(None, description="サブスクリプションID")
+
+
+class ChipPaymentRequest(BaseModel):
+    """投げ銭決済リクエスト"""
+    recipient_user_id: str = Field(..., description="受取人ユーザーID")
+    amount: int = Field(..., description="投げ銭金額", ge=500, le=10000)
+    message: Optional[str] = Field(None, description="メッセージ")

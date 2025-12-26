@@ -47,6 +47,11 @@ SNS_SMS_TYPE = os.getenv("SNS_SMS_TYPE", "Transactional")
 BANNER_BUCKET_NAME = os.environ.get("BANNER_BUCKET_NAME")
 BANNER_IMAGE_URL = os.environ.get("BANNER_IMAGE_URL", "")
 
+# メッセージアセット
+MESSAGE_ASSETS_BUCKET_NAME = os.environ.get("MESSAGE_ASSETS_BUCKET_NAME")
+KMS_ALIAS_MESSAGE_ASSETS = os.environ.get("KMS_ALIAS_MESSAGE_ASSETS")
+MESSAGE_ASSETS_CDN_URL = os.environ.get("MESSAGE_ASSETS_CDN_URL", "")
+
 # ECS設定
 ECS_SUBNETS = (
     os.environ.get("ECS_SUBNETS", "").split(",")
@@ -85,6 +90,12 @@ def s3_client(is_use_accelerate_endpoint: bool = False):
 def ecs_client():
     return boto3.client(
         "ecs",
+        region_name=AWS_REGION,
+    )
+
+def scheduler_client():
+    return boto3.client(
+        "scheduler",
         region_name=AWS_REGION,
     )
 

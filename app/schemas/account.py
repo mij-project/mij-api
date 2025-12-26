@@ -6,6 +6,7 @@ from decimal import Decimal
 from app.schemas.commons import PresignResponseItem
 from app.schemas.purchases import SinglePurchaseResponse
 from app.models.posts import Posts
+from app.schemas.message_asset import UserMessageAssetsListResponse
 
 Kind = Literal["avatar", "cover"]
 
@@ -99,6 +100,7 @@ class AccountInfoResponse(BaseModel):
     posts_info: PostsInfo
     sales_info: SalesInfo
     plan_info: PlanInfo
+    message_assets_info: UserMessageAssetsListResponse
 
 class AvatarPresignRequest(BaseModel):
     files: List[AccountFileSpec] = Field(..., description='例: [{"kind":"avatar","ext":"jpg"}, ...]')

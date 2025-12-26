@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 from app.constants.enums import AccountType, PaymentStatus, WithdrawStatus
 from app.core.logger import Logger
-from sqlalchemy import func, or_, select, case, cast, and_
+from sqlalchemy import func, or_, select, case, cast, and_, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-
+from app.constants.enums import PaymentType
 from app.models import (
     Banks,
     Creators,
@@ -115,6 +115,7 @@ def get_sales_period_by_creator(
     - period_sales: 期間中の合計売上（プラットフォーム手数料差引後）
     - single_item_sales: 期間中の単品売上（手数料差引後）
     - plan_sales: 期間中のサブスク売上（手数料差引後）
+    - chip_sales: 期間中のチップ売上（手数料差引後）
     - previous_period_sales: 前期間の合計売上（手数料差引後）
     """
 
@@ -151,8 +152,7 @@ def get_sales_period_by_creator(
                 func.sum(
                     case(
                         (
-                            # Payments.payment_type == PaymentType.SINGLE,
-                            Payments.payment_type == 1,
+                            Payments.payment_type == PaymentType.SINGLE,
                             net_per_payment,
                         ),
                         else_=0,
@@ -165,8 +165,7 @@ def get_sales_period_by_creator(
                 func.sum(
                     case(
                         (
-                            # Payments.payment_type == PaymentType.PLAN,
-                            Payments.payment_type == 2,
+                            Payments.payment_type == PaymentType.PLAN,
                             net_per_payment,
                         ),
                         else_=0,
@@ -174,6 +173,19 @@ def get_sales_period_by_creator(
                 ),
                 0,
             ).label("plan_sales"),
+            # チップ売上（手数料差引後）
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            Payments.payment_type == PaymentType.CHIP,
+                            net_per_payment,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("chip_sales"),
         ).where(base_filter_current)
 
         payments_row = db.execute(payments_stmt).one()
@@ -181,6 +193,7 @@ def get_sales_period_by_creator(
         period_sales = int(payments_row.period_sales or 0)
         single_item_sales = int(payments_row.single_item_sales or 0)
         plan_sales = int(payments_row.plan_sales or 0)
+        chip_sales = int(payments_row.chip_sales or 0)
 
         # 3. 前期間の売上（net）
         base_filter_previous = (
@@ -204,6 +217,7 @@ def get_sales_period_by_creator(
             "period_sales": period_sales,
             "single_item_sales": single_item_sales,
             "plan_sales": plan_sales,
+            "chip_sales": chip_sales,
             "previous_period_sales": previous_period_sales,
         }
 
@@ -237,22 +251,31 @@ def get_sales_history_by_creator(
             .outerjoin(
                 Prices,
                 and_(
-                    Payments.order_type == 1,
-                    cast(Payments.order_id, PG_UUID) == Prices.id,
+                    Payments.order_type == PaymentType.SINGLE,
+                    Payments.payment_type != PaymentType.CHIP,
+                    case(
+                        (Payments.payment_type == PaymentType.CHIP, None),
+                        else_=cast(Payments.order_id, PG_UUID)
+                    ) == Prices.id,
                 ),
             )
             .outerjoin(
                 Posts,
                 and_(
-                    Payments.order_type == 1,
+                    Payments.order_type == PaymentType.SINGLE,
+                    Payments.payment_type != PaymentType.CHIP,
                     Prices.post_id == Posts.id,
                 ),
             )
             .outerjoin(
                 Plans,
                 and_(
-                    Payments.order_type == 2,
-                    cast(Payments.order_id, PG_UUID) == Plans.id,
+                    Payments.order_type == PaymentType.PLAN,
+                    Payments.payment_type != PaymentType.CHIP,
+                    case(
+                        (Payments.payment_type == PaymentType.CHIP, None),
+                        else_=cast(Payments.order_id, PG_UUID)
+                    ) == Plans.id,
                 ),
             )
             .where(
@@ -819,14 +842,22 @@ def get_payments_by_user_id(
                 Prices,
                 and_(
                     Payments.order_type == 1,
-                    cast(Payments.order_id, PG_UUID) == Prices.id,
+                    Payments.payment_type != PaymentType.CHIP,
+                    case(
+                        (Payments.payment_type == PaymentType.CHIP, None),
+                        else_=cast(Payments.order_id, PG_UUID)
+                    ) == Prices.id,
                 ),
             )
             .outerjoin(
                 Plans,
                 and_(
                     Payments.order_type == 2,
-                    cast(Payments.order_id, PG_UUID) == Plans.id,
+                    Payments.payment_type != PaymentType.CHIP,
+                    case(
+                        (Payments.payment_type == PaymentType.CHIP, None),
+                        else_=cast(Payments.order_id, PG_UUID)
+                    ) == Plans.id,
                 ),
             )
             .where(

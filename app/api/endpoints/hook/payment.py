@@ -23,6 +23,8 @@ from app.crud import (
     plan_crud,
     user_crud,
     notifications_crud,
+    conversations_crud,
+    profile_crud,
 )
 from app.constants.enums import (
     PaymentTransactionStatus,
@@ -32,6 +34,10 @@ from app.constants.enums import (
     SubscriptionStatus,
     TransactionType,
     ItemType,
+    ConversationType,
+    ParticipantType,
+    PaymentType,
+    ConversationMessageStatus,
 )
 from app.services.email.send_email import (
     send_payment_succuces_email,
@@ -39,10 +45,16 @@ from app.services.email.send_email import (
     send_selling_info_email,
     send_cancel_subscription_email,
     send_buyer_cancel_subscription_email,
+    send_chip_payment_buyer_success_email,
+    send_chip_payment_seller_success_email,
 )
 from app.models.payment_transactions import PaymentTransactions
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
+from app.models.conversations import Conversations
+from app.models.conversation_participants import ConversationParticipants
+from app.models.conversation_messages import ConversationMessages
+from datetime import datetime, timezone
 import os
 
 CDN_BASE_URL = os.environ.get("CDN_BASE_URL")
@@ -328,6 +340,7 @@ def _update_or_create_user_provider(
         cardbrand: カードブランド
         cardnumber: カード番号
         yuko: 有効期限
+        main_card: メインカードかどうか
     """
     if not send_id:
         return
@@ -798,6 +811,517 @@ def _add_payment_notifications_for_seller(
     )
 
 
+def _send_chip_payment_notifications_for_buyer(
+    db: Session,
+    transaction: PaymentTransactions,
+    result: str,
+    email: Optional[str],
+    money: Optional[int],
+) -> None:
+    """
+    チップ決済購入者への通知送信
+
+    Args:
+        db: データベースセッション
+        transaction: 決済トランザクション
+        result: 決済結果（ok/ng）
+        email: 購入者メールアドレス
+        money: 決済金額
+    """
+    # order_idから recipient_user_id, chip_message_id, message_id を取得
+    # 形式: recipient_user_id_chip_message_id_message_id または recipient_user_id_chip_message_id
+    order_id_parts = transaction.order_id.split("_")
+    recipient_user_id = order_id_parts[0]
+    chip_message_id = order_id_parts[1] if len(order_id_parts) > 1 else None
+    message_id = order_id_parts[2] if len(order_id_parts) > 2 else None
+
+    # 購入者情報取得
+    buyer_user = user_crud.get_user_by_id(db, transaction.user_id)
+    if not buyer_user:
+        logger.error(f"Buyer user not found: {transaction.user_id}")
+        return
+
+    # クリエイター情報取得
+    recipient_user = user_crud.get_user_by_id(db, recipient_user_id)
+    if not recipient_user:
+        logger.error(f"Recipient user not found: {recipient_user_id}")
+        return
+
+    recipient_profile = profile_crud.get_profile_by_user_id(db, UUID(recipient_user_id))
+    recipient_name = recipient_user.profile_name if recipient_user else "クリエイター"
+
+    # メッセージテキスト取得
+    message_text = None
+    conversation_id = None
+    if message_id:
+        try:
+            message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(message_id)
+            ).first()
+            if message:
+                message_text = message.body_text
+                conversation_id = message.conversation_id
+        except Exception as e:
+            logger.error(f"Failed to get message {message_id}: {e}")
+
+    if chip_message_id:
+        try:
+            chip_message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(chip_message_id)
+            ).first()
+            if chip_message:
+                conversation_id = chip_message.conversation_id
+        except Exception as e:
+            logger.error(f"Failed to get chip message {chip_message_id}: {e}")
+    # チップ金額計算（手数料除く）
+    payment_amount = money if money else 0
+
+    # UTCからJSTに変換
+    jst = timezone(timedelta(hours=9))
+    if transaction.updated_at.tzinfo is None:
+        utc_time = transaction.updated_at.replace(tzinfo=timezone.utc)
+    else:
+        utc_time = transaction.updated_at
+    jst_time = utc_time.astimezone(jst)
+    payment_date = jst_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # 通知内容を作成
+    if result == RESULT_OK:
+        title = f"{recipient_name}にチップ送信が完了しました"
+        subtitle = f"{recipient_name}にチップ送信が完了しました"
+    else:
+        title = "チップの送信に失敗しました"
+        subtitle = "チップの送信に失敗しました"
+
+    if conversation_id:
+        notification_redirect_url = f"/message/conversation/{conversation_id}"
+    else:
+        notification_redirect_url = f"/profile?username={recipient_profile.username}"
+
+    # メール送信
+    try:
+        frontend_url = os.environ.get("FRONTEND_URL", "https://mijfans.jp")
+
+        if result == RESULT_OK:
+            # 成功時のメール送信
+            recipient_profile_url = f"{frontend_url}/profile?username={recipient_profile.username}" if recipient_profile else ""
+
+            send_chip_payment_buyer_success_email(
+                to=email,
+                recipient_name=recipient_name,
+                recipient_profile_url=recipient_profile_url,
+                transaction_id=str(transaction.id),
+                payment_amount=payment_amount,
+                payment_date=payment_date,
+                has_message=bool(message_text),
+                message_text=message_text,
+            )
+        else:
+            # 失敗時のメール送信
+            send_payment_faild_email(
+                to=email,
+                transaction_id=str(transaction.id),
+                failure_date=payment_date,
+                sendid=transaction.session_id,
+                user_name=buyer_user.profile_name,
+                user_email=buyer_user.email,
+            )
+    except Exception as e:
+        logger.error(f"Failed to send chip payment buyer email: {e}")
+
+    # 通知を追加
+    payload = {
+        "title": title,
+        "subtitle": subtitle,
+        "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
+        "redirect_url": notification_redirect_url,
+    }
+
+    notifications_crud.add_notification_for_payment_succuces(
+        db=db,
+        notification={
+            "user_id": transaction.user_id,
+            "type": NotificationType.USERS,
+            "payload": payload,
+        },
+    )
+
+
+def _send_chip_payment_notifications_for_seller(
+    db: Session,
+    transaction: PaymentTransactions,
+    payment: Payments,
+    result: str,
+) -> None:
+    """
+    チップ決済クリエイターへの通知送信
+
+    Args:
+        db: データベースセッション
+        transaction: 決済トランザクション
+        result: 決済結果（ok/ng）
+    """
+    # 失敗時は通知不要
+    if result != RESULT_OK:
+        return
+
+    # order_idから recipient_user_id, chip_message_id, message_id を取得
+    # 形式: recipient_user_id_chip_message_id_message_id または recipient_user_id_chip_message_id
+    order_id_parts = transaction.order_id.split("_")
+    recipient_user_id = order_id_parts[0]
+    chip_message_id = order_id_parts[1] if len(order_id_parts) > 1 else None
+    message_id = order_id_parts[2] if len(order_id_parts) > 2 else None
+
+    # クリエイター情報取得
+    recipient_user = user_crud.get_user_by_id(db, recipient_user_id)
+    if not recipient_user:
+        logger.error(f"Recipient user not found: {recipient_user_id}")
+        return
+
+    recipient_profile = profile_crud.get_profile_by_user_id(db, UUID(recipient_user_id))
+
+    # 購入者情報取得
+    buyer_user = user_crud.get_user_by_id(db, transaction.user_id)
+    if not buyer_user:
+        logger.error(f"Buyer user not found: {transaction.user_id}")
+        return
+
+    buyer_profile = profile_crud.get_profile_by_user_id(db, transaction.user_id)
+    buyer_name = buyer_user.profile_name if buyer_user else "ユーザー"
+
+    # メッセージテキスト取得
+    message_text = None
+    conversation_id = None
+    if message_id:
+        try:
+            message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(message_id)
+            ).first()
+            if message:
+                message_text = message.body_text
+                conversation_id = message.conversation_id
+        except Exception as e:
+            logger.error(f"Failed to get message {message_id}: {e}")
+
+    if chip_message_id:
+        try:
+            chip_message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(chip_message_id)
+            ).first()
+            if chip_message:
+                conversation_id = chip_message.conversation_id
+        except Exception as e:
+            logger.error(f"Failed to get chip message {chip_message_id}: {e}")
+
+    # チップ金額計算
+    payment_amount = payment.payment_amount if payment.payment_amount else 0
+    chip_amount = int(payment_amount / 1.1)
+
+    # プラットフォーム手数料取得
+    from app.crud import creator_crud
+    creator_info = creator_crud.get_creator_by_user_id(db, UUID(recipient_user_id))
+    if not creator_info:
+        logger.error(f"Creator info not found: {recipient_user_id}")
+        return
+
+    platform_fee_percent = creator_info.platform_fee_percent
+    seller_amount = int(chip_amount * (1 - platform_fee_percent / 100))
+
+    # UTCからJSTに変換
+    jst = timezone(timedelta(hours=9))
+    if transaction.updated_at.tzinfo is None:
+        utc_time = transaction.updated_at.replace(tzinfo=timezone.utc)
+    else:
+        utc_time = transaction.updated_at
+    jst_time = utc_time.astimezone(jst)
+    payment_date = jst_time.strftime("%Y年%m月%d日 %H:%M")
+
+    # 通知内容を作成
+    title = f"{buyer_name}さんからチップが届きました"
+    subtitle = f"{buyer_name}さんからチップが届きました"
+    if conversation_id:
+        notification_redirect_url = f"/message/conversation/{conversation_id}"
+    else:
+        notification_redirect_url = "/account/sale"
+
+    # アバターURLの取得
+    avatar_url = "https://logo.mijfans.jp/bimi/logo.svg"
+    if buyer_profile and buyer_profile.avatar_url:
+        avatar_url = f"{CDN_BASE_URL}/{buyer_profile.avatar_url}"
+
+    # メール送信
+    try:
+        frontend_url = os.environ.get("FRONTEND_URL", "https://mijfans.jp")
+        sender_profile_url = f"{frontend_url}/profile?username={buyer_profile.username}" if buyer_profile else ""
+
+        sales_url = f"{frontend_url}/message/conversation/{conversation_id}" if conversation_id else f"{frontend_url}/account/sale"
+        send_chip_payment_seller_success_email(
+            to=recipient_user.email,
+            sender_name=buyer_name,
+            sender_profile_url=sender_profile_url,
+            transaction_id=str(transaction.id),
+            seller_amount=seller_amount,
+            payment_date=payment_date,
+            has_message=bool(message_text),
+            message_text=message_text,
+            sales_url=sales_url,
+        )
+    except Exception as e:
+        logger.error(f"Failed to send chip payment seller email: {e}")
+
+    # 通知を追加
+    payload = {
+        "title": title,
+        "subtitle": subtitle,
+        "avatar": avatar_url,
+        "redirect_url": notification_redirect_url,
+    }
+
+    notification = {
+        "user_id": UUID(recipient_user_id),
+        "type": NotificationType.PAYMENTS,
+        "payload": payload,
+    }
+    notifications_crud.add_notification_for_selling_info(
+        db=db, notification=notification
+    )
+
+
+def _send_dm_notification(
+    db: Session,
+    transaction: PaymentTransactions,
+) -> None:
+    """プラン加入時のDMの通知を送信"""
+    plan = plan_crud.get_plan_by_id(db, transaction.order_id)
+    if not plan:
+        return
+
+    # welcome_messageがない場合は通知を送信しない
+    if plan.welcome_message is None or plan.welcome_message == "":
+        return
+
+    creator_user = user_crud.get_user_by_id(db, plan.creator_user_id)
+    if not creator_user:
+        return
+
+    buyer_user_id = transaction.user_id
+    creator_user_id = plan.creator_user_id
+
+    try:
+        # DM会話を取得または作成
+        conversation = conversations_crud.get_or_create_dm_conversation(
+            db=db, user_id_1=creator_user_id, user_id_2=buyer_user_id
+        )
+
+        # ウェルカムメッセージを送信（クリエイターから購入者へ）
+        message = conversations_crud.create_message(
+            db=db,
+            conversation_id=conversation.id,
+            sender_user_id=creator_user_id,
+            body_text=plan.welcome_message,
+        )
+
+        logger.info(
+            f"Sent welcome message: {message.id} from creator={creator_user_id} to buyer={buyer_user_id} in conversation={conversation.id}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to send DM notification: {e}", exc_info=True)
+        # エラーが発生しても決済処理は継続するため、例外は握りつぶす
+        return
+
+
+def _handle_chip_payment_success(
+    db: Session,
+    transaction: PaymentTransactions,
+    payment_amount: int,
+    sendid: Optional[str] = None,
+    cardbrand: Optional[str] = None,
+    cardnumber: Optional[str] = None,
+    yuko: Optional[str] = None,
+) -> Payments:
+    """
+    チップ決済成功時の処理
+
+    - conversation_messagesのstatusを0→1に更新
+    - 購入者とクリエイターへの通知送信
+    - メール送信
+    - paymentsレコード作成
+    """
+
+    payment_transactions_crud.update_transaction_status(
+        db=db,
+        transaction_id=transaction.id,
+        status=PaymentTransactionStatus.COMPLETED,
+    )
+
+    # order_idを分解: recipient_user_id_chip_message_id_message_id または recipient_user_id_chip_message_id
+    order_id_parts = transaction.order_id.split("_")
+    recipient_user_id = order_id_parts[0]
+    chip_message_id = order_id_parts[1] if len(order_id_parts) > 1 else None
+    message_id = order_id_parts[2] if len(order_id_parts) > 2 else None
+
+    # クリエイター情報取得
+    from app.crud import creator_crud
+
+    recipient_user = user_crud.get_user_by_id(db, recipient_user_id)
+    if not recipient_user:
+        logger.error(f"Recipient user not found: {recipient_user_id}")
+        raise ValueError(f"Recipient user not found: {recipient_user_id}")
+
+    creator_info = creator_crud.get_creator_by_user_id(db, UUID(recipient_user_id))
+    if not creator_info:
+        logger.error(f"Creator info not found: {recipient_user_id}")
+        raise ValueError(f"Creator info not found: {recipient_user_id}")
+
+    # chip_message_idがある場合、メッセージを有効化
+    if chip_message_id:
+        try:
+            chip_message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(chip_message_id)
+            ).first()
+
+            if chip_message:
+                chip_message.status = ConversationMessageStatus.ACTIVE
+                db.commit()
+                logger.info(f"Activated chip payment message: {chip_message_id}")
+            else:
+                logger.warning(f"Chip message not found for chip_message_id: {chip_message_id}")
+        except Exception as e:
+            logger.error(f"Failed to activate chip message {chip_message_id}: {e}")
+
+    # メッセージIDがある場合、メッセージを有効化
+    message_text = None
+    if message_id:
+        try:
+            message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(message_id)
+            ).first()
+
+            if message:
+                message.status = ConversationMessageStatus.ACTIVE
+                db.commit()
+                message_text = message.body_text
+                logger.info(f"Activated chip payment message: {message_id}")
+            else:
+                logger.warning(f"Message not found for message_id: {message_id}")
+        except Exception as e:
+            logger.error(f"Failed to activate message {message_id}: {e}")
+
+
+    # チップ金額（手数料除く）
+    chip_amount = int(payment_amount / 1.1)
+    
+
+    # paymentsレコード作成
+    payment = payments_crud.create_payment(
+        db=db,
+        transaction_id=transaction.id,
+        payment_type=PaymentType.CHIP,
+        order_id=transaction.order_id,
+        order_type=PaymentType.CHIP,
+        provider_id=transaction.provider_id,
+        provider_payment_id=sendid,
+        buyer_user_id=transaction.user_id,
+        seller_user_id=recipient_user_id,
+        payment_amount=payment_amount,
+        payment_price=chip_amount,
+        status=PaymentStatus.SUCCEEDED,
+        platform_fee=creator_info.platform_fee_percent,
+    )
+
+    _update_or_create_user_provider(
+        db, transaction, sendid, cardbrand, cardnumber, yuko, True
+    )
+
+    return payment
+
+
+def _handle_chip_payment_failure(
+    db: Session,
+    payment_amount: int,
+    transaction: PaymentTransactions,
+) -> None:
+    """
+    チップ決済失敗時の処理
+
+    - conversation_messagesのdeleted_atを設定
+    """
+    # order_idを分解: recipient_user_id_chip_message_id_message_id または recipient_user_id_chip_message_id
+    order_id_parts = transaction.order_id.split("_")
+    recipient_user_id = order_id_parts[0]
+    chip_message_id = order_id_parts[1] if len(order_id_parts) > 1 else None
+    message_id = order_id_parts[2] if len(order_id_parts) > 2 else None
+
+    payment_transactions_crud.update_transaction_status(
+        db=db,
+        transaction_id=transaction.id,
+        status=PaymentTransactionStatus.FAILED,
+    )
+
+    from app.crud import creator_crud
+    creator_info = creator_crud.get_creator_by_user_id(db, recipient_user_id)
+    if not creator_info:
+        logger.error(f"Creator user not found: {recipient_user_id}")
+        raise ValueError(f"Creator user not found: {recipient_user_id}")
+
+    chip_amount = int(payment_amount / 1.1)
+
+    # chip_message_idがある場合、メッセージを削除
+    if chip_message_id:
+        try:
+            chip_message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(chip_message_id)
+            ).first()
+
+            if chip_message:
+                from datetime import datetime, timezone
+                chip_message.deleted_at = datetime.now(timezone.utc)
+                db.commit()
+                logger.info(f"Marked chip payment message as deleted: {chip_message_id}")
+            else:
+                logger.warning(f"Chip message not found for chip_message_id: {chip_message_id}")
+        except Exception as e:
+            logger.error(f"Failed to delete chip message {chip_message_id}: {e}")
+
+    # メッセージIDがある場合、メッセージを削除
+    if message_id:
+        try:
+            message = db.query(ConversationMessages).filter(
+                ConversationMessages.id == UUID(message_id)
+            ).first()
+
+            if message:
+                from datetime import datetime, timezone
+                message.deleted_at = datetime.now(timezone.utc)
+                db.commit()
+                logger.info(f"Marked chip payment message as deleted: {message_id}")
+            else:
+                logger.warning(f"Message not found for message_id: {message_id}")
+        except Exception as e:
+            logger.error(f"Failed to delete message {message_id}: {e}")
+
+
+    payment = payments_crud.create_payment(
+        db=db,
+        transaction_id=transaction.id,
+        payment_type=PaymentType.CHIP,
+        order_id=transaction.order_id,
+        order_type=PaymentType.CHIP,
+        provider_id=transaction.provider_id,
+        provider_payment_id=transaction.session_id,
+        buyer_user_id=transaction.user_id,
+        seller_user_id=recipient_user_id,
+        payment_amount=payment_amount,
+        payment_price=chip_amount,
+        status=PaymentStatus.FAILED,
+        platform_fee=creator_info.platform_fee_percent,
+    )
+
+    logger.info(f"Chip payment failure processed: transaction_id={transaction.id}")
+
+    return payment
+
+
 @router.get("/payment")
 async def payment_webhook(
     clientip: Optional[str] = Query(None, alias="clientip"),
@@ -866,51 +1390,113 @@ async def payment_webhook(
         # 決済結果に応じて処理を分岐
         is_success = result == RESULT_OK
         payment_amount = money if money else 0
+        is_chip_payment = transaction.type == PaymentTransactionType.CHIP
 
         if is_success:
-            payment = _handle_successful_payment(
-                db,
-                transaction,
-                payment_amount,
-                sendid,
-                email,
-                cardbrand,
-                cardnumber,
-                yuko,
-                transaction_origin,
-            )
-        else:
-            payment = _handle_failed_payment(
-                db, transaction, payment_amount, transaction_origin
-            )
-
-        # get buyer and seller setting notification
-        send_notification_buyer, send_notification_seller = (
-            _get_buyer_and_seller_need_to_send_notification(
-                db, payment.buyer_user_id, payment.seller_user_id
-            )
-        )
-        # 0円決済（無料）の場合は決済通知を送信しない
-        if transaction_origin != TransactionType.PAYMENT_ORIGIN_FREE:
-            if send_notification_buyer:
-                # 決済通知を送信 (バッチからの失敗時、またはフロントエンドからのリクエスト時)
-                _send_payment_notifications_for_buyer(
+            # 成功時の処理
+            if is_chip_payment:
+                payment = _handle_chip_payment_success(
                     db=db,
-                    result=result,
                     transaction=transaction,
+                    payment_amount=payment_amount,
+                    sendid=sendid,
+                    cardbrand=cardbrand,
+                    cardnumber=cardnumber,
+                    yuko=yuko,
+                )
+            else:
+                payment = _handle_successful_payment(
+                    db=db,
+                    transaction=transaction,
+                    payment_amount=payment_amount,
                     send_id=sendid,
                     email=email,
-                    money=money,
+                    cardbrand=cardbrand,
+                    cardnumber=cardnumber,
+                    yuko=yuko,
                     transaction_origin=transaction_origin,
                 )
-            if send_notification_seller:
-                # 決済通知を追加
-                _add_payment_notifications_for_seller(
+
+            # プラン加入時のDMの通知を送信
+            if transaction.type == PaymentTransactionType.SUBSCRIPTION:
+                _send_dm_notification(db, transaction)
+        else:
+            # 失敗時の処理
+            if is_chip_payment:
+                payment = _handle_chip_payment_failure(
                     db=db,
-                    result=result,
                     transaction=transaction,
-                    transaction_origin=transaction_origin,
+                    payment_amount=payment_amount,
                 )
+            else:
+                payment = _handle_failed_payment(
+                    db=db,
+                    transaction=transaction,
+                    payment_amount=payment_amount,
+                    transaction_origin=transaction_origin
+                )
+
+
+        # チップ決済の場合は専用の通知関数を呼び出す
+        if is_chip_payment:
+            # order_idから recipient_user_id を取得
+            order_id_parts = transaction.order_id.split("_")
+            recipient_user_id = order_id_parts[0]
+
+            # 購入者とクリエイターの通知設定を取得
+            send_notification_buyer, send_notification_seller = (
+                _get_buyer_and_seller_need_to_send_notification(
+                    db, transaction.user_id, UUID(recipient_user_id)
+                )
+            )
+
+            # 購入者への通知
+            if send_notification_buyer:
+                _send_chip_payment_notifications_for_buyer(
+                    db=db,
+                    transaction=transaction,
+                    result=result,
+                    email=email,
+                    money=money,
+                )
+
+            # クリエイターへの通知
+            if send_notification_seller:
+                _send_chip_payment_notifications_for_seller(
+                    db=db,
+                    transaction=transaction,
+                    payment=payment,
+                    result=result,
+                )
+        else:
+            # 通常の決済の場合
+            # get buyer and seller setting notification
+            send_notification_buyer, send_notification_seller = (
+                _get_buyer_and_seller_need_to_send_notification(
+                    db, payment.buyer_user_id, payment.seller_user_id
+                )
+            )
+            # 0円決済（無料）の場合は決済通知を送信しない
+            if transaction_origin != TransactionType.PAYMENT_ORIGIN_FREE:
+                if send_notification_buyer:
+                    # 決済通知を送信 (バッチからの失敗時、またはフロントエンドからのリクエスト時)
+                    _send_payment_notifications_for_buyer(
+                        db=db,
+                        result=result,
+                        transaction=transaction,
+                        send_id=sendid,
+                        email=email,
+                        money=money,
+                        transaction_origin=transaction_origin,
+                    )
+                if send_notification_seller:
+                    # 決済通知を追加
+                    _add_payment_notifications_for_seller(
+                        db=db,
+                        result=result,
+                        transaction=transaction,
+                        transaction_origin=transaction_origin,
+                    )
 
         # トランザクションをリフレッシュ
         db.refresh(transaction)

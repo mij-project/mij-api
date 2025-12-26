@@ -579,6 +579,7 @@ def _format_sale_info(
             "description": plan.get("description") if plan else None,
             "price": plan.get("price") if plan else None,
             "type": plan.get("type") if plan else None,
+                "open_dm_flg": plan.get("open_dm_flg") if plan else None,
             "post_count": plan.get("post_count") if plan else None,
             "plan_post": [
                 {
