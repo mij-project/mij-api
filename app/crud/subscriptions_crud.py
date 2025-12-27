@@ -231,16 +231,33 @@ def create_free_subscription(
 
 def get_subscription_by_user_id(db: Session, user_id: UUID, partner_user_id: UUID):
     """
-    ユーザーのDM解放プラン加入の有無を取得
+    ユーザーが相手のプランに加入しているかを取得
+    （プランの種類やopen_dm_flgの値に関わらず、加入状態を判定）
     """
-    has_dm_plan = db.query(Subscriptions).join(
+    has_subscription = db.query(Subscriptions).join(
         Plans,
         (Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION) & (cast(Subscriptions.order_id, PG_UUID) == Plans.id)
     ).filter(
         Subscriptions.user_id == user_id,
         Subscriptions.creator_id == partner_user_id,
-        Plans.open_dm_flg == True,
         Subscriptions.status == SubscriptionStatus.ACTIVE
     ).first() is not None
 
-    return has_dm_plan
+    return has_subscription
+
+
+def get_dm_release_plan_subscription(db: Session, user_id: UUID, partner_user_id: UUID):
+    """
+    ユーザーが相手のDM解放プラン（open_dm_flg=true）に加入しているかを取得
+    """
+    has_dm_subscription = db.query(Subscriptions).join(
+        Plans,
+        (Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION) & (cast(Subscriptions.order_id, PG_UUID) == Plans.id)
+    ).filter(
+        Subscriptions.user_id == user_id,
+        Subscriptions.creator_id == partner_user_id,
+        Subscriptions.status == SubscriptionStatus.ACTIVE,
+        Plans.open_dm_flg == True
+    ).first() is not None
+
+    return has_dm_subscription
