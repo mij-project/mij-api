@@ -18,6 +18,7 @@ from app.models.plans import Plans, PostPlans
 from app.models.media_assets import MediaAssets
 from app.models.social import Likes, Follows
 from app.models.prices import Prices
+
 # from app.constants.enums import MediaAssetKind
 from app.api.commons.function import CommonFunction
 import os
@@ -197,8 +198,8 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
     for post_id, plan_id in post_plan_rows:
         post_to_plan_ids.setdefault(str(post_id), []).append(str(plan_id))
         all_plan_ids.add(plan_id)
-    plan_ts_map = get_active_plan_timesale_map(db, all_plan_ids)
 
+    plan_ts_map = get_active_plan_timesale_map(db, all_plan_ids)
     price_pairs = []
     for row in posts:
         post_obj = row[0]
@@ -261,15 +262,17 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         )
         .all()
     )
+    plan_ids = [str(plan.id) for plan in plans]
+    plan_ts_map_all_plans = get_active_plan_timesale_map(db, plan_ids)
     for plan in plans:
         plan_id = str(plan.id)
         if (
-            (plan_id in plan_ts_map)
-            and (plan_ts_map[plan_id]["is_active"])
-            and (not plan_ts_map[plan_id]["is_expired"])
+            (plan_id in plan_ts_map_all_plans)
+            and (plan_ts_map_all_plans[plan_id]["is_active"])
+            and (not plan_ts_map_all_plans[plan_id]["is_expired"])
         ):
             plan.is_time_sale = True
-            plan.time_sale_info = plan_ts_map[plan_id]
+            plan.time_sale_info = plan_ts_map_all_plans[plan_id]
         else:
             plan.is_time_sale = False
             plan.time_sale_info = None
@@ -323,14 +326,13 @@ def get_user_profile_by_username(db: Session, username: str) -> dict:
         .order_by(desc(Posts.created_at))
         .all()
     )
-    
 
     gacha_items = []
 
     # フォロワー数とフォロー数を取得
     follower_count = get_follower_count(db, user.id)
     following_count = get_following_count(db, user.id)
-    
+
     return {
         "user": user,
         "profile": profile,

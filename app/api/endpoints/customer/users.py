@@ -147,6 +147,7 @@ def get_user_profile_by_username_endpoint(
     try:
         now = datetime.now(timezone.utc)
         profile_data = get_user_profile_by_username(db, username)
+        
         if not profile_data:
             raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
 
