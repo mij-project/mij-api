@@ -76,6 +76,7 @@ class SubscribedPlanDetail(BaseModel):
     creator_profile_name: Optional[str] = None
     post_count: int
     thumbnail_keys: List[str] = []
+    purchase_ids: Optional[List[str]] = None  # 同じプランに複数回加入している場合のpurchase_idリスト
 
 class PlanInfo(BaseModel):
     plan_count: int
@@ -169,6 +170,8 @@ class AccountPostResponse(BaseModel):
     duration: Optional[str] = None
     is_video: bool = False
     has_plan: bool = False
+    is_time_sale: bool = False
+    sale_percentage: Optional[int] = None
 
 class AccountPostStatusResponse(BaseModel):
     pending_posts: List[AccountPostResponse] = []

@@ -588,6 +588,126 @@ def get_active_plan_timesale(db: Session, plan_id: UUID) -> dict:
         "is_expired": bool(is_expired),
     }
 
+def get_plan_time_sale_by_id(db: Session, time_sale_id: UUID):
+    """プランのタイムセール情報をIDから取得（ステータス付き）"""
+    now = func.now()
+    within_time = and_(TimeSale.start_date <= now, now < TimeSale.end_date)
+
+    start_bound = TimeSale.start_date
+    end_bound = TimeSale.end_date
+
+    purchase_count_sq = (
+        select(func.count(Payments.id))
+        .where(
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.paid_at.is_not(None),
+            Payments.paid_at >= start_bound,
+            Payments.paid_at <= end_bound,
+            Payments.order_id == cast(TimeSale.plan_id, String),
+            Payments.payment_price == TimeSale.sale_price,
+        )
+        .correlate(TimeSale)
+        .scalar_subquery()
+    )
+
+    is_active_expr = case(
+        (TimeSale.max_purchase_count.is_(None), within_time),
+        else_=and_(within_time, purchase_count_sq < TimeSale.max_purchase_count),
+    ).label("is_active")
+
+    is_expired_expr = case(
+        (now >= TimeSale.end_date, True),
+        (
+            and_(
+                TimeSale.max_purchase_count.is_not(None),
+                within_time,
+                purchase_count_sq >= TimeSale.max_purchase_count,
+            ),
+            True,
+        ),
+        else_=False,
+    ).label("is_expired")
+
+    stmt = (
+        select(
+            TimeSale,
+            purchase_count_sq.label("purchase_count"),
+            is_active_expr,
+            is_expired_expr,
+        )
+        .where(
+            TimeSale.id == time_sale_id,
+            TimeSale.plan_id.is_not(None),
+            TimeSale.price_id.is_(None),
+            TimeSale.post_id.is_(None),
+            TimeSale.deleted_at.is_(None),
+        )
+    )
+
+    row = db.execute(stmt).first()
+    return row
+
+
+def get_price_time_sale_by_id(db: Session, time_sale_id: UUID):
+    """投稿の価格タイムセール情報をIDから取得（ステータス付き）"""
+    now = func.now()
+    within_time = and_(TimeSale.start_date <= now, now < TimeSale.end_date)
+
+    start_bound = TimeSale.start_date
+    end_bound = TimeSale.end_date
+
+    purchase_count_sq = (
+        select(func.count(Payments.id))
+        .where(
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.paid_at.is_not(None),
+            Payments.paid_at >= start_bound,
+            Payments.paid_at <= end_bound,
+            Payments.order_id == cast(TimeSale.price_id, String),
+            Payments.payment_price == TimeSale.sale_price,
+        )
+        .correlate(TimeSale)
+        .scalar_subquery()
+    )
+
+    is_active_expr = case(
+        (TimeSale.max_purchase_count.is_(None), within_time),
+        else_=and_(within_time, purchase_count_sq < TimeSale.max_purchase_count),
+    ).label("is_active")
+
+    is_expired_expr = case(
+        (now >= TimeSale.end_date, True),
+        (
+            and_(
+                TimeSale.max_purchase_count.is_not(None),
+                within_time,
+                purchase_count_sq >= TimeSale.max_purchase_count,
+            ),
+            True,
+        ),
+        else_=False,
+    ).label("is_expired")
+
+    stmt = (
+        select(
+            TimeSale,
+            purchase_count_sq.label("purchase_count"),
+            is_active_expr,
+            is_expired_expr,
+        )
+        .where(
+            TimeSale.id == time_sale_id,
+            TimeSale.post_id.is_not(None),
+            TimeSale.price_id.is_not(None),
+            TimeSale.plan_id.is_(None),
+            TimeSale.deleted_at.is_(None),
+        )
+    )
+
+    row = db.execute(stmt).first()
+    return row
+
+
 def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool]:
     
     if not post_ids:
@@ -707,5 +827,75 @@ def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool
                     continue
                 if any((plid in active_plan_ids) for plid in plan_ids if plid in paid_plan_ids):
                     out[pid] = True
+
+    return out
+
+
+def get_post_time_sale_details_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, Dict]:
+    """
+    投稿の単品時間セール詳細情報をマップで取得
+
+    Returns:
+        Dict[UUID, Dict]: 投稿IDをキーに、{'sale_percentage': int}を値とする辞書
+    """
+    if not post_ids:
+        return {}
+
+    now = func.now()
+    out: Dict[UUID, Dict] = {}
+
+    # -------------------------
+    # A) PRICE SALE (post_id + active price_id) のみを取得
+    # -------------------------
+    price_rows = db.execute(
+        select(Prices.post_id, Prices.id.label("price_id"))
+        .where(
+            Prices.post_id.in_(post_ids),
+            Prices.is_active.is_(True),
+            Prices.price > 0,
+        )
+    ).all()
+
+    post_to_price_id = {r.post_id: r.price_id for r in price_rows}
+    price_ids = list(post_to_price_id.values())
+
+    if price_ids:
+        purchase_count_sq = (
+            select(func.count(Payments.id))
+            .where(
+                Payments.status == PaymentStatus.SUCCEEDED,
+                Payments.paid_at.is_not(None),
+                Payments.paid_at >= TimeSale.start_date,
+                Payments.paid_at <= TimeSale.end_date,
+                Payments.order_id == cast(TimeSale.price_id, String),
+                Payments.payment_price == TimeSale.sale_price,
+            )
+            .correlate(TimeSale)
+            .scalar_subquery()
+        )
+
+        within_time = and_(TimeSale.start_date <= now, now < TimeSale.end_date)
+        price_sale_active_cond = and_(
+            TimeSale.deleted_at.is_(None),
+            TimeSale.post_id.is_not(None),
+            TimeSale.price_id.in_(price_ids),
+            TimeSale.plan_id.is_(None),
+            TimeSale.start_date.is_not(None),
+            TimeSale.end_date.is_not(None),
+            within_time,
+            or_(
+                TimeSale.max_purchase_count.is_(None),
+                purchase_count_sq < TimeSale.max_purchase_count,
+            ),
+        )
+
+        active_sales = db.execute(
+            select(TimeSale.post_id, TimeSale.sale_percentage)
+            .where(price_sale_active_cond)
+        ).all()
+
+        for post_id, sale_percentage in active_sales:
+            if post_id not in out:
+                out[post_id] = {"sale_percentage": sale_percentage}
 
     return out

@@ -30,9 +30,9 @@
             <td style="padding:8px 0;color:#111827;font-size:14px;font-weight:bold;">{{ sender_name }}</td>
           </tr>
           <tr>
-            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">プロフィール:</td>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">会話ルーム:</td>
             <td style="padding:8px 0;color:#111827;font-size:14px;">
-              <a href="{{ sender_profile_url }}" style="color:#2563eb;text-decoration:none;word-break:break-all;">{{ sender_profile_url }}</a>
+              <a href="{{ conversation_url }}" style="color:#2563eb;text-decoration:none;word-break:break-all;">{{ conversation_url }}</a>
             </td>
           </tr>
           <tr>
@@ -49,14 +49,6 @@
           </tr>
         </table>
       </div>
-
-      <!-- メッセージ情報 -->
-      {% if has_message %}
-      <div style="background-color:#eff6ff;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #bfdbfe;">
-        <h3 style="color:#111827;margin-top:0;margin-bottom:10px;font-size:18px;">{{ sender_name }}さんからのメッセージ</h3>
-        <p style="color:#374151;font-size:14px;line-height:1.6;margin:0;white-space:pre-wrap;">{{ message_text }}</p>
-      </div>
-      {% endif %}
 
       <!-- 売上確認リンク -->
       <div style="margin:25px 0;text-align:center;">

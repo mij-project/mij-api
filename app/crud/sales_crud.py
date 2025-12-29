@@ -826,8 +826,11 @@ def get_payments_by_user_id(
 ) -> dict:
     """
     ユーザーの決済履歴を取得
+    チップの場合、相手ユーザーIDとconversation_idを含める
     """
     try:
+        from app.models.conversation_messages import ConversationMessages
+
         offset = (page - 1) * limit
         payments_query = (
             select(
@@ -836,6 +839,7 @@ def get_payments_by_user_id(
                 Prices.post_id.label("single_post_id"),
                 Plans.id.label("plan_id"),
                 Plans.name.label("plan_name"),
+                ConversationMessages.conversation_id.label("chip_conversation_id"),
             )
             .join(Profiles, Profiles.user_id == Payments.buyer_user_id)
             .outerjoin(
@@ -858,6 +862,18 @@ def get_payments_by_user_id(
                         (Payments.payment_type == PaymentType.CHIP, None),
                         else_=cast(Payments.order_id, PG_UUID)
                     ) == Plans.id,
+                ),
+            )
+            .outerjoin(
+                ConversationMessages,
+                and_(
+                    Payments.payment_type == PaymentType.CHIP,
+                    # order_id形式: recipient_user_id_chip_message_id_message_id または recipient_user_id_chip_message_id
+                    # 最後の部分（message_id）を抽出してJOIN
+                    cast(
+                        func.split_part(Payments.order_id, '_', -1),
+                        PG_UUID
+                    ) == ConversationMessages.id,
                 ),
             )
             .where(
@@ -896,6 +912,8 @@ def get_payments_by_user_id(
                 "single_post_id": row.single_post_id,
                 "plan_id": row.plan_id,
                 "plan_name": row.plan_name,
+                "seller_user_id": str(row.Payments.seller_user_id) if row.Payments.seller_user_id else None,
+                "conversation_id": str(row.chip_conversation_id) if row.chip_conversation_id else None,
             }
             payments.append(payment)
         return {

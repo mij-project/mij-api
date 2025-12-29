@@ -833,7 +833,6 @@ def _send_chip_payment_notifications_for_buyer(
     order_id_parts = transaction.order_id.split("_")
     recipient_user_id = order_id_parts[0]
     chip_message_id = order_id_parts[1] if len(order_id_parts) > 1 else None
-    message_id = order_id_parts[2] if len(order_id_parts) > 2 else None
 
     # 購入者情報取得
     buyer_user = user_crud.get_user_by_id(db, transaction.user_id)
@@ -851,18 +850,7 @@ def _send_chip_payment_notifications_for_buyer(
     recipient_name = recipient_user.profile_name if recipient_user else "クリエイター"
 
     # メッセージテキスト取得
-    message_text = None
     conversation_id = None
-    if message_id:
-        try:
-            message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(message_id)
-            ).first()
-            if message:
-                message_text = message.body_text
-                conversation_id = message.conversation_id
-        except Exception as e:
-            logger.error(f"Failed to get message {message_id}: {e}")
 
     if chip_message_id:
         try:
@@ -893,10 +881,7 @@ def _send_chip_payment_notifications_for_buyer(
         title = "チップの送信に失敗しました"
         subtitle = "チップの送信に失敗しました"
 
-    if conversation_id:
-        notification_redirect_url = f"/message/conversation/{conversation_id}"
-    else:
-        notification_redirect_url = f"/profile?username={recipient_profile.username}"
+    notification_redirect_url = f"/message/conversation/{conversation_id}" if conversation_id else "/account/sale"
 
     # メール送信
     try:
@@ -904,17 +889,15 @@ def _send_chip_payment_notifications_for_buyer(
 
         if result == RESULT_OK:
             # 成功時のメール送信
-            recipient_profile_url = f"{frontend_url}/profile?username={recipient_profile.username}" if recipient_profile else ""
+            conversation_url = f"{frontend_url}/message/conversation/{conversation_id}" if conversation_id else ""
 
             send_chip_payment_buyer_success_email(
                 to=email,
                 recipient_name=recipient_name,
-                recipient_profile_url=recipient_profile_url,
+                conversation_url=conversation_url,
                 transaction_id=str(transaction.id),
                 payment_amount=payment_amount,
                 payment_date=payment_date,
-                has_message=bool(message_text),
-                message_text=message_text,
             )
         else:
             # 失敗時のメール送信
@@ -970,7 +953,6 @@ def _send_chip_payment_notifications_for_seller(
     order_id_parts = transaction.order_id.split("_")
     recipient_user_id = order_id_parts[0]
     chip_message_id = order_id_parts[1] if len(order_id_parts) > 1 else None
-    message_id = order_id_parts[2] if len(order_id_parts) > 2 else None
 
     # クリエイター情報取得
     recipient_user = user_crud.get_user_by_id(db, recipient_user_id)
@@ -990,18 +972,7 @@ def _send_chip_payment_notifications_for_seller(
     buyer_name = buyer_user.profile_name if buyer_user else "ユーザー"
 
     # メッセージテキスト取得
-    message_text = None
     conversation_id = None
-    if message_id:
-        try:
-            message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(message_id)
-            ).first()
-            if message:
-                message_text = message.body_text
-                conversation_id = message.conversation_id
-        except Exception as e:
-            logger.error(f"Failed to get message {message_id}: {e}")
 
     if chip_message_id:
         try:
@@ -1013,9 +984,10 @@ def _send_chip_payment_notifications_for_seller(
         except Exception as e:
             logger.error(f"Failed to get chip message {chip_message_id}: {e}")
 
-    # チップ金額計算
+    # チップ金額計算（税込から税抜を計算：整数演算で正確に計算）
     payment_amount = payment.payment_amount if payment.payment_amount else 0
-    chip_amount = int(payment_amount / 1.1)
+    # payment_amount / 1.1 を整数演算で正確に計算: (payment_amount * 10) // 11
+    chip_amount = (payment_amount * 10) // 11
 
     # プラットフォーム手数料取得
     from app.crud import creator_crud
@@ -1023,9 +995,11 @@ def _send_chip_payment_notifications_for_seller(
     if not creator_info:
         logger.error(f"Creator info not found: {recipient_user_id}")
         return
-
-    platform_fee_percent = creator_info.platform_fee_percent
-    seller_amount = int(chip_amount * (1 - platform_fee_percent / 100))
+    
+    # 手数料計算も整数演算で正確に計算
+    fee_per_payment = (chip_amount * creator_info.platform_fee_percent) // 100
+    # chip_amountから手数料を引いて売上金額を計算
+    seller_amount = chip_amount - fee_per_payment
 
     # UTCからJSTに変換
     jst = timezone(timedelta(hours=9))
@@ -1052,18 +1026,16 @@ def _send_chip_payment_notifications_for_seller(
     # メール送信
     try:
         frontend_url = os.environ.get("FRONTEND_URL", "https://mijfans.jp")
-        sender_profile_url = f"{frontend_url}/profile?username={buyer_profile.username}" if buyer_profile else ""
+        conversation_url = f"{frontend_url}/message/conversation/{conversation_id}" if conversation_id else ""
 
-        sales_url = f"{frontend_url}/message/conversation/{conversation_id}" if conversation_id else f"{frontend_url}/account/sale"
+        sales_url = f"{frontend_url}/account/sale"
         send_chip_payment_seller_success_email(
             to=recipient_user.email,
             sender_name=buyer_name,
-            sender_profile_url=sender_profile_url,
+            conversation_url=conversation_url,
             transaction_id=str(transaction.id),
             seller_amount=seller_amount,
             payment_date=payment_date,
-            has_message=bool(message_text),
-            message_text=message_text,
             sales_url=sales_url,
         )
     except Exception as e:
@@ -1154,11 +1126,10 @@ def _handle_chip_payment_success(
         status=PaymentTransactionStatus.COMPLETED,
     )
 
-    # order_idを分解: recipient_user_id_chip_message_id_message_id または recipient_user_id_chip_message_id
+    # order_idを分解: recipient_user_id_chip_message_id
     order_id_parts = transaction.order_id.split("_")
     recipient_user_id = order_id_parts[0]
     chip_message_id = order_id_parts[1] if len(order_id_parts) > 1 else None
-    message_id = order_id_parts[2] if len(order_id_parts) > 2 else None
 
     # クリエイター情報取得
     from app.crud import creator_crud
@@ -1182,6 +1153,7 @@ def _handle_chip_payment_success(
 
             if chip_message:
                 chip_message.status = ConversationMessageStatus.ACTIVE
+                chip_message.updated_at = datetime.now(timezone.utc)
                 db.commit()
                 logger.info(f"Activated chip payment message: {chip_message_id}")
             else:
@@ -1189,28 +1161,8 @@ def _handle_chip_payment_success(
         except Exception as e:
             logger.error(f"Failed to activate chip message {chip_message_id}: {e}")
 
-    # メッセージIDがある場合、メッセージを有効化
-    message_text = None
-    if message_id:
-        try:
-            message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(message_id)
-            ).first()
-
-            if message:
-                message.status = ConversationMessageStatus.ACTIVE
-                db.commit()
-                message_text = message.body_text
-                logger.info(f"Activated chip payment message: {message_id}")
-            else:
-                logger.warning(f"Message not found for message_id: {message_id}")
-        except Exception as e:
-            logger.error(f"Failed to activate message {message_id}: {e}")
-
-
     # チップ金額（手数料除く）
     chip_amount = (payment_amount * 100 + 110 - 1) // 110
-    
 
     # paymentsレコード作成
     payment = payments_crud.create_payment(
