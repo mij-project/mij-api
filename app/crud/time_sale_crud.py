@@ -1,6 +1,7 @@
 import math
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
+from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select, case, String, cast, tuple_
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -10,6 +11,7 @@ from app.models.plans import PostPlans
 from app.models.time_sale import TimeSale
 from app.schemas.post_price_timesale import PriceTimeSaleCreateRequest
 from app.schemas.post_plan_timesale import PlanTimeSaleCreateRequest
+from app.schemas.post_plan_timesale import UpdateRequest
 from app.core.logger import Logger
 
 logger = Logger.get_logger()
@@ -100,7 +102,9 @@ def create_price_time_sale_by_post_id(
             return None
         # Check price of post
         price = db.query(Prices).filter(Prices.post_id == post_id).first()
-        sale_price = price.price - math.ceil(price.price * payload.sale_percentage / 100)
+        sale_price = price.price - math.ceil(
+            price.price * payload.sale_percentage / 100
+        )
         # Create time sale
         time_sale = TimeSale(
             post_id=post_id,
@@ -124,9 +128,14 @@ def create_price_time_sale_by_post_id(
 
 
 def check_exists_price_time_sale_in_period_by_post_id(
-    db: Session, post_id: UUID, start_date: datetime, end_date: datetime
+    db: Session,
+    post_id: UUID,
+    start_date: datetime,
+    end_date: datetime,
+    time_sale_id: Optional[UUID] = None,
 ) -> bool:
     """投稿の価格時間販売情報が期間内に存在するかを確認する"""
+    is_exists = False
     time_sale = (
         db.query(TimeSale)
         .filter(
@@ -139,7 +148,15 @@ def check_exists_price_time_sale_in_period_by_post_id(
         )
         .first()
     )
-    return time_sale is not None
+    if time_sale is not None:
+        is_exists = True
+    if (
+        time_sale_id is not None
+        and time_sale is not None
+        and str(time_sale_id) == str(time_sale.id)
+    ):
+        is_exists = False
+    return is_exists
 
 
 def get_plan_time_sale_by_plan_id(
@@ -215,9 +232,14 @@ def get_plan_time_sale_by_plan_id(
 
 
 def check_exists_plan_time_sale_in_period_by_plan_id(
-    db: Session, plan_id: UUID, start_date: datetime, end_date: datetime
+    db: Session,
+    plan_id: UUID,
+    start_date: datetime,
+    end_date: datetime,
+    time_sale_id: Optional[UUID] = None,
 ) -> bool:
     """投稿の価格時間販売情報が期間内に存在するかを確認する"""
+    is_exists = False
     time_sale = (
         db.query(TimeSale)
         .filter(
@@ -230,7 +252,15 @@ def check_exists_plan_time_sale_in_period_by_plan_id(
         )
         .first()
     )
-    return time_sale is not None
+    if time_sale is not None:
+        is_exists = True
+    if (
+        time_sale_id is not None
+        and time_sale is not None
+        and str(time_sale_id) == str(time_sale.id)
+    ):
+        is_exists = False
+    return is_exists
 
 
 def create_plan_time_sale_by_plan_id(
@@ -395,14 +425,22 @@ def get_active_price_timesale_pairs(
     )
 
     stmt = (
-        select(TimeSale.post_id, TimeSale.price_id, TimeSale.sale_percentage,  TimeSale.end_date)
+        select(
+            TimeSale.post_id,
+            TimeSale.price_id,
+            TimeSale.sale_percentage,
+            TimeSale.end_date,
+        )
         .where(*base_filters)
         .where(active_filter)
         .distinct()
     )
 
     rows = db.execute(stmt).all()
-    return {(str(post_id), str(price_id), sale_percentage, end_date) for post_id, price_id, sale_percentage, end_date in rows}
+    return {
+        (str(post_id), str(price_id), sale_percentage, end_date)
+        for post_id, price_id, sale_percentage, end_date in rows
+    }
 
 
 def get_active_plan_timesale_map(db: Session, plan_ids: List[UUID]) -> dict:
@@ -588,6 +626,7 @@ def get_active_plan_timesale(db: Session, plan_id: UUID) -> dict:
         "is_expired": bool(is_expired),
     }
 
+
 def get_plan_time_sale_by_id(db: Session, time_sale_id: UUID):
     """プランのタイムセール情報をIDから取得（ステータス付き）"""
     now = func.now()
@@ -628,20 +667,17 @@ def get_plan_time_sale_by_id(db: Session, time_sale_id: UUID):
         else_=False,
     ).label("is_expired")
 
-    stmt = (
-        select(
-            TimeSale,
-            purchase_count_sq.label("purchase_count"),
-            is_active_expr,
-            is_expired_expr,
-        )
-        .where(
-            TimeSale.id == time_sale_id,
-            TimeSale.plan_id.is_not(None),
-            TimeSale.price_id.is_(None),
-            TimeSale.post_id.is_(None),
-            TimeSale.deleted_at.is_(None),
-        )
+    stmt = select(
+        TimeSale,
+        purchase_count_sq.label("purchase_count"),
+        is_active_expr,
+        is_expired_expr,
+    ).where(
+        TimeSale.id == time_sale_id,
+        TimeSale.plan_id.is_not(None),
+        TimeSale.price_id.is_(None),
+        TimeSale.post_id.is_(None),
+        TimeSale.deleted_at.is_(None),
     )
 
     row = db.execute(stmt).first()
@@ -688,20 +724,17 @@ def get_price_time_sale_by_id(db: Session, time_sale_id: UUID):
         else_=False,
     ).label("is_expired")
 
-    stmt = (
-        select(
-            TimeSale,
-            purchase_count_sq.label("purchase_count"),
-            is_active_expr,
-            is_expired_expr,
-        )
-        .where(
-            TimeSale.id == time_sale_id,
-            TimeSale.post_id.is_not(None),
-            TimeSale.price_id.is_not(None),
-            TimeSale.plan_id.is_(None),
-            TimeSale.deleted_at.is_(None),
-        )
+    stmt = select(
+        TimeSale,
+        purchase_count_sq.label("purchase_count"),
+        is_active_expr,
+        is_expired_expr,
+    ).where(
+        TimeSale.id == time_sale_id,
+        TimeSale.post_id.is_not(None),
+        TimeSale.price_id.is_not(None),
+        TimeSale.plan_id.is_(None),
+        TimeSale.deleted_at.is_(None),
     )
 
     row = db.execute(stmt).first()
@@ -709,7 +742,6 @@ def get_price_time_sale_by_id(db: Session, time_sale_id: UUID):
 
 
 def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool]:
-    
     if not post_ids:
         return {}
 
@@ -720,8 +752,7 @@ def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool
     # A) PRICE SALE (post_id + active price_id)
     # -------------------------
     price_rows = db.execute(
-        select(Prices.post_id, Prices.id.label("price_id"))
-        .where(
+        select(Prices.post_id, Prices.id.label("price_id")).where(
             Prices.post_id.in_(post_ids),
             Prices.is_active.is_(True),
             Prices.price > 0,
@@ -762,7 +793,9 @@ def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool
         )
 
         active_price_ids = set(
-            db.execute(select(TimeSale.price_id).where(price_sale_active_cond)).scalars().all()
+            db.execute(select(TimeSale.price_id).where(price_sale_active_cond))
+            .scalars()
+            .all()
         )
 
         for pid, price_id in post_to_price_id.items():
@@ -773,7 +806,9 @@ def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool
     # B) PLAN SALE (post_plans -> plans -> time_sale)
     # -------------------------
     pp_rows = db.execute(
-        select(PostPlans.post_id, PostPlans.plan_id).where(PostPlans.post_id.in_(post_ids))
+        select(PostPlans.post_id, PostPlans.plan_id).where(
+            PostPlans.post_id.in_(post_ids)
+        )
     ).all()
 
     post_to_plan_ids: Dict[UUID, List[UUID]] = {}
@@ -784,8 +819,14 @@ def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool
     if all_plan_ids:
         paid_plan_ids = set(
             db.execute(
-                select(Plans.id).where(Plans.id.in_(all_plan_ids), Plans.price > 0, Plans.deleted_at.is_(None))
-            ).scalars().all()
+                select(Plans.id).where(
+                    Plans.id.in_(all_plan_ids),
+                    Plans.price > 0,
+                    Plans.deleted_at.is_(None),
+                )
+            )
+            .scalars()
+            .all()
         )
 
         if paid_plan_ids:
@@ -819,19 +860,27 @@ def get_post_sale_flag_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, bool
             )
 
             active_plan_ids = set(
-                db.execute(select(TimeSale.plan_id).where(plan_sale_active_cond)).scalars().all()
+                db.execute(select(TimeSale.plan_id).where(plan_sale_active_cond))
+                .scalars()
+                .all()
             )
 
             for pid, plan_ids in post_to_plan_ids.items():
                 if out[pid]:
                     continue
-                if any((plid in active_plan_ids) for plid in plan_ids if plid in paid_plan_ids):
+                if any(
+                    (plid in active_plan_ids)
+                    for plid in plan_ids
+                    if plid in paid_plan_ids
+                ):
                     out[pid] = True
 
     return out
 
 
-def get_post_time_sale_details_map(db: Session, post_ids: List[UUID]) -> Dict[UUID, Dict]:
+def get_post_time_sale_details_map(
+    db: Session, post_ids: List[UUID]
+) -> Dict[UUID, Dict]:
     """
     投稿の単品時間セール詳細情報をマップで取得
 
@@ -848,8 +897,7 @@ def get_post_time_sale_details_map(db: Session, post_ids: List[UUID]) -> Dict[UU
     # A) PRICE SALE (post_id + active price_id) のみを取得
     # -------------------------
     price_rows = db.execute(
-        select(Prices.post_id, Prices.id.label("price_id"))
-        .where(
+        select(Prices.post_id, Prices.id.label("price_id")).where(
             Prices.post_id.in_(post_ids),
             Prices.is_active.is_(True),
             Prices.price > 0,
@@ -890,8 +938,9 @@ def get_post_time_sale_details_map(db: Session, post_ids: List[UUID]) -> Dict[UU
         )
 
         active_sales = db.execute(
-            select(TimeSale.post_id, TimeSale.sale_percentage)
-            .where(price_sale_active_cond)
+            select(TimeSale.post_id, TimeSale.sale_percentage).where(
+                price_sale_active_cond
+            )
         ).all()
 
         for post_id, sale_percentage in active_sales:
@@ -899,3 +948,87 @@ def get_post_time_sale_details_map(db: Session, post_ids: List[UUID]) -> Dict[UU
                 out[post_id] = {"sale_percentage": sale_percentage}
 
     return out
+
+
+def delete_plan_time_sale_by_id(db: Session, time_sale_id: UUID, current_user_id: UUID):
+    """プランの価格時間販売情報を削除する"""
+    time_sale = db.query(TimeSale).filter(TimeSale.id == time_sale_id).first()
+    if not time_sale:
+        return False
+    try:
+        db.delete(time_sale)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.exception(f"Delete plan time sale error: {e}")
+        db.rollback()
+        return False
+
+
+def delete_price_time_sale_by_id(
+    db: Session, time_sale_id: UUID, current_user_id: UUID
+):
+    """価格の価格時間販売情報を削除する"""
+    time_sale = db.query(TimeSale).filter(TimeSale.id == time_sale_id).first()
+    if not time_sale:
+        return False
+    try:
+        db.delete(time_sale)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.exception(f"Delete price time sale error: {e}")
+        db.rollback()
+        return False
+
+
+def update_price_time_sale_by_id(
+    db: Session, time_sale_id: UUID, payload: UpdateRequest, current_user_id: UUID
+):
+    """価格の価格時間販売情報を更新する"""
+    time_sale = db.query(TimeSale).filter(TimeSale.id == time_sale_id).first()
+    if not time_sale:
+        return False
+    price = None
+    if time_sale.price_id is None:
+        if check_exists_plan_time_sale_in_period_by_plan_id(
+            db, time_sale.plan_id, payload.start_date, payload.end_date, time_sale_id
+        ):
+            raise HTTPException(
+                status_code=400, detail="Plan time sale is already exists in period"
+            )
+        plan = db.query(Plans).filter(Plans.id == time_sale.plan_id).first()
+        if not plan:
+            return False
+        price = plan.price
+    if time_sale.plan_id is None:
+        if check_exists_price_time_sale_in_period_by_post_id(
+            db,
+            time_sale.post_id,
+            # time_sale.price_id,
+            payload.start_date,
+            payload.end_date,
+            time_sale_id,
+        ):
+            raise HTTPException(
+                status_code=400, detail="Price time sale is already exists in period"
+            )
+        price = db.query(Prices).filter(Prices.id == time_sale.price_id).first()
+        if not price:
+            return False
+        price = price.price
+
+    try:
+        new_sale_price = price - math.ceil(price * payload.sale_percentage / 100)
+        time_sale.start_date = payload.start_date
+        time_sale.end_date = payload.end_date
+        time_sale.sale_percentage = payload.sale_percentage
+        time_sale.max_purchase_count = payload.max_purchase_count
+        time_sale.sale_price = new_sale_price
+        time_sale.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.exception(f"Update price time sale error: {e}")
+        db.rollback()
+        return False
