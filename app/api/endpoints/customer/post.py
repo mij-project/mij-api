@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.crud.time_sale_crud import (
     check_exists_price_time_sale_in_period_by_post_id,
     create_price_time_sale_by_post_id,
+    delete_price_time_sale_by_id,
     get_price_time_sale_by_post_id,
 )
 from app.db.base import get_db
@@ -702,4 +703,16 @@ async def create_price_time_sale(
     time_sale = create_price_time_sale_by_post_id(db, post_id, payload, current_user)
     if not time_sale:
         raise HTTPException(status_code=500, detail="Can not create price time sale")
+    return {"message": "ok"}
+
+@router.delete("/delete-price-time-sale/{time_sale_id}")
+async def delete_price_time_sale(
+    time_sale_id: str,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """価格時間販売情報を削除する"""
+    success = delete_price_time_sale_by_id(db, time_sale_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Can not delete price time sale")
     return {"message": "ok"}

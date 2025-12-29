@@ -187,7 +187,7 @@ def get_account_info(
 
         # 売上
         total_sales = get_sales_summary_by_creator(db, current_user.id)
-        sales = total_sales["cumulative_sales"] if total_sales is not None else 0
+        sales = total_sales["withdrawable_amount"] if total_sales is not None else 0
         sales_info = SalesInfo(
             total_sales=sales or 0,
         )
