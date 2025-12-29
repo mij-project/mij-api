@@ -72,6 +72,7 @@ from app.crud.profile_crud import (
     exist_profile_by_username,
 )
 from app.crud import profile_image_crud, message_assets_crud
+from app.crud.time_sale_crud import get_post_sale_flag_map, get_post_time_sale_details_map
 from app.services.email.send_email import send_email_verification
 from app.services.s3.keygen import account_asset_key
 from app.services.s3.presign import presign_put_public
@@ -228,17 +229,44 @@ def get_account_info(
                 }
             )
 
-        # subscribed_plan_detailsのURLを構築
-        subscribed_plan_details = []
+        # subscribed_plan_detailsのURLを構築し、plan_idでグループ化
+        from collections import defaultdict
+        
+        # plan_idでグループ化
+        plan_groups = defaultdict(list)
         for plan in plan_data.get("subscribed_plan_details", []):
+            plan_id = plan.get("plan_id")
+            if plan_id:
+                plan_groups[plan_id].append(plan)
+        
+        # グループ化されたプランを処理（最新の情報を使用）
+        subscribed_plan_details = []
+        for plan_id, plans in plan_groups.items():
+            # 最新のpurchase_created_atを持つプランを取得
+            # purchase_created_atがNoneの場合は最小値として扱う
+            def get_created_at(plan_item):
+                created_at = plan_item.get("purchase_created_at")
+                if created_at is None:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+                if isinstance(created_at, datetime):
+                    return created_at
+                return datetime.min.replace(tzinfo=timezone.utc)
+            
+            latest_plan = max(plans, key=get_created_at)
+            
+            # 複数のpurchase_idがある場合は配列として保持
+            purchase_ids = [p.get("purchase_id") for p in plans if p.get("purchase_id")]
+            
             subscribed_plan_details.append(
                 {
-                    **plan,
-                    "creator_avatar_url": f"{BASE_URL}/{plan['creator_avatar_url']}"
-                    if plan.get("creator_avatar_url")
+                    **latest_plan,
+                    "purchase_id": purchase_ids[0] if purchase_ids else latest_plan.get("purchase_id"),  # 最新のものをメインに
+                    "purchase_ids": purchase_ids if len(purchase_ids) > 1 else None,  # 複数ある場合のみ配列として保持
+                    "creator_avatar_url": f"{BASE_URL}/{latest_plan['creator_avatar_url']}"
+                    if latest_plan.get("creator_avatar_url")
                     else None,
                     "thumbnail_keys": [
-                        f"{BASE_URL}/{key}" for key in plan.get("thumbnail_keys", [])
+                        f"{BASE_URL}/{key}" for key in latest_plan.get("thumbnail_keys", [])
                     ],
                 }
             )
@@ -547,13 +575,31 @@ def get_post_status(user=Depends(get_current_user), db: Session = Depends(get_db
     try:
         posts_data = get_post_status_by_user_id(db, user.id)
 
+        # 全投稿からポストIDを集める
+        all_posts = (
+            posts_data["pending_posts"] +
+            posts_data["rejected_posts"] +
+            posts_data["unpublished_posts"] +
+            posts_data["deleted_posts"] +
+            posts_data["approved_posts"] +
+            posts_data["reserved_posts"]
+        )
+        # row[0].idが既にUUIDの場合はそのまま使用、文字列の場合はUUIDに変換
+        post_ids = [
+            row[0].id if isinstance(row[0].id, UUID) else UUID(row[0].id)
+            for row in all_posts
+        ]
+
+        # タイムセール詳細情報を取得
+        time_sale_details_map = get_post_time_sale_details_map(db, post_ids) if post_ids else {}
+
         return AccountPostStatusResponse(
-            pending_posts=_convert_posts(posts_data["pending_posts"]),
-            rejected_posts=_convert_posts(posts_data["rejected_posts"]),
-            unpublished_posts=_convert_posts(posts_data["unpublished_posts"]),
-            deleted_posts=_convert_posts(posts_data["deleted_posts"]),
-            approved_posts=_convert_posts(posts_data["approved_posts"]),
-            reserved_posts=_convert_posts(posts_data["reserved_posts"]),
+            pending_posts=_convert_posts(posts_data["pending_posts"], time_sale_details_map),
+            rejected_posts=_convert_posts(posts_data["rejected_posts"], time_sale_details_map),
+            unpublished_posts=_convert_posts(posts_data["unpublished_posts"], time_sale_details_map),
+            deleted_posts=_convert_posts(posts_data["deleted_posts"], time_sale_details_map),
+            approved_posts=_convert_posts(posts_data["approved_posts"], time_sale_details_map),
+            reserved_posts=_convert_posts(posts_data["reserved_posts"], time_sale_details_map),
         )
     except Exception as e:
         logger.error(f"投稿ステータス取得エラーが発生しました: {e}", exc_info=True)
@@ -862,6 +908,7 @@ def get_bought(
                 duration=duration,
                 is_video=(post.post_type == PostType.VIDEO),  # PostType.VIDEO = 1
                 created_at=purchased_at,
+                plan_name=plan_name,
             )
             bought_posts.append(bought_post)
 
@@ -947,8 +994,11 @@ def get_profile_image_status(
 
 
 # データ変換用のヘルパー関数
-def _convert_posts(posts_list):
+def _convert_posts(posts_list, time_sale_map=None):
     result = []
+    if time_sale_map is None:
+        time_sale_map = {}
+
     for row in posts_list:
         # タプルの最初の要素がPostsオブジェクト
         post_obj = row[0]
@@ -967,6 +1017,13 @@ def _convert_posts(posts_list):
 
         # プランに属しているかを判定
         has_plan = row.plan_count > 0 if hasattr(row, "plan_count") else False
+
+        # タイムセール情報を判定
+        post_id_uuid = post_obj.id
+        is_time_sale = post_id_uuid in time_sale_map
+        sale_percentage = None
+        if is_time_sale and post_id_uuid in time_sale_map:
+            sale_percentage = time_sale_map[post_id_uuid].get("sale_percentage")
 
         result.append(
             AccountPostResponse(
@@ -991,6 +1048,8 @@ def _convert_posts(posts_list):
                 duration=duration,
                 is_video=is_video,
                 has_plan=has_plan,
+                is_time_sale=is_time_sale,
+                sale_percentage=sale_percentage,
             )
         )
     return result

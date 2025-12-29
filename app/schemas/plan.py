@@ -11,6 +11,7 @@ class PlanCreateRequest(BaseModel):
     billing_cycle: int = Field(default=1)
     type: int = Field(default=1, description="1=通常, 2=おすすめ")
     welcome_message: Optional[str] = Field(None, max_length=1000)
+    open_dm_flg: Optional[bool] = Field(False, description="DMを開放するかどうか")
     post_ids: Optional[List[UUID]] = Field(default=[], description="プランに含める投稿IDリスト")
 
 class PlanUpdateRequest(BaseModel):
@@ -30,10 +31,13 @@ class PlanResponse(BaseModel):
     type: int = 1
     display_order: Optional[int] = None
     welcome_message: Optional[str] = None
+    open_dm_flg: bool = False
     post_count: Optional[int] = 0
     subscriber_count: Optional[int] = 0
     updated_at: datetime
     plan_status: int = 1
+    is_time_sale: bool = False
+    sale_percentage: Optional[int] = None
     class Config:
         from_attributes = True
 

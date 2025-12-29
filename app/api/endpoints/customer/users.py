@@ -35,8 +35,9 @@ from app.schemas.user import (
 from app.crud.payments_crud import get_top_buyers_by_user_id
 from app.models.subscriptions import Subscriptions
 from app.models.payments import Payments
-from app.constants.enums import ItemType, SubscriptionStatus, PaymentStatus
-from sqlalchemy import func, select
+from app.constants.enums import ItemType, SubscriptionStatus, PaymentStatus, PaymentType
+from app.models.plans import Plans
+from sqlalchemy import func, select, cast, String
 from app.api.commons.utils import generate_email_verification_url
 import os
 from app.crud.email_verification_crud import issue_verification_token
@@ -312,7 +313,7 @@ def get_user_profile_by_username_endpoint(
         top_buyers = []
         # seller_user_idが現在のユーザーで、statusがSUCCEEDEDのレコードを集計
         top_buyers_results = get_top_buyers_by_user_id(db, user.id)
-        
+
         for buyer_result in top_buyers_results:
             buyer_user_id = buyer_result.buyer_user_id
             # 購入者情報を取得
@@ -326,6 +327,38 @@ def get_user_profile_by_username_endpoint(
                         avatar_url=f"{BASE_URL}/{buyer_profile.avatar_url}" if buyer_profile and buyer_profile.avatar_url else None,
                     )
                 )
+
+        # チップ購入済みかどうかをチェック
+        has_sent_chip = False
+        if current_user:
+            has_sent_chip = (
+                db.query(Payments)
+                .filter(
+                    Payments.payment_type == PaymentType.CHIP,
+                    Payments.seller_user_id == user.id,
+                    Payments.buyer_user_id == current_user.id,
+                    Payments.status == PaymentStatus.SUCCEEDED,
+                )
+                .first()
+                is not None
+            )
+
+        # DM解放プランに加入済みかどうかをチェック
+        has_dm_release_plan = False
+        if current_user:
+            has_dm_release_plan = (
+                db.query(Subscriptions)
+                .join(Plans, Subscriptions.order_id == cast(Plans.id, String))
+                .filter(
+                    Subscriptions.user_id == current_user.id,
+                    Subscriptions.order_type == ItemType.PLAN,
+                    Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),
+                    Plans.creator_user_id == user.id,
+                    Plans.open_dm_flg == True,
+                )
+                .first()
+                is not None
+            )
 
         return UserProfileResponse(
             id=user.id,
@@ -348,6 +381,8 @@ def get_user_profile_by_username_endpoint(
             individual_purchases=profile_purchases,
             gacha_items=profile_gacha_items,
             top_buyers=top_buyers,
+            has_sent_chip=has_sent_chip,
+            has_dm_release_plan=has_dm_release_plan,
         )
     except Exception as e:
         logger.error("ユーザープロフィール取得エラー: ", e)
