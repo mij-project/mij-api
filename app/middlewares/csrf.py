@@ -12,7 +12,7 @@ EXCLUDE_PATHS = {
     "/auth/email/verify", "/auth/email/verify/", "/_debug/send-email",
     "/admin/conversations", "/admin/create-admin", "/users/register/company",
     "/auth/password-reset/request", "/auth/password-reset/confirm", "/payments/credix/session",
-    "/tracking/track-access",  "/admin/users/create-super-user",
+    "/tracking/track-access",  "/admin/users/create-super-user", "/webhook/univa/payment",
 }
 
 class CSRFMiddleware(BaseHTTPMiddleware):
