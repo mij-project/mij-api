@@ -35,3 +35,9 @@ class PlanTimeSaleEditInitResponse(BaseModel):
     """プランのタイムセール編集初期化用レスポンス"""
     plan: Any  # PlanDetailResponse
     time_sale: Optional[PlanTimeSaleResponse] = None
+
+class UpdateRequest(BaseModel):
+    start_date: datetime
+    end_date: datetime
+    sale_percentage: int
+    max_purchase_count: Optional[int] = None

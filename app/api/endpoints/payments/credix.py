@@ -60,9 +60,7 @@ async def create_credix_session(
             user_id=current_user.id,
             provider_id=credix_provider.id
         )
-
         # TODO: user_providerが複数の場合は、画面に戻してどのカードを使うかを選択させる
-
         # sendid生成または取得
         is_first_payment = user_provider is None or user_provider.sendid is None
 
@@ -79,6 +77,8 @@ async def create_credix_session(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
+            if user_provider.cardbrand != "J":
+                raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算
         money, order_id, transaction_type = _set_money(request, db)
@@ -374,6 +374,8 @@ async def create_chip_payment(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
+            if user_provider.cardbrand != "J":
+                raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算（手数料10%込み）
         money = math.floor(request.amount * 1.1)

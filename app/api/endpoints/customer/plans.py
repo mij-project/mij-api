@@ -45,6 +45,7 @@ from app.core.logger import Logger
 from app.crud.time_sale_crud import (
     check_exists_plan_time_sale_in_period_by_plan_id,
     create_plan_time_sale_by_plan_id,
+    delete_plan_time_sale_by_id,
     get_plan_time_sale_by_plan_id,
     get_plan_time_sale_by_id,
     get_price_time_sale_by_id,
@@ -682,4 +683,17 @@ async def create_plan_time_sale(
     time_sale = create_plan_time_sale_by_plan_id(db, plan_id, payload, current_user)
     if not time_sale:
         raise HTTPException(status_code=500, detail="Can not create price time sale")
+    return {"message": "ok"}
+
+@router.delete("/delete-plan-time-sale/{time_sale_id}")
+def delete_plan_time_sale(
+    time_sale_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """価格時間販売情報を削除する"""
+    success = delete_plan_time_sale_by_id(db, time_sale_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Can not delete price time sale")
+
     return {"message": "ok"}

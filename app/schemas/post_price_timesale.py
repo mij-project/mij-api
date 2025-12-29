@@ -30,3 +30,9 @@ class PriceTimeSaleCreateRequest(BaseModel):
     end_date: Optional[datetime] = None
     sale_percentage: int = Field(..., ge=0, le=100)
     max_purchase_count: Optional[int] = None
+
+class UpdateRequest(BaseModel):
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    sale_percentage: Optional[int] = None
+    max_purchase_count: Optional[int] = None
