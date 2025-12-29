@@ -39,6 +39,7 @@ from app.api.endpoints.customer import (
     subscriptions,
     user_provider,
     advertising_agency_tracking,
+    time_sale,
 )
 
 # Admin routes
@@ -157,6 +158,7 @@ api_router.include_router(
 api_router.include_router(
     advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"]
 )
+api_router.include_router(time_sale.router, prefix="/time-sale", tags=["Time Sale"])
 
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])

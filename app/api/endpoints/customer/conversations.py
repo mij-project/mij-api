@@ -441,79 +441,67 @@ def send_conversation_message(
             storage_key=message_asset.storage_key,
         )
 
-    
+    else:
+        # 通知処理（ベストエフォート - エラーでもメッセージ送信は成功とする）
+        try:
+            # 受信者を取得（送信者以外の参加者）
+            recipients = db.query(ConversationParticipants).filter(
+                ConversationParticipants.conversation_id == conversation_id,
+                ConversationParticipants.user_id != current_user.id
+            ).all()
 
-    # 通知処理（ベストエフォート - エラーでもメッセージ送信は成功とする）
-    try:
-        # 受信者を取得（送信者以外の参加者）
-        recipients = db.query(ConversationParticipants).filter(
-            ConversationParticipants.conversation_id == conversation_id,
-            ConversationParticipants.user_id != current_user.id
-        ).all()
+            # 送信者のプロフィール情報を取得
+            sender_profile = db.query(Profiles).filter(Profiles.user_id == current_user.id).first()
+            sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
 
-        # 送信者のプロフィール情報を取得
-        sender_profile = db.query(Profiles).filter(Profiles.user_id == current_user.id).first()
-        sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
+            # メッセージプレビューを生成
+            if message_data.body_text:
+                message_preview = message_data.body_text[:50] if len(message_data.body_text) > 50 else message_data.body_text
 
-        # メッセージプレビューを生成
-        if message_data.body_text:
-            message_preview = message_data.body_text[:50] if len(message_data.body_text) > 50 else message_data.body_text
-        else:
-            # アセットのみの場合
-            if message_asset:
-                if message_asset.asset_type == MessageAssetType.IMAGE:
-                    message_preview = "画像を送信しました"
-                elif message_asset.asset_type == MessageAssetType.VIDEO:
-                    message_preview = "動画を送信しました"
-                else:
-                    message_preview = "メディアファイルを送信しました"
-            else:
-                message_preview = ""
+            # 各受信者に通知とメールを送信
+            for recipient in recipients:
+                need_to_send_notification = CommonFunction.get_user_need_to_send_notification(db, recipient.user_id, "userMessages")
+                if not need_to_send_notification:
+                    continue
 
-        # 各受信者に通知とメールを送信
-        for recipient in recipients:
-            need_to_send_notification = CommonFunction.get_user_need_to_send_notification(db, recipient.user_id, "userMessages")
-            if not need_to_send_notification:
-                continue
+                recipient_user = db.query(Users).filter(Users.id == recipient.user_id).first()
+                if not recipient_user:
+                    continue
 
-            recipient_user = db.query(Users).filter(Users.id == recipient.user_id).first()
-            if not recipient_user:
-                continue
-
-            notifications_crud.add_notification_for_new_message(
-                db=db,
-                recipient_user_id=recipient_user.id,
-                sender_profile_name=current_user.profile_name or "Unknown User",
-                sender_avatar_url=sender_avatar_url,
-                message_preview=message_preview,
-                conversation_id=conversation_id,
-            )
-
-            # メール通知を送信（通知可否情報を取得してから送信）
-            need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(db, recipient_user.id, "message")
-            if need_to_send_email_notification and recipient_user.email:
-                logger.info(f"Attempting to send email notification to {recipient_user.email} for message {message.id}")
-                conversation_url = f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation/{conversation_id}"
-
-                recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
-                recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
-
-                send_message_notification_email(
-                    to=recipient_user.email,
-                    sender_name=current_user.profile_name or "Unknown User",
-                    recipient_name=recipient_name or "User",
+                notifications_crud.add_notification_for_new_message(
+                    db=db,
+                    recipient_user_id=recipient_user.id,
+                    sender_profile_name=current_user.profile_name or "Unknown User",
+                    sender_avatar_url=sender_avatar_url,
                     message_preview=message_preview,
-                    conversation_url=conversation_url,
+                    conversation_id=conversation_id,
                 )
-                logger.info(f"Email notification call completed for {recipient_user.email}")
-            else:
-                if not need_to_send_email_notification:
-                    logger.info(f"Email notification disabled for user {recipient_user.id}, skipping email notification")
+
+                # メール通知を送信（通知可否情報を取得してから送信）
+                need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(db, recipient_user.id, "message")
+                if need_to_send_email_notification and recipient_user.email:
+                    logger.info(f"Attempting to send email notification to {recipient_user.email} for message {message.id}")
+                    conversation_url = f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation/{conversation_id}"
+
+                    recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
+                    recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
+
+                    send_message_notification_email(
+                        to=recipient_user.email,
+                        sender_name=current_user.profile_name or "Unknown User",
+                        recipient_name=recipient_name or "User",
+                        message_preview=message_preview,
+                        conversation_url=conversation_url,
+                    )
+                    logger.info(f"Email notification call completed for {recipient_user.email}")
                 else:
-                    logger.info(f"Recipient user {recipient_user.id} has no email address, skipping email notification")
-    except Exception as e:
-        # 通知エラーはログに記録するが、メッセージ送信は成功とする
-        logger.error(f"Failed to send notification for message {message.id}: {e}")
+                    if not need_to_send_email_notification:
+                        logger.info(f"Email notification disabled for user {recipient_user.id}, skipping email notification")
+                    else:
+                        logger.info(f"Recipient user {recipient_user.id} has no email address, skipping email notification")
+        except Exception as e:
+            # 通知エラーはログに記録するが、メッセージ送信は成功とする
+            logger.error(f"Failed to send notification for message {message.id}: {e}")
 
     return MessageResponse(
         id=message.id,

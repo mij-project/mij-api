@@ -592,14 +592,14 @@ def get_user_conversations(
         )
 
     # 最終メッセージがある会話のみをカウントするためのサブクエリ
-    # status が NULL または PENDING (2) でないメッセージがある会話を取得
+    # status が NULL または ACTIVE (1) のメッセージがある会話を取得（INACTIVE (0) と PENDING (2) を除外）
     messages_with_valid_status = (
         db.query(ConversationMessages.conversation_id)
         .filter(
             ConversationMessages.deleted_at.is_(None),
             or_(
                 ConversationMessages.status.is_(None),
-                ConversationMessages.status != ConversationMessageStatus.PENDING
+                ConversationMessages.status == ConversationMessageStatus.ACTIVE
             )
         )
         .group_by(ConversationMessages.conversation_id)
@@ -639,7 +639,7 @@ def get_user_conversations(
                     ConversationMessages.deleted_at.is_(None),
                     or_(
                         ConversationMessages.status.is_(None),
-                        ConversationMessages.status != ConversationMessageStatus.PENDING
+                        ConversationMessages.status == ConversationMessageStatus.ACTIVE
                     )
                 )
                 .order_by(ConversationMessages.created_at.desc())
@@ -668,7 +668,7 @@ def get_user_conversations(
                     ConversationMessages.deleted_at.is_(None),
                     or_(
                         ConversationMessages.status.is_(None),
-                        ConversationMessages.status != ConversationMessageStatus.PENDING
+                        ConversationMessages.status == ConversationMessageStatus.ACTIVE
                     )
                 )
                 .count()
@@ -683,7 +683,7 @@ def get_user_conversations(
                     ConversationMessages.deleted_at.is_(None),
                     or_(
                         ConversationMessages.status.is_(None),
-                        ConversationMessages.status != ConversationMessageStatus.PENDING
+                        ConversationMessages.status == ConversationMessageStatus.ACTIVE
                     )
                 )
                 .count()
@@ -794,15 +794,18 @@ def get_or_create_dm_conversation(
 def get_unread_conversation_count(db: Session, user_id: UUID) -> int:
     """
     未読メッセージがある会話の数を取得
+    - conversations.typeが2（DM）の会話のみ
+    - conversation_messages.statusが1（ACTIVE）またはnullのメッセージのみ
     - 自分以外が送った最新メッセージで、まだ既読にしていない会話をカウント
     - last_read_message_id と last_message_id を比較して判定
     """
-    # ユーザーが参加している全ての会話を取得
+    # ユーザーが参加しているtype=2（DM）の会話を取得
     participants = (
         db.query(ConversationParticipants)
         .join(Conversations, ConversationParticipants.conversation_id == Conversations.id)
         .filter(
             ConversationParticipants.user_id == user_id,
+            Conversations.type == ConversationType.DM,  # type=2: DM
             Conversations.is_active == True,
             Conversations.deleted_at.is_(None),
         )
@@ -822,12 +825,16 @@ def get_unread_conversation_count(db: Session, user_id: UUID) -> int:
         if participant.last_read_message_id == conversation.last_message_id:
             continue
 
-        # 最後のメッセージを取得
+        # 最後のメッセージを取得（statusが1（ACTIVE）またはnullのみ）
         last_message = (
             db.query(ConversationMessages)
             .filter(
                 ConversationMessages.id == conversation.last_message_id,
                 ConversationMessages.deleted_at.is_(None),
+                or_(
+                    ConversationMessages.status.is_(None),
+                    ConversationMessages.status == ConversationMessageStatus.ACTIVE
+                )
             )
             .first()
         )

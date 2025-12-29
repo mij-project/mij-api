@@ -8,3 +8,9 @@ POSTGRES_SERVER=os.environ.get("POSTGRES_SERVER", "localhost")
 POSTGRES_PORT=os.environ.get("POSTGRES_PORT", "5432")
 
 DATABASE_URL=f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_SERVER}:{POSTGRES_PORT}/{POSTGRES_DB}"
+
+EMAIL_BACKEND="auto"
+EMAIL_ENABLED="true"
+MAIL_FROM="no-reply@mijfans.jp"
+MAIL_FROM_NAME="mijfans"
+AWS_REGION="ap-northeast-1"

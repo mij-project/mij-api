@@ -369,9 +369,6 @@ async def create_chip_payment(
         if not creator_profile or not creator_profile.username:
             raise HTTPException(status_code=404, detail="Creator profile or username not found")
 
-        # 決済完了後のリダイレクトURL
-        success_url = f"{FRONTEND_URL}/profile?username={creator_profile.username}"
-        failure_url = f"{FRONTEND_URL}/profile?username={creator_profile.username}"
 
         if is_first_payment:
             sendid = generate_sendid(length=20)
@@ -379,7 +376,7 @@ async def create_chip_payment(
             sendid = user_provider.sendid
 
         # 決済金額計算（手数料10%込み）
-        money = math.ceil(request.amount * 1.1)
+        money = math.floor(request.amount * 1.1)
 
         # メッセージが指定されている場合、先に会話を作成してメッセージを追加
         chip_message_id = None
@@ -393,8 +390,16 @@ async def create_chip_payment(
                 user_id_2=UUID(request.recipient_user_id),
             )
 
+            # 決済成功時はトークルームへ失敗時はプロフィールに遷移
+            success_url = f"{FRONTEND_URL}/message/conversation/{conversation.id}"
+            failure_url = f"{FRONTEND_URL}/profile?username={creator_profile.username}"
+
             # チップメッセージを作成
-            chip_monner_message = f"{current_user.profile_name}さんから{request.amount}円のチップが届きました！"
+            if request.message and request.message.strip():
+                chip_monner_message = f"{current_user.profile_name}さんが{request.amount}円のチップを送りました！\n\n【メッセージ】\n{request.message}"
+            else:
+                chip_monner_message = f"{current_user.profile_name}さんが{request.amount}円のチップを送りました！"
+
             chip_message = conversations_crud.create_chip_message(
                 db=db,
                 conversation_id=conversation.id,
@@ -405,18 +410,6 @@ async def create_chip_payment(
             chip_message_id = str(chip_message.id)
             logger.info(f"Chip payment message created: {chip_message_id}")
 
-            # メッセージが指定されている場合、先に会話を作成してメッセージを追加
-            if request.message and request.message.strip():
-                # status=0（INACTIVE）でメッセージを作成
-                message = conversations_crud.create_message(
-                    db=db,
-                    conversation_id=conversation.id,
-                    sender_user_id=current_user.id,
-                    body_text=request.message,
-                    status=ConversationMessageStatus.INACTIVE,
-                )
-                message_id = str(message.id)
-                logger.info(f"Chip payment message created: {message_id}")
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to create chip payment message: {e}")
@@ -426,8 +419,8 @@ async def create_chip_payment(
             )
 
 
-        # order_idを決定（メッセージIDがあれば recipient_user_id + "_" + chip_message_id + "_" + message_id）
-        order_id = f"{request.recipient_user_id}_{chip_message_id}_{message_id}" if message_id else f"{request.recipient_user_id}_{chip_message_id}"
+        # order_idを決定（ recipient_user_id + "_" + chip_message_id）
+        order_id = f"{request.recipient_user_id}_{chip_message_id}"
 
         # 決済トランザクション作成（仮のセッションID生成）
         temp_session_id = generate_sendid(length=20)

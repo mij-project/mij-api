@@ -9,7 +9,9 @@ from typing import List
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
+from app.models.profiles import Profiles
 from app.crud import bulk_message_crud
+from app.crud import notifications_crud
 from app.schemas.bulk_message import (
     BulkMessageRecipientsResponse,
     PresignedUrlRequest,
@@ -23,6 +25,8 @@ from app.services.s3.client import scheduler_client
 from datetime import datetime, timezone, timedelta
 from app.crud.reservation_message_crud import ReservationMessageCrud
 from app.models.reservation_message import ReservationMessage
+from app.api.commons.function import CommonFunction
+from app.services.email.send_email import send_message_notification_email
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -182,7 +186,20 @@ def send_bulk_message(
                 reservation_message = ReservationMessageCrud(db).create_reservation_message(
                     reservation_message=reservation_message_obj
                 )
-                
+        else:
+            # 即時送信でアセットがない場合、受信者に通知とメールを送信（ベストエフォート）
+            try:
+                if request.asset_storage_key is None:
+                    _send_notifications_to_recipients(
+                        db=db,
+                        sender_user_id=current_user.id,
+                        target_user_ids=target_user_ids,
+                        message_text=request.message_text,
+                    )
+            except Exception as e:
+                # 通知送信エラーはログに記録するが、メッセージ送信は成功とする
+                logger.error(f"Failed to send notifications for bulk message: {e}")
+
 
         return BulkMessageSendResponse(
             message="一斉送信が完了しました",
@@ -284,3 +301,72 @@ def _define_ecs_task_schedule(db: Session, group_by: str, scheduled_at: datetime
             "schedule_name": schedule_name,
             "result": False,
         }
+
+
+def _send_notifications_to_recipients(
+    db: Session,
+    sender_user_id: UUID,
+    target_user_ids: List[UUID],
+    message_text: str,
+) -> None:
+    """
+    受信者に対して通知とメールを送信（即時送信時）
+    send_conversation_messageの通知ロジックを参考に実装
+    """
+    # 送信者のプロフィール情報を取得
+    sender_user = db.query(Users).filter(Users.id == sender_user_id).first()
+    if not sender_user:
+        logger.warning(f"Sender user not found: {sender_user_id}")
+        return
+
+    sender_profile = db.query(Profiles).filter(Profiles.user_id == sender_user_id).first()
+    sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
+
+    # メッセージプレビューを生成
+    if message_text:
+        message_preview = message_text[:50] if len(message_text) > 50 else message_text
+
+    # 各受信者に通知とメールを送信
+    for recipient_user_id in target_user_ids:
+        try:
+            need_to_send_notification = CommonFunction.get_user_need_to_send_notification(
+                db, recipient_user_id, "userMessages"
+            )
+            if not need_to_send_notification:
+                continue
+
+            recipient_user = db.query(Users).filter(Users.id == recipient_user_id).first()
+            if not recipient_user:
+                continue
+
+            # アプリ内通知を作成（新しいメッセージ到着）
+            # 一斉送信の場合は、会話IDがないため、generic notificationを作成
+            notifications_crud.add_notification_for_bulk_message(
+                db=db,
+                recipient_user_id=recipient_user.id,
+                sender_profile_name=sender_user.profile_name or "Unknown User",
+                sender_avatar_url=sender_avatar_url,
+                message_preview=message_preview,
+            )
+
+            # メール通知を送信
+            need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(
+                db, recipient_user.id, "message"
+            )
+            if need_to_send_email_notification and recipient_user.email:
+                try:
+                    recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
+                    recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
+
+                    send_message_notification_email(
+                        to=recipient_user.email,
+                        sender_name=sender_user.profile_name or "Unknown User",
+                        recipient_name=recipient_name or "User",
+                        message_preview=message_preview,
+                        conversation_url=f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
+                    )
+                    logger.info(f"Bulk message notification email sent to {recipient_user.email}")
+                except Exception as e:
+                    logger.error(f"Failed to send notification email to {recipient_user.email}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to send notification to recipient {recipient_user_id}: {e}")

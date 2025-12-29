@@ -9,8 +9,10 @@ from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
 from app.models.admins import Admins
 from app.models.conversation_messages import ConversationMessages
+from app.models.conversation_participants import ConversationParticipants
 from app.models.message_assets import MessageAssets
 from app.models.profiles import Profiles
+from app.models.user import Users
 from app.crud import message_assets_crud
 from app.crud import notifications_crud, user_crud
 from app.schemas.message_asset import (
@@ -19,10 +21,10 @@ from app.schemas.message_asset import (
     AdminMessageAssetListResponse,
     AdminMessageAssetDetailResponse,
 )
-from app.constants.enums import MessageAssetStatus
 from app.services.s3 import client as s3_client
-from app.services.email.send_email import send_message_content_approval_email, send_message_content_rejection_email
+from app.services.email.send_email import send_message_content_approval_email, send_message_content_rejection_email, send_message_notification_email
 from app.api.commons.function import CommonFunction
+from app.constants.enums import MessageAssetStatus, MessageAssetType, ConversationMessageType, ConversationMessageStatus
 import os
 import logging
 
@@ -184,20 +186,23 @@ def approve_message_asset(
     メッセージアセットを承認（管理者用）
     - group_byでグループ化されたすべてのアセットを承認
     - 送信者に通知とメールを送信
+    - 受信者に新規メッセージ到着通知とメールを送信
     """
     asset = message_assets_crud.approve_message_asset_by_group_by(db, group_by)
 
     if not asset:
         raise HTTPException(status_code=404, detail="Message asset not found")
 
-    # メッセージ情報を取得（送信者ID取得のため）
+    # メッセージ情報を取得（送信者・会話ID取得のため）
     message = db.query(ConversationMessages).filter(
         ConversationMessages.id == asset.message_id
     ).first()
 
     if message and message.sender_user_id:
         sender_user_id = message.sender_user_id
+        conversation_id = message.conversation_id
 
+        # 送信者への通知処理
         # 通知可否判定
         need_to_send_notification = CommonFunction.get_user_need_to_send_notification(
             db, sender_user_id, "messageContentApprove"
@@ -224,6 +229,167 @@ def approve_message_asset(
                     logger.info(f"Approval email sent to {sender_user.email} for message asset {asset.id}")
                 except Exception as e:
                     logger.error(f"Failed to send approval email to {sender_user.email}: {e}")
+
+        # 受信者への通知処理（ベストエフォート）
+        # typeが1（USER）の時だけ通知処理を実行
+        if message.type == ConversationMessageType.USER:
+            try:
+                # 受信者を取得（送信者以外の参加者）
+                recipients = db.query(ConversationParticipants).filter(
+                    ConversationParticipants.conversation_id == conversation_id,
+                    ConversationParticipants.user_id != sender_user_id
+                ).all()
+
+                # 送信者のプロフィール情報を取得
+                sender_profile = db.query(Profiles).filter(Profiles.user_id == sender_user_id).first()
+                sender_name = sender_profile.username if sender_profile else "Unknown User"
+                sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
+
+                # メッセージプレビューを生成
+                if message.body_text:
+                    message_preview = message.body_text[:50] if len(message.body_text) > 50 else message.body_text
+                else:
+                    # アセットのみの場合
+                    if asset.asset_type == MessageAssetType.IMAGE:  # 画像
+                        message_preview = "画像を送信しました"
+                    elif asset.asset_type == MessageAssetType.VIDEO:  # 動画
+                        message_preview = "動画を送信しました"
+                    else:
+                        message_preview = "メディアファイルを送信しました"
+
+                # 各受信者に通知とメールを送信
+                for recipient in recipients:
+                    need_to_send_recipient_notification = CommonFunction.get_user_need_to_send_notification(
+                        db, recipient.user_id, "userMessages"
+                    )
+                    if not need_to_send_recipient_notification:
+                        continue
+
+                    recipient_user = db.query(Users).filter(Users.id == recipient.user_id).first()
+                    if not recipient_user:
+                        continue
+
+                    # アプリ内通知を作成（新しいメッセージ到着）
+                    notifications_crud.add_notification_for_new_message(
+                        db=db,
+                        recipient_user_id=recipient_user.id,
+                        sender_profile_name=sender_name,
+                        sender_avatar_url=sender_avatar_url,
+                        message_preview=message_preview,
+                        conversation_id=conversation_id,
+                    )
+
+                    # メール通知を送信
+                    need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(
+                        db, recipient_user.id, "message"
+                    )
+                    if need_to_send_email_notification and recipient_user.email:
+                        try:
+                            conversation_url = f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation/{conversation_id}"
+
+                            recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
+                            recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
+
+                            send_message_notification_email(
+                                to=recipient_user.email,
+                                sender_name=sender_name,
+                                recipient_name=recipient_name or "User",
+                                message_preview=message_preview,
+                                conversation_url=conversation_url,
+                            )
+                            logger.info(f"Message notification email sent to {recipient_user.email} for message asset {asset.id}")
+                        except Exception as e:
+                            logger.error(f"Failed to send notification email to {recipient_user.email}: {e}")
+            except Exception as e:
+                # 受信者への通知エラーはログに記録するが、承認は成功とする
+                logger.error(f"Failed to send notification to recipients for message asset {asset.id}: {e}")
+
+        elif message.type == ConversationMessageType.BULK and message.status != ConversationMessageStatus.PENDING:
+            # BULK メッセージで status != PENDING の場合、同じ group_by の受信者に通知とメール送信
+            try:
+                # 同じ group_by を持つメッセージから受信者を取得
+                # Conversations -> ConversationParticipants -> Users の関係から受信者を取得
+                bulk_messages = db.query(ConversationMessages).filter(
+                    ConversationMessages.group_by == message.group_by
+                ).all()
+
+                if not bulk_messages:
+                    logger.warning(f"No bulk messages found for group_by={message.group_by}")
+                else:
+                    # 各メッセージの会話から受信者を取得
+                    recipient_user_ids = set()
+                    for bulk_msg in bulk_messages:
+                        recipients = db.query(ConversationParticipants).filter(
+                            ConversationParticipants.conversation_id == bulk_msg.conversation_id,
+                            ConversationParticipants.user_id != sender_user_id
+                        ).all()
+                        for recipient in recipients:
+                            if recipient.user_id:
+                                recipient_user_ids.add(recipient.user_id)
+
+                    # 送信者のプロフィール情報を取得
+                    sender_profile = db.query(Profiles).filter(Profiles.user_id == sender_user_id).first()
+                    sender_name = sender_profile.username if sender_profile else "Unknown User"
+                    sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
+
+                    # メッセージプレビューを生成
+                    if message.body_text:
+                        message_preview = message.body_text[:50] if len(message.body_text) > 50 else message.body_text
+                    else:
+                        # アセットのみの場合
+                        if asset.asset_type == MessageAssetType.IMAGE:
+                            message_preview = "画像を送信しました"
+                        elif asset.asset_type == MessageAssetType.VIDEO:
+                            message_preview = "動画を送信しました"
+                        else:
+                            message_preview = "メディアファイルを送信しました"
+
+                    # 各受信者に通知とメールを送信
+                    for recipient_user_id in recipient_user_ids:
+                        try:
+                            need_to_send_recipient_notification = CommonFunction.get_user_need_to_send_notification(
+                                db, recipient_user_id, "userMessages"
+                            )
+                            if not need_to_send_recipient_notification:
+                                continue
+
+                            recipient_user = db.query(Users).filter(Users.id == recipient_user_id).first()
+                            if not recipient_user:
+                                continue
+
+                            # アプリ内通知を作成（一斉メッセージ到着）
+                            notifications_crud.add_notification_for_bulk_message(
+                                db=db,
+                                recipient_user_id=recipient_user.id,
+                                sender_profile_name=sender_name,
+                                sender_avatar_url=sender_avatar_url,
+                                message_preview=message_preview,
+                            )
+
+                            # メール通知を送信
+                            need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(
+                                db, recipient_user.id, "message"
+                            )
+                            if need_to_send_email_notification and recipient_user.email:
+                                try:
+                                    recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
+                                    recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
+
+                                    send_message_notification_email(
+                                        to=recipient_user.email,
+                                        sender_name=sender_name,
+                                        recipient_name=recipient_name or "User",
+                                        message_preview=message_preview,
+                                        conversation_url=f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
+                                    )
+                                    logger.info(f"Bulk message notification email sent to {recipient_user.email} for message asset {asset.id}")
+                                except Exception as e:
+                                    logger.error(f"Failed to send notification email to {recipient_user.email}: {e}")
+                        except Exception as e:
+                            logger.error(f"Failed to send notification to recipient {recipient_user_id}: {e}")
+            except Exception as e:
+                # 受信者への通知エラーはログに記録するが、承認は成功とする
+                logger.error(f"Failed to send bulk message notifications for message asset {asset.id}: {e}")
 
     # 承認済みなのでCDN URLを設定
     cdn_url = f"{MESSAGE_ASSETS_CDN_URL}/{asset.storage_key}"

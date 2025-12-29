@@ -98,6 +98,8 @@ class UserProfileResponse(BaseModel):
     individual_purchases: List[ProfilePurchaseResponse]
     gacha_items: List[ProfileGachaResponse]
     top_buyers: Optional[List[TopBuyerResponse]] = []
+    has_sent_chip: bool = False
+    has_dm_release_plan: bool = False
 
 class UserOGPResponse(BaseModel):
     """ユーザーOGP情報レスポンス"""
