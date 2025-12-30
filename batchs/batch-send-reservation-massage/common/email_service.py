@@ -216,7 +216,7 @@ class EmailService:
             destination["BccAddresses"] = list(bcc)
 
         params: Dict[str, Any] = {
-            "FromEmailAddress": self._from_header(),
+            "FromEmailAddress": os.environ.get("MAIL_FROM", "no-reply@mijfans.jp"),
             "Destination": destination,
             "Content": {
                 "Simple": {
