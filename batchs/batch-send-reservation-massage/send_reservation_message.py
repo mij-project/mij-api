@@ -148,7 +148,7 @@ class SendReservationMessage:
         conversation = self.db.query(Conversations).filter(Conversations.id == msg.conversation_id).first()
         if conversation:
             conversation.last_message_id = msg.id
-            conversation.last_message_at = self._now()
+            conversation.last_message_at = reservation_message.scheduled_at
 
 
     def _exec(self) -> None:
