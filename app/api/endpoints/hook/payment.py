@@ -1152,9 +1152,18 @@ def _handle_chip_payment_success(
             ).first()
 
             if chip_message:
+                payment_completion_time = datetime.now(timezone.utc)
                 chip_message.status = ConversationMessageStatus.ACTIVE
-                chip_message.updated_at = datetime.now(timezone.utc)
+                chip_message.created_at = payment_completion_time
+                chip_message.updated_at = payment_completion_time
                 db.commit()
+
+                # Update conversation's last_message_at to payment completion time
+                conversation = chip_message.conversation
+                if conversation:
+                    conversation.last_message_at = payment_completion_time
+                    db.commit()
+
                 logger.info(f"Activated chip payment message: {chip_message_id}")
             else:
                 logger.warning(f"Chip message not found for chip_message_id: {chip_message_id}")

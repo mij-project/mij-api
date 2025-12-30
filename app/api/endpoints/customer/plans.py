@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.models.plans import PostPlans
 from app.models.posts import Posts
-from app.constants.enums import PostStatus
+from app.constants.enums import PostStatus, PlanStatus
 from sqlalchemy import func
 from app.db.base import get_db
 from app.deps.auth import get_current_user
@@ -369,7 +369,6 @@ def update_user_plan(
         db.refresh(updated_plan)
 
         # 投稿数と加入者数を取得
-
         post_count = (
             db.query(func.count(PostPlans.post_id))
             .join(Posts, PostPlans.post_id == Posts.id)
@@ -501,6 +500,23 @@ def _update_plan_with_retry(db: Session, plan_id: UUID, update_data: dict) -> Pl
 
             if not plan:
                 raise HTTPException(status_code=404, detail="プランが見つかりません")
+
+            # typeが2に設定される場合、同じクリエイターの他のプランのtypeを1に更新
+            if update_data.get("type") == PlanStatus.RECOMMENDED:
+                # 同じクリエイターの他のプラン（現在のプラン以外）のtypeを1に更新
+                other_plans = (
+                    db.query(Plans)
+                    .filter(
+                        Plans.creator_user_id == plan.creator_user_id,
+                        Plans.id != plan_id,
+                        Plans.deleted_at.is_(None)
+                    )
+                    .with_for_update()
+                    .all()
+                )
+                for other_plan in other_plans:
+                    other_plan.type = PlanStatus.NORMAL
+                    other_plan.updated_at = datetime.now(timezone.utc)
 
             # プランを更新
             for key, value in update_data.items():
