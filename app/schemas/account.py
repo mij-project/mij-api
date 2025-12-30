@@ -6,6 +6,7 @@ from decimal import Decimal
 from app.schemas.commons import PresignResponseItem
 from app.schemas.purchases import SinglePurchaseResponse
 from app.models.posts import Posts
+from app.schemas.message_asset import UserMessageAssetsListResponse
 
 Kind = Literal["avatar", "cover"]
 
@@ -25,7 +26,7 @@ class LikedPostResponse(BaseModel):
     duration_sec: Optional[Decimal] = None
     created_at: datetime
     updated_at: datetime
-    
+    is_time_sale: Optional[bool] = None
     class Config:
         from_attributes = True
 
@@ -75,6 +76,7 @@ class SubscribedPlanDetail(BaseModel):
     creator_profile_name: Optional[str] = None
     post_count: int
     thumbnail_keys: List[str] = []
+    purchase_ids: Optional[List[str]] = None  # 同じプランに複数回加入している場合のpurchase_idリスト
 
 class PlanInfo(BaseModel):
     plan_count: int
@@ -99,6 +101,7 @@ class AccountInfoResponse(BaseModel):
     posts_info: PostsInfo
     sales_info: SalesInfo
     plan_info: PlanInfo
+    message_assets_info: UserMessageAssetsListResponse
 
 class AvatarPresignRequest(BaseModel):
     files: List[AccountFileSpec] = Field(..., description='例: [{"kind":"avatar","ext":"jpg"}, ...]')
@@ -134,6 +137,10 @@ class PostCardResponse(BaseModel):
     price: Optional[int] = None
     currency: Optional[str] = None
     plan_name: Optional[str] = None  # プラン名（プラン購読の場合のみ）
+    price_id: Optional[str] = None
+    sale_percentage: Optional[int] = None
+    end_date: Optional[datetime] = None
+    is_time_sale: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -163,6 +170,8 @@ class AccountPostResponse(BaseModel):
     duration: Optional[str] = None
     is_video: bool = False
     has_plan: bool = False
+    is_time_sale: bool = False
+    sale_percentage: Optional[int] = None
 
 class AccountPostStatusResponse(BaseModel):
     pending_posts: List[AccountPostResponse] = []

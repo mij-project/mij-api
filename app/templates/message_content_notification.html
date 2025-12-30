@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;padding:20px;background-color:#f9fafb;">
+    <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+      <h2 style="color:#111827;margin-bottom:20px;">{{ brand }} メッセージコンテンツの審査が完了しました</h2>
+
+      <p style="color:#374151;line-height:1.6;">{{ name }} 様</p>
+
+      <p style="color:#374151;line-height:1.6;">
+        送信していただいたメッセージのコンテンツ審査が完了いたしました。
+      </p>
+
+      {% if status == 1 %}
+      <div style="background-color:#dcfce7;border-left:4px solid #16a34a;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#166534;font-weight:bold;margin:0 0 10px 0;">✓ 審査結果: 承認</p>
+        <p style="color:#166534;margin:0;">おめでとうございます！メッセージに含まれる画像/動画が承認されました。</p>
+      </div>
+      <p style="color:#374151;line-height:1.6;">
+        メッセージは相手に送信されています。<br>
+        <a href="{{ message_url }}" style="display:inline-block;background-color:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:500;margin:10px 0;">メッセージを確認する</a>
+      </p>
+      <p style="color:#374151;line-height:1.6;">
+        ご不明な点がございましたら、サポートまでお問い合わせください。
+      </p>
+      {% else %}
+      <div style="background-color:#fee2e2;border-left:4px solid #dc2626;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#991b1b;font-weight:bold;margin:0 0 10px 0;">✕ 審査結果: 拒否</p>
+        <p style="color:#991b1b;margin:0;">誠に申し訳ございませんが、メッセージに含まれるコンテンツが承認されませんでした。</p>
+      </div>
+      {% if reject_comments %}
+      <div style="background-color:#f3f4f6;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#4b5563;font-weight:bold;margin:0 0 10px 0;">拒否理由:</p>
+        <p style="color:#4b5563;margin:0;">{{ reject_comments }}</p>
+      </div>
+      {% endif %}
+      <p style="color:#374151;line-height:1.6;">
+        <a href="{{ message_url }}" style="display:inline-block;background-color:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:500;margin:10px 0;">詳細を確認する</a>
+      </p>
+      <p style="color:#374151;line-height:1.6;">
+        コンテンツを修正して再度送信をお願いいたします。<br>
+        ご不明な点がございましたら、サポートまでお問い合わせください。
+      </p>
+      {% endif %}
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <p style="color:#6b7280;font-size:14px;line-height:1.6;">
+        お問い合わせ: <a href="mailto:{{ support_email }}" style="color:#2563eb;text-decoration:none;">{{ support_email }}</a>
+      </p>
+
+      <p style="color:#9ca3af;font-size:12px;margin-top:20px;">
+        このメールは自動送信されています。返信はできません。
+      </p>
+    </div>
+  </body>
+</html>

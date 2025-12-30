@@ -37,10 +37,14 @@ class ProfilePostResponse(BaseModel):
     currency: Optional[str] = "JPY"
     is_reserved: Optional[bool] = False
     is_expired: Optional[bool] = False
+    is_time_sale: Optional[bool] = False
+    sale_percentage: Optional[int] = None
+    end_date: Optional[datetime] = None
 
 class ProfilePlanResponse(BaseModel):
     id: UUID
     name: str
+    open_dm_flg: Optional[bool] = False
     description: Optional[str] = None
     price: int
     currency: str = "JPY"
@@ -48,6 +52,8 @@ class ProfilePlanResponse(BaseModel):
     post_count: Optional[int] = 0
     plan_post: Optional[List[Dict[str, str]]] = []
     is_subscribed: Optional[bool] = False  # 現在のユーザーが加入済みかどうか
+    is_time_sale: Optional[bool] = False
+    time_sale_info: Optional[dict] = None
 
 class ProfilePurchaseResponse(BaseModel):
     id: UUID
@@ -59,11 +65,20 @@ class ProfilePurchaseResponse(BaseModel):
     price: Optional[int] = None
     currency: Optional[str] = "JPY"
     is_reserved: Optional[bool] = False
+    is_time_sale: Optional[bool] = False
+    sale_percentage: Optional[int] = None
+    end_date: Optional[datetime] = None
 
 class ProfileGachaResponse(BaseModel):
     id: UUID
     amount: int
     created_at: datetime
+
+class TopBuyerResponse(BaseModel):
+    """購入金額上位ユーザー情報"""
+    profile_name: str
+    username: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 class UserProfileResponse(BaseModel):
     id: UUID
@@ -77,10 +92,14 @@ class UserProfileResponse(BaseModel):
     website_url: Optional[str] = None
     post_count: int
     follower_count: int
+    is_creator: bool = False
     posts: List[ProfilePostResponse]
     plans: List[ProfilePlanResponse]
     individual_purchases: List[ProfilePurchaseResponse]
     gacha_items: List[ProfileGachaResponse]
+    top_buyers: Optional[List[TopBuyerResponse]] = []
+    has_sent_chip: bool = False
+    has_dm_release_plan: bool = False
 
 class UserOGPResponse(BaseModel):
     """ユーザーOGP情報レスポンス"""

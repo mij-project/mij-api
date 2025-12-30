@@ -19,7 +19,7 @@ from app.deps.auth import get_current_user
 from app.db.base import get_db
 from app.services.s3.keygen import post_media_image_key, post_media_video_key
 from app.schemas.commons import PresignResponseItem
-from typing import Dict, List, Union, Tuple, Set, Any, Optional, Literal
+from typing import Dict, List, Union, Set, Any, Literal
 from app.services.s3.client import (
     delete_ffmpeg_directory,
     delete_hls_directory_full,
@@ -46,7 +46,7 @@ from app.services.s3.ecs_task import run_ecs_task
 import subprocess
 import os
 import boto3
-from app.core.config import settings
+# from app.core.config import settings
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -1242,7 +1242,7 @@ async def check_video_conversion_status(
                 logger.info(f"メイン動画チェック: bucket={bucket_name}, key={main_video_asset.storage_key}")
                 s3_client.head_object(Bucket=bucket_name, Key=main_video_asset.storage_key)
                 main_video_exists = True
-                logger.info(f"メイン動画が存在します")
+                logger.info("メイン動画が存在します")
             except s3_client.exceptions.ClientError as e:
                 logger.warning(f"メイン動画が存在しません: {e}")
                 main_video_exists = False
@@ -1254,7 +1254,7 @@ async def check_video_conversion_status(
                 logger.info(f"サンプル動画チェック: bucket={bucket_name}, key={sample_video_asset.storage_key}")
                 s3_client.head_object(Bucket=bucket_name, Key=sample_video_asset.storage_key)
                 sample_video_exists = True
-                logger.info(f"サンプル動画が存在します")
+                logger.info("サンプル動画が存在します")
             except s3_client.exceptions.ClientError as e:
                 logger.warning(f"サンプル動画が存在しません: {e}")
                 sample_video_exists = False

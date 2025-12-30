@@ -33,6 +33,7 @@ class PostCategoryResponse(BaseModel):
 	creator_avatar_url: Optional[str] = None
 	duration: Optional[str] = None
 	category_name: str
+	is_time_sale: Optional[bool] = False
 
 class PaginatedPostCategoryResponse(BaseModel):
 	posts: List[PostCategoryResponse]
@@ -52,6 +53,7 @@ class NewArrivalsResponse(BaseModel):
     creator_avatar_url: Optional[str] = None
     duration: Optional[str] = None
     likes_count: int = 0
+    is_time_sale: Optional[bool] = False
 
 class PaginatedNewArrivalsResponse(BaseModel):
     posts: List[NewArrivalsResponse]

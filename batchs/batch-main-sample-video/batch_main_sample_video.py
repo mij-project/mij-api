@@ -7,6 +7,7 @@ from common.constants import (
     AWS_ACCESS,
     AWS_SECRET,
     END_TIME,
+    KMS_ARN,
     MAIN_VIDEO_BUCKET,
     MAIN_VIDEO_DESTINATION,
     NEED_TRIM,
@@ -128,8 +129,9 @@ class BatchMainSampleVideo(Path):
                     bucket,
                     destination,
                     ExtraArgs={
-                        # "SSEKMSKeyId": KMS_ARN,
                         "ServerSideEncryption": "aws:kms",
+                        # "SSEKMSKeyId": KMS_ARN,
+                        "SSEKMSKeyId": KMS_ARN,
                     },
                 )
                 exists = self.__s3_key_exists(bucket, destination)
@@ -151,7 +153,7 @@ class BatchMainSampleVideo(Path):
                     bucket,
                     destination,
                     ExtraArgs={
-                        # "SSEKMSKeyId": KMS_ARN,
+                        "SSEKMSKeyId": KMS_ARN,
                         "ServerSideEncryption": "aws:kms",
                     },
                 )

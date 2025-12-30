@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>チップ送信完了通知</title>
+  </head>
+  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:20px;background-color:#f9fafb;margin:0;">
+    <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+      <!-- ヘッダー -->
+      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">チップ送信完了通知</h2>
+
+      <p style="color:#374151;line-height:1.6;margin-bottom:20px;">
+        いつもmijfansをご利用いただき誠にありがとうございます。<br>
+        チップの送信が完了しました。
+      </p>
+
+      <!-- 決済完了通知 -->
+      <div style="background-color:#dcfce7;border-left:4px solid #16a34a;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#166534;font-weight:bold;margin:0;">✓ {{ recipient_name }}にチップを贈りました</p>
+      </div>
+
+      <!-- 決済詳細 -->
+      <div style="background-color:#f9fafb;padding:20px;margin:20px 0;border-radius:6px;border:1px solid #e5e7eb;">
+        <h3 style="color:#111827;margin-top:0;margin-bottom:15px;font-size:18px;">チップ送信詳細</h3>
+
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;width:120px;">送信先:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;font-weight:bold;">{{ recipient_name }}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">会話ルーム:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">
+              <a href="{{ conversation_url }}" style="color:#2563eb;text-decoration:none;word-break:break-all;">{{ conversation_url }}</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">注文番号:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;font-family:monospace;">{{ transaction_id }}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">決済金額:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">¥{{ payment_amount }} <span style="color:#6b7280;font-size:12px;">(手数料10%含む)</span></td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">送信日時:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">{{ payment_date }}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">決済種別:</td>
+            <td style="padding:8px 0;color:#111827;font-size:14px;">クレジットカード</td>
+          </tr>
+        </table>
+      </div>
+
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <!-- 請求名の説明 -->
+      <div style="background-color:#fef3c7;border-left:4px solid #f59e0b;padding:15px;margin:20px 0;border-radius:4px;">
+        <p style="color:#92400e;margin:0;font-size:14px;">
+          <strong>ご注意:</strong> 請求名は「mijfans」「P.V*MGN」等で表記されます。
+        </p>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+      <!-- フッター -->
+      <div style="margin-top:30px;">
+        <p style="color:#374151;font-size:14px;line-height:1.6;margin-bottom:10px;">
+          <strong>公式Twitter(最新情報):</strong><br>
+          <a href="https://x.com/mijfan_official" style="color:#2563eb;text-decoration:none;">https://x.com/mijfan_official</a>
+        </p>
+
+        <p style="color:#6b7280;font-size:14px;line-height:1.6;margin-top:20px;">
+          このメールは送信専用のメールアドレスから送信されているため、返信できません。<br>
+          恐れ入りますが、お問い合わせは以下のアドレスよりお願いします。<br>
+          <a href="mailto:support@mijfans.jp" style="color:#2563eb;text-decoration:none;">support@mijfans.jp</a>
+        </p>
+
+        <p style="color:#374151;font-size:14px;line-height:1.6;margin-top:20px;font-weight:bold;">
+          今後ともmijfansをよろしくお願いいたします。
+        </p>
+      </div>
+
+      <!-- コピーライト -->
+      <p style="color:#9ca3af;font-size:12px;margin-top:30px;text-align:center;">
+        © 2025 mijfans. All rights reserved.
+      </p>
+    </div>
+  </body>
+</html>

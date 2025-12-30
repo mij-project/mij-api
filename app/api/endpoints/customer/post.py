@@ -1,5 +1,12 @@
+import math
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
+from app.crud.time_sale_crud import (
+    check_exists_price_time_sale_in_period_by_post_id,
+    create_price_time_sale_by_post_id,
+    delete_price_time_sale_by_id,
+    get_price_time_sale_by_post_id,
+)
 from app.db.base import get_db
 from app.deps.auth import get_current_user, get_current_user_optional
 from app.constants.enums import PostStatus
@@ -36,6 +43,11 @@ from os import getenv
 from datetime import datetime, timezone
 from app.api.commons.utils import get_video_duration
 from app.core.logger import Logger
+from app.schemas.post_price_timesale import (
+    PaginatedPriceTimeSaleResponse,
+    PriceTimeSaleCreateRequest,
+    PriceTimeSaleResponse,
+)
 from app.services.slack.slack import SlackService
 import time
 
@@ -202,7 +214,9 @@ async def get_post_detail(
         categories_data = _format_categories_info(post_data["categories"])
 
         # 販売情報を整形
-        sale_info = _format_sale_info(post_data["price"], post_data["plans"])
+        sale_info = _format_sale_info(
+            post_data["price"], post_data["plans"], post_data["plan_timesale_map"]
+        )
 
         # Schedule and Expiration Information
         schedule_info, expiration_info = (
@@ -252,7 +266,7 @@ async def get_new_arrivals(
 ):
     try:
         # ページ番号からオフセットを計算
-        offset = (page - 1) * per_page
+        # offset = (page - 1) * per_page
 
         # 次のページがあるか確認するため、1件多く取得
         recent_posts = get_recent_posts(db, limit=per_page + 1)
@@ -279,6 +293,7 @@ async def get_new_arrivals(
                 if post.duration_sec
                 else None,
                 likes_count=post.likes_count or 0,
+                is_time_sale=post.Posts.is_time_sale,
             )
             for post in posts_to_return
         ]
@@ -552,33 +567,63 @@ def _format_categories_info(categories: list):
     ]
 
 
-def _format_sale_info(price: dict | None, plans: list | None):
+def _format_sale_info(
+    price: dict | None, plans: list | None, plan_timesale_map: dict | None
+):
     """販売情報を整形する"""
+    temp_plans = []
+    for plan in plans:
+        plan_id = str(plan["id"])
+        tmp_plan_dict = {
+            "id": str(plan["id"]) if plan and "id" in plan else None,
+            "name": plan["name"] if plan and "name" in plan else None,
+            "description": plan.get("description") if plan else None,
+            "price": plan.get("price") if plan else None,
+            "type": plan.get("type") if plan else None,
+                "open_dm_flg": plan.get("open_dm_flg") if plan else None,
+            "post_count": plan.get("post_count") if plan else None,
+            "plan_post": [
+                {
+                    "description": post["description"],
+                    "thumbnail_url": f"{CDN_BASE_URL}/{post['thumbnail_url']}",
+                }
+                for post in plan.get("plan_post", [])
+            ]
+            if plan and "plan_post" in plan
+            else [],
+        }
+        is_time_sale_active = False
+        time_sale_price = None
+        sale_percentage = None
+        end_date = None
+        if plan_id in plan_timesale_map:
+            if plan_timesale_map[plan_id]["is_active"] and (
+                not plan_timesale_map[plan_id]["is_expired"]
+            ):
+                is_time_sale_active = True
+                time_sale_price = int(plan["price"]) - math.ceil(
+                    int(plan["price"])
+                    * plan_timesale_map[plan_id]["sale_percentage"]
+                    / 100
+                )
+                sale_percentage = plan_timesale_map[plan_id]["sale_percentage"]
+                end_date = plan_timesale_map[plan_id]["end_date"]
+        tmp_plan_dict["is_time_sale_active"] = is_time_sale_active
+        tmp_plan_dict["time_sale_price"] = time_sale_price
+        tmp_plan_dict["sale_percentage"] = sale_percentage
+        tmp_plan_dict["end_date"] = end_date
+        temp_plans.append(tmp_plan_dict)
+
     return {
         "price": {
             "id": str(price.id) if price else None,
             "price": price.price if price else None,
+            "is_time_sale_active": price.is_time_sale_active if price else False,
+            "time_sale_price": price.time_sale_price if price else None,
+            "sale_percentage": price.sale_percentage if price else None,
+            "end_date": price.end_date if price else None,
         },
-        "plans": [
-            {
-                "id": str(plan["id"]) if plan and "id" in plan else None,
-                "name": plan["name"] if plan and "name" in plan else None,
-                "description": plan.get("description") if plan else None,
-                "price": plan.get("price") if plan else None,
-                "type": plan.get("type") if plan else None,
-                "post_count": plan.get("post_count") if plan else None,
-                "plan_post": [
-                    {
-                        "description": post["description"],
-                        "thumbnail_url": f"{CDN_BASE_URL}/{post['thumbnail_url']}",
-                    }
-                    for post in plan.get("plan_post", [])
-                ]
-                if plan and "plan_post" in plan
-                else [],
-            }
-            for plan in (plans or [])
-        ],
+        "plans": temp_plans,
     }
 
 
@@ -596,3 +641,78 @@ async def delete_post(
         db.rollback()
         logger.error("投稿削除エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{post_id}/price-time-sale")
+async def get_price_time_sale(
+    post_id: str,
+    page: int = Query(1, ge=1, description="ページ番号（1から開始）"),
+    per_page: int = Query(20, ge=1, le=100, description="1ページあたりの件数"),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """投稿の価格時間販売情報を取得する"""
+    rows, total = get_price_time_sale_by_post_id(db, post_id, page, per_page)
+    total_pages = math.ceil((total - 1) / per_page)
+    time_sales = []
+    for row in rows:
+        time_sales.append(
+            PriceTimeSaleResponse(
+                id=str(row.TimeSale.id),
+                post_id=str(row.TimeSale.post_id),
+                plan_id=str(row.TimeSale.plan_id) if row.TimeSale.plan_id else None,
+                price_id=str(row.TimeSale.price_id) if row.TimeSale.price_id else None,
+                start_date=row.TimeSale.start_date if row.TimeSale.start_date else None,
+                end_date=row.TimeSale.end_date if row.TimeSale.end_date else None,
+                sale_percentage=row.TimeSale.sale_percentage,
+                max_purchase_count=row.TimeSale.max_purchase_count
+                if row.TimeSale.max_purchase_count
+                else None,
+                purchase_count=row.purchase_count,
+                is_active=row.is_active,
+                is_expired=row.is_expired,
+                created_at=row.TimeSale.created_at if row.TimeSale.created_at else None,
+            )
+        )
+    return PaginatedPriceTimeSaleResponse(
+        time_sales=time_sales,
+        total=total,
+        total_pages=total_pages,
+        page=page,
+        limit=per_page,
+        has_next=page < total_pages,
+    )
+
+
+@router.post("/{post_id}/create-price-time-sale")
+async def create_price_time_sale(
+    post_id: str,
+    payload: PriceTimeSaleCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """価格時間販売情報を作成する"""
+    if payload.start_date and payload.end_date:
+        if check_exists_price_time_sale_in_period_by_post_id(
+            db, post_id, payload.start_date, payload.end_date
+        ):
+            raise HTTPException(
+                status_code=400, detail="Price time sale already exists"
+            )
+
+    time_sale = create_price_time_sale_by_post_id(db, post_id, payload, current_user)
+    if not time_sale:
+        raise HTTPException(status_code=500, detail="Can not create price time sale")
+    return {"message": "ok"}
+
+@router.delete("/delete-price-time-sale/{time_sale_id}")
+async def delete_price_time_sale(
+    time_sale_id: str,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """価格時間販売情報を削除する"""
+    success = delete_price_time_sale_by_id(db, time_sale_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Can not delete price time sale")
+    return {"message": "ok"}
