@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.models.plans import PostPlans
 from app.models.posts import Posts
-from app.constants.enums import PostStatus
+from app.constants.enums import PostStatus, PlanStatus
 from sqlalchemy import func
 from app.db.base import get_db
 from app.deps.auth import get_current_user
@@ -45,6 +45,7 @@ from app.core.logger import Logger
 from app.crud.time_sale_crud import (
     check_exists_plan_time_sale_in_period_by_plan_id,
     create_plan_time_sale_by_plan_id,
+    delete_plan_time_sale_by_id,
     get_plan_time_sale_by_plan_id,
     get_plan_time_sale_by_id,
     get_price_time_sale_by_id,
@@ -368,7 +369,6 @@ def update_user_plan(
         db.refresh(updated_plan)
 
         # 投稿数と加入者数を取得
-
         post_count = (
             db.query(func.count(PostPlans.post_id))
             .join(Posts, PostPlans.post_id == Posts.id)
@@ -500,6 +500,23 @@ def _update_plan_with_retry(db: Session, plan_id: UUID, update_data: dict) -> Pl
 
             if not plan:
                 raise HTTPException(status_code=404, detail="プランが見つかりません")
+
+            # typeが2に設定される場合、同じクリエイターの他のプランのtypeを1に更新
+            if update_data.get("type") == PlanStatus.RECOMMENDED:
+                # 同じクリエイターの他のプラン（現在のプラン以外）のtypeを1に更新
+                other_plans = (
+                    db.query(Plans)
+                    .filter(
+                        Plans.creator_user_id == plan.creator_user_id,
+                        Plans.id != plan_id,
+                        Plans.deleted_at.is_(None)
+                    )
+                    .with_for_update()
+                    .all()
+                )
+                for other_plan in other_plans:
+                    other_plan.type = PlanStatus.NORMAL
+                    other_plan.updated_at = datetime.now(timezone.utc)
 
             # プランを更新
             for key, value in update_data.items():
@@ -682,4 +699,17 @@ async def create_plan_time_sale(
     time_sale = create_plan_time_sale_by_plan_id(db, plan_id, payload, current_user)
     if not time_sale:
         raise HTTPException(status_code=500, detail="Can not create price time sale")
+    return {"message": "ok"}
+
+@router.delete("/delete-plan-time-sale/{time_sale_id}")
+def delete_plan_time_sale(
+    time_sale_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """価格時間販売情報を削除する"""
+    success = delete_plan_time_sale_by_id(db, time_sale_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Can not delete price time sale")
+
     return {"message": "ok"}
