@@ -286,7 +286,10 @@ def get_messages_by_conversation(
                 ConversationMessages.status.is_(None),
             ),
             ConversationMessages.deleted_at.is_(None),
-            ConversationMessages.status != ConversationMessageStatus.PENDING,
+            or_(
+                ConversationMessages.status != ConversationMessageStatus.PENDING,
+                ConversationMessages.status.is_(None),
+            ),
         )
         .order_by(ConversationMessages.created_at.asc(), ConversationMessages.updated_at.asc())
         .offset(skip)
