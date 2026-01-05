@@ -1,6 +1,9 @@
 """
 CREDIX決済APIエンドポイント
 """
+# 会話の最後のメッセージの時間を取得（1個前のメッセージがあればその時間を使用）
+from sqlalchemy import desc
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -22,6 +25,7 @@ from app.models.user import Users
 from app.models.plans import Plans
 from app.models.prices import Prices
 from app.constants.number import PaymentPlanPlatformFeePercent
+from app.models.conversation_messages import ConversationMessages
 from app.constants.enums import PaymentTransactionType, TransactionType, ConversationMessageStatus
 # from app.constants.messages import CredixMessage    
 from app.core.logger import Logger
@@ -60,9 +64,7 @@ async def create_credix_session(
             user_id=current_user.id,
             provider_id=credix_provider.id
         )
-
         # TODO: user_providerが複数の場合は、画面に戻してどのカードを使うかを選択させる
-
         # sendid生成または取得
         is_first_payment = user_provider is None or user_provider.sendid is None
 
@@ -79,6 +81,8 @@ async def create_credix_session(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
+            # if user_provider.cardbrand != "J":
+            #     raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算
         money, order_id, transaction_type = _set_money(request, db)
@@ -374,6 +378,8 @@ async def create_chip_payment(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
+            # if user_provider.cardbrand != "J":
+            #     raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算（手数料10%込み）
         money = math.floor(request.amount * 1.1)
@@ -394,7 +400,8 @@ async def create_chip_payment(
             success_url = f"{FRONTEND_URL}/message/conversation/{conversation.id}"
             failure_url = f"{FRONTEND_URL}/profile?username={creator_profile.username}"
 
-            # チップメッセージを作成
+            
+            # チップメッセージを作成（タイムスタンプは決済完了時に設定）
             if request.message and request.message.strip():
                 chip_monner_message = f"{current_user.profile_name}さんが{request.amount}円のチップを送りました！\n\n【メッセージ】\n{request.message}"
             else:

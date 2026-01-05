@@ -135,7 +135,15 @@ def _update_conversation_last_message(
 ) -> None:
     """
     会話の最終メッセージ情報を更新する共通関数
+    ※ INACTIVE（決済待ち）メッセージと PENDING（予約送信）メッセージは無視
     """
+    from app.constants.enums import ConversationMessageStatus
+
+    # INACTIVEメッセージの場合は更新しない（決済完了時に更新される）
+    # PENDINGメッセージの場合は更新しない（実際の送信時に更新される）
+    if message.status in (ConversationMessageStatus.INACTIVE, ConversationMessageStatus.PENDING):
+        return
+
     conversation = (
         db.query(Conversations).filter(Conversations.id == conversation_id).first()
     )
@@ -278,9 +286,12 @@ def get_messages_by_conversation(
                 ConversationMessages.status.is_(None),
             ),
             ConversationMessages.deleted_at.is_(None),
-            ConversationMessages.status != ConversationMessageStatus.PENDING,
+            or_(
+                ConversationMessages.status != ConversationMessageStatus.PENDING,
+                ConversationMessages.status.is_(None),
+            ),
         )
-        .order_by(ConversationMessages.created_at.asc())
+        .order_by(ConversationMessages.created_at.asc(), ConversationMessages.updated_at.asc())
         .offset(skip)
         .limit(limit)
         .all()
