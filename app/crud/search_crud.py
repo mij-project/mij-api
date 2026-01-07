@@ -82,8 +82,8 @@ def search_creators(
         func.to_tsvector("simple", Users.profile_name).op("@@")(tsquery),
         func.to_tsvector("simple", Profiles.username).op("@@")(tsquery),
         func.to_tsvector("simple", func.coalesce(Profiles.bio, "")).op("@@")(tsquery),
-        Users.profile_name.ilike(f"{query_lower}%"),  # 前方一致
-        Profiles.username.ilike(f"{query_lower}%"),
+        Users.profile_name.ilike(f"%{query_lower}%"), 
+        Profiles.username.ilike(f"%{query_lower}%"),
     )
 
     base_query = base_query.filter(search_conditions)
