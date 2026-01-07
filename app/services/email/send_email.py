@@ -576,3 +576,144 @@ def _send_backend(to: str, subject: str, html: str, tags: dict[str, str] | None 
         logger.error(f"[email] send failed backend={backend} to={to} err={e}")
 
 
+# --------------------------
+# チップ決済メール
+# --------------------------
+def send_chip_payment_buyer_success_email(
+    to: str,
+    recipient_name: str | None = None,
+    conversation_url: str | None = None,
+    transaction_id: str | None = None,
+    payment_amount: int | None = None,
+    payment_date: str | None = None,
+) -> None:
+    """チップ送信完了メール（購入者用）"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】{recipient_name}へのチップ送信が完了しました"
+    ctx = {
+        "recipient_name": recipient_name or "",
+        "conversation_url": conversation_url or "",
+        "transaction_id": transaction_id or "",
+        "payment_amount": payment_amount or 0,
+        "payment_date": payment_date or "",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="chip_payment_buyer_success.html",
+        ctx=ctx,
+        tags={"category": "chip_payment_buyer"},
+    )
+
+
+def send_chip_payment_seller_success_email(
+    to: str,
+    sender_name: str | None = None,
+    conversation_url: str | None = None,
+    transaction_id: str | None = None,
+    seller_amount: int | None = None,
+    payment_date: str | None = None,
+    sales_url: str | None = None,
+) -> None:
+    """チップ受取通知メール（クリエイター用）"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = f"【mijfans】{sender_name}さんからチップが届きました"
+    ctx = {
+        "sender_name": sender_name or "",
+        "conversation_url": conversation_url or "",
+        "transaction_id": transaction_id or "",
+        "seller_amount": seller_amount or 0,
+        "payment_date": payment_date or "",
+        "sales_url": sales_url or "",
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="chip_payment_seller_success.html",
+        ctx=ctx,
+        tags={"category": "chip_payment_seller"},
+    )
+
+
+def send_message_notification_email(
+    to: str,
+    sender_name: str | None = None,
+    recipient_name: str | None = None,
+    message_preview: str | None = None,
+    conversation_url: str | None = None,
+) -> None:
+    """メッセージ通知メール"""
+    logger.info(f"[send_message_notification_email] Called with to={to}, sender_name={sender_name}")
+
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        logger.warning(f"[send_message_notification_email] EMAIL_ENABLED is False, skipping email to {to}")
+        return
+
+    subject = f"【mijfans】{sender_name}さんから新しいメッセージが届きました"
+    ctx = {
+        "brand": "mijfans",
+        "sender_name": sender_name or "",
+        "recipient_name": recipient_name or "",
+        "message_preview": message_preview or "",
+        "conversation_url": conversation_url or os.environ.get("FRONTEND_URL", "https://mijfans.jp/"),
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+
+    logger.info(f"[send_message_notification_email] Sending email to {to} with subject: {subject}")
+
+    try:
+        send_templated_email(
+            to=to,
+            subject=subject,
+            template_html="message_notification.html",
+            ctx=ctx,
+            tags={"category": "message_notification"},
+        )
+        logger.info(f"[send_message_notification_email] Email sent successfully to {to}")
+    except Exception as e:
+        logger.error(f"[send_message_notification_email] Failed to send email to {to}: {e}", exc_info=True)
+
+
+def send_message_content_approval_email(to: str, display_name: str | None = None, redirect_url: str | None = None) -> None:
+    """メッセージコンテンツ承認メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】送信したメッセージが承認されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 1,  # 承認
+        "message_url": redirect_url or f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="message_content_notification.html",
+        ctx=ctx,
+        tags={"category": "message_content_approval"},
+    )
+
+
+def send_message_content_rejection_email(to: str, display_name: str | None = None, reject_comments: str | None = None, group_by: str | None = None) -> None:
+    """メッセージコンテンツ拒否メール"""
+    if not getattr(settings, "EMAIL_ENABLED", True):
+        return
+    subject = "【mijfans】送信したメッセージが拒否されました"
+    ctx = {
+        "name": display_name or "",
+        "brand": "mijfans",
+        "status": 0,  # 拒否
+        "reject_comments": reject_comments or "申請内容を再度ご確認ください。",
+        "message_url": f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/account/message/{group_by}" if group_by else f"{os.environ.get('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
+        "support_email": os.getenv("SUPPORT_EMAIL", "support@mijfans.jp"),
+    }
+    send_templated_email(
+        to=to,
+        subject=subject,
+        template_html="message_content_notification.html",
+        ctx=ctx,
+        tags={"category": "message_content_rejection"},
+    )

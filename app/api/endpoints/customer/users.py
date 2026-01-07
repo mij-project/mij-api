@@ -17,21 +17,27 @@ from app.crud.user_crud import (
     check_profile_name_exists,
     get_user_profile_by_username,
     get_plan_details,
+    get_user_by_id,
 )
 from app.deps.auth import get_current_user, get_current_user_optional
 from app.crud.companies_crud import get_company_by_code
 from app.models.profiles import Profiles
 from app.models.user import Users
 from app.api.commons.utils import generate_code
-from app.crud.profile_crud import create_profile, get_profile_ogp_data
+from app.crud.profile_crud import create_profile, get_profile_ogp_data, get_profile_by_user_id
 from app.schemas.user import (
     ProfilePostResponse,
     ProfilePlanResponse,
     ProfilePurchaseResponse,
     ProfileGachaResponse,
+    TopBuyerResponse,
 )
+from app.crud.payments_crud import get_top_buyers_by_user_id
 from app.models.subscriptions import Subscriptions
-from app.constants.enums import ItemType, SubscriptionStatus
+from app.models.payments import Payments
+from app.constants.enums import ItemType, SubscriptionStatus, PaymentStatus, PaymentType
+from app.models.plans import Plans
+from sqlalchemy import func, select, cast, String
 from app.api.commons.utils import generate_email_verification_url
 import os
 from app.crud.email_verification_crud import issue_verification_token
@@ -142,6 +148,7 @@ def get_user_profile_by_username_endpoint(
     try:
         now = datetime.now(timezone.utc)
         profile_data = get_user_profile_by_username(db, username)
+        
         if not profile_data:
             raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
 
@@ -182,7 +189,6 @@ def get_user_profile_by_username_endpoint(
                 is_reserved = True
             else:
                 is_reserved = False
-
             profile_posts.append(
                 ProfilePostResponse(
                     id=post.id,
@@ -197,6 +203,9 @@ def get_user_profile_by_username_endpoint(
                     price=price,
                     currency=currency,
                     is_reserved=is_reserved,
+                    is_time_sale=post.is_time_sale,
+                    sale_percentage=post.price_sale_percentage,
+                    end_date=post.price_sale_end_date,
                 )
             )
 
@@ -214,17 +223,18 @@ def get_user_profile_by_username_endpoint(
                         Subscriptions.user_id == current_user.id,
                         Subscriptions.order_id == str(plan.id),
                         Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-                        Subscriptions.status == SubscriptionStatus.ACTIVE,  # 1=ACTIVE
+                        Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # 1=ACTIVE
                     )
                     .first()
                     is not None
                 )
-
+            
             profile_plans.append(
                 ProfilePlanResponse(
                     id=plan.id,
                     name=plan.name,
                     description=plan.description,
+                    open_dm_flg=plan.open_dm_flg,
                     price=plan.price,
                     currency="JPY",  # 通貨は固定（必要に応じてDBから取得）
                     type=plan.type,
@@ -237,6 +247,8 @@ def get_user_profile_by_username_endpoint(
                         for post in plan_details.get("plan_post", [])
                     ],
                     is_subscribed=is_subscribed,
+                    is_time_sale=plan.is_time_sale,
+                    time_sale_info=plan.time_sale_info,
                 )
             )
 
@@ -282,6 +294,9 @@ def get_user_profile_by_username_endpoint(
                     price=price,
                     currency=currency,
                     is_reserved=is_reserved,
+                    is_time_sale=post.is_time_sale,
+                    sale_percentage=post.price_sale_percentage,
+                    end_date=post.price_sale_end_date,
                 )
             )
 
@@ -293,6 +308,57 @@ def get_user_profile_by_username_endpoint(
                     amount=gacha_item.amount,
                     created_at=gacha_item.order.created_at,  # Ordersテーブルのcreated_atを使用
                 )
+            )
+
+        # 購入金額上位3名を取得
+        top_buyers = []
+        # seller_user_idが現在のユーザーで、statusがSUCCEEDEDのレコードを集計
+        top_buyers_results = get_top_buyers_by_user_id(db, user.id)
+
+        for buyer_result in top_buyers_results:
+            buyer_user_id = buyer_result.buyer_user_id
+            # 購入者情報を取得
+            buyer_user = get_user_by_id(db, str(buyer_user_id))
+            if buyer_user:
+                buyer_profile = get_profile_by_user_id(db, buyer_user_id)
+                top_buyers.append(
+                    TopBuyerResponse(
+                        profile_name=buyer_user.profile_name if buyer_user else "",
+                        username=buyer_profile.username if buyer_profile else None,
+                        avatar_url=f"{BASE_URL}/{buyer_profile.avatar_url}" if buyer_profile and buyer_profile.avatar_url else None,
+                    )
+                )
+
+        # チップ購入済みかどうかをチェック
+        has_sent_chip = False
+        if current_user:
+            has_sent_chip = (
+                db.query(Payments)
+                .filter(
+                    Payments.payment_type == PaymentType.CHIP,
+                    Payments.seller_user_id == user.id,
+                    Payments.buyer_user_id == current_user.id,
+                    Payments.status == PaymentStatus.SUCCEEDED,
+                )
+                .first()
+                is not None
+            )
+
+        # DM解放プランに加入済みかどうかをチェック
+        has_dm_release_plan = False
+        if current_user:
+            has_dm_release_plan = (
+                db.query(Subscriptions)
+                .join(Plans, Subscriptions.order_id == cast(Plans.id, String))
+                .filter(
+                    Subscriptions.user_id == current_user.id,
+                    Subscriptions.order_type == ItemType.PLAN,
+                    Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),
+                    Plans.creator_user_id == user.id,
+                    Plans.open_dm_flg == True,
+                )
+                .first()
+                is not None
             )
 
         return UserProfileResponse(
@@ -310,10 +376,14 @@ def get_user_profile_by_username_endpoint(
             links=profile.links if profile else None,
             post_count=post_count,
             follower_count=profile_data["follower_count"],
+            is_creator=(user.role == 2),  # AccountType.CREATOR
             posts=profile_posts,
             plans=profile_plans,
             individual_purchases=profile_purchases,
             gacha_items=profile_gacha_items,
+            top_buyers=top_buyers,
+            has_sent_chip=has_sent_chip,
+            has_dm_release_plan=has_dm_release_plan,
         )
     except Exception as e:
         logger.error("ユーザープロフィール取得エラー: ", e)

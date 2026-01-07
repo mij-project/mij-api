@@ -8,10 +8,17 @@ from typing import Optional, List
 class RecentPostThumbnail(BaseModel):
     id: UUID
     thumbnail_url: Optional[str] = None
-
+    is_time_sale: Optional[bool] = False
     class Config:
         from_attributes = True
 
+class SearchCategoryItem(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+
+class SearchCategoriesResponse(BaseModel):
+    items: List[SearchCategoryItem]
 
 class CreatorSearchResult(BaseModel):
     id: UUID
@@ -46,7 +53,7 @@ class PostSearchResult(BaseModel):
     video_duration: Optional[int] = None
     creator: PostCreatorInfo
     created_at: str
-
+    is_time_sale: Optional[bool] = False
     class Config:
         from_attributes = True
 
@@ -91,3 +98,36 @@ class SearchHistoryItem(BaseModel):
 
 class SearchHistoryResponse(BaseModel):
     items: List[SearchHistoryItem]
+
+
+# --- Admin用検索履歴スキーマ ---
+
+class SearchHistoryUserInfo(BaseModel):
+    id: UUID
+    username: Optional[str] = None
+    profile_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    email: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminSearchHistoryItem(BaseModel):
+    id: UUID
+    query: str
+    search_type: Optional[str]
+    filters: Optional[dict]
+    created_at: str
+    user: SearchHistoryUserInfo
+
+    class Config:
+        from_attributes = True
+
+
+class AdminSearchHistoryListResponse(BaseModel):
+    items: List[AdminSearchHistoryItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int

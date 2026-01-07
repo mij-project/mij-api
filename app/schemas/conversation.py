@@ -5,7 +5,20 @@ from datetime import datetime
 
 # メッセージ作成リクエスト
 class MessageCreate(BaseModel):
-    body_text: str = Field(..., min_length=1, max_length=5000)
+    body_text: Optional[str] = Field(None, max_length=5000)  # テキストのみ、またはアセットのみも許可
+    asset_storage_key: Optional[str] = None  # アセットのS3キー（オプション）
+    asset_type: Optional[int] = Field(None, ge=1, le=2)  # 1=画像, 2=動画（オプション）
+
+# メッセージアセット情報（MessageResponse内で使用）
+class MessageAssetInfo(BaseModel):
+    id: UUID
+    status: int  # 0=審査待ち, 1=承認済み, 2=拒否
+    asset_type: int  # 1=画像, 2=動画
+    cdn_url: Optional[str] = None  # 承認済みの場合のみ
+    storage_key: str
+
+    class Config:
+        from_attributes = True
 
 # メッセージレスポンス
 class MessageResponse(BaseModel):
@@ -22,6 +35,9 @@ class MessageResponse(BaseModel):
     sender_username: Optional[str] = None
     sender_avatar: Optional[str] = None
     sender_profile_name: Optional[str] = None
+
+    # アセット情報（オプション）
+    asset: Optional[MessageAssetInfo] = None
 
     class Config:
         from_attributes = True
@@ -67,3 +83,27 @@ class UnreadCountResponse(BaseModel):
 # 既読更新リクエスト
 class MarkAsReadRequest(BaseModel):
     message_id: UUID
+
+# 会話メッセージレスポンス（相手のプロフィール情報を含む）
+class ConversationMessagesResponse(BaseModel):
+    messages: List[MessageResponse]
+    partner_user_id: Optional[UUID] = None
+    partner_username: Optional[str] = None
+    partner_profile_name: Optional[str] = None
+    partner_profile_username: Optional[str] = None  # プロフィール遷移用（Profile.username）
+    partner_avatar: Optional[str] = None
+    can_send_message: bool = False
+    current_user_is_creator: bool = False
+    partner_user_is_creator: bool = False
+    # DM解放プラン購入状況
+    has_dm_plan_to_partner: bool = False  # 現在のユーザーが相手のDM解放プランを購入している
+    has_dm_plan_from_partner: bool = False  # 相手が現在のユーザーのDM解放プランを購入している
+    # チップ送信履歴
+    has_chip_history_to_partner: bool = False  # 現在のユーザーが相手へチップを送信した
+    has_chip_history_from_partner: bool = False  # 相手が現在のユーザーへチップを送信した
+    # クリエイター ⇔ クリエイター 用フラグ
+    is_current_user_seller: bool = False  # 購入されている側（相手がプラン加入 OR チップ送信）
+    is_current_user_buyer: bool = False  # 購入者側（自分がプラン購入 OR チップ送信）
+
+    class Config:
+        from_attributes = True

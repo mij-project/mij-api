@@ -1,5 +1,10 @@
+import math
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from app.models.plans import PostPlans
+from app.models.posts import Posts
+from app.constants.enums import PostStatus, PlanStatus
+from sqlalchemy import func
 from app.db.base import get_db
 from app.deps.auth import get_current_user
 from app.models.user import Users
@@ -19,7 +24,6 @@ from app.schemas.plan import (
 from app.crud.plan_crud import (
     create_plan,
     delete_plan,
-    update_plan,
     request_plan_deletion,
     get_user_plans,
     get_plan_detail,
@@ -32,13 +36,27 @@ from app.crud.plan_crud import (
 )
 from app.models.plans import Plans
 from app.crud.post_crud import get_posts_by_plan_id
-from app.constants.enums import PlanStatus, PriceType, PostType
-from app.crud.price_crud import create_price
+from app.constants.enums import PostType
 from uuid import UUID
 from typing import Optional
 import os
 import time
 from app.core.logger import Logger
+from app.crud.time_sale_crud import (
+    check_exists_plan_time_sale_in_period_by_plan_id,
+    create_plan_time_sale_by_plan_id,
+    delete_plan_time_sale_by_id,
+    get_plan_time_sale_by_plan_id,
+    get_plan_time_sale_by_id,
+    get_price_time_sale_by_id,
+    get_active_plan_timesale_map,
+)
+from app.schemas.post_plan_timesale import (
+    PaginatedPlanTimeSaleResponse,
+    PlanTimeSaleResponse,
+    PlanTimeSaleCreateRequest,
+    PlanTimeSaleEditInitResponse,
+)
 
 logger = Logger.get_logger()
 router = APIRouter()
@@ -63,6 +81,7 @@ def create_user_plan(
             "type": plan_data.type,
             "price": plan_data.price,
             "welcome_message": plan_data.welcome_message,
+            "open_dm_flg": plan_data.open_dm_flg,
             "status": 1,  # アクティブ
         }
         plan = create_plan(db, plan_create_data, plan_data.post_ids)
@@ -97,6 +116,7 @@ def create_user_plan(
             type=plan.type,
             display_order=plan.display_order,
             welcome_message=plan.welcome_message,
+            open_dm_flg=plan.open_dm_flg,
             post_count=post_count,
             subscriber_count=0,
             updated_at=plan.updated_at,
@@ -118,11 +138,35 @@ def get_plans(
     """
     try:
         plans_data = get_user_plans(db, current_user.id)
-        plans = [PlanResponse(**plan) for plan in plans_data]
+
+        # プランIDを抽出（plan["id"]が既にUUIDの場合はそのまま使用、文字列の場合はUUIDに変換）
+        plan_ids = [
+            plan["id"] if isinstance(plan["id"], UUID) else UUID(plan["id"])
+            for plan in plans_data
+        ]
+
+        # アクティブなタイムセール情報を取得
+        timesale_map = get_active_plan_timesale_map(db, plan_ids) if plan_ids else {}
+
+        # タイムセール情報をプランレスポンスに追加
+        plans = []
+        for plan_data in plans_data:
+            plan_dict = dict(plan_data)
+            plan_id_str = str(plan_dict["id"])
+
+            if plan_id_str in timesale_map:
+                timesale_info = timesale_map[plan_id_str]
+                plan_dict["is_time_sale"] = True
+                plan_dict["sale_percentage"] = timesale_info.get("sale_percentage")
+            else:
+                plan_dict["is_time_sale"] = False
+                plan_dict["sale_percentage"] = None
+
+            plans.append(PlanResponse(**plan_dict))
 
         return PlanListResponse(plans=plans)
     except Exception as e:
-        logger.error("プラン取得エラーが発生しました", e)
+        logger.exception("プラン取得エラーが発生しました")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -309,6 +353,8 @@ def update_user_plan(
             update_data["type"] = plan_data.type
         if plan_data.welcome_message is not None:
             update_data["welcome_message"] = plan_data.welcome_message
+        if plan_data.open_dm_flg is not None:
+            update_data["open_dm_flg"] = plan_data.open_dm_flg
         if plan_data.price is not None:
             update_data["price"] = plan_data.price
 
@@ -323,11 +369,6 @@ def update_user_plan(
         db.refresh(updated_plan)
 
         # 投稿数と加入者数を取得
-        from app.models.plans import PostPlans
-        from app.models.posts import Posts
-        from app.constants.enums import PostStatus
-        from sqlalchemy import func
-
         post_count = (
             db.query(func.count(PostPlans.post_id))
             .join(Posts, PostPlans.post_id == Posts.id)
@@ -446,26 +487,45 @@ def get_posts_for_plan(
 def _update_plan_with_retry(db: Session, plan_id: UUID, update_data: dict) -> Plans:
     """プランを更新する（決済処理でロックがかかっている可能性があるので、ロックをかけてから更新し、リトライする）"""
     from datetime import datetime, timezone
-    
+
     for retry_count in range(10):
         try:
             # プランレコードに対してロックをかける
-            plan = db.query(Plans).filter(
-                Plans.id == plan_id,
-                Plans.deleted_at.is_(None)
-            ).with_for_update().first()
-            
+            plan = (
+                db.query(Plans)
+                .filter(Plans.id == plan_id, Plans.deleted_at.is_(None))
+                .with_for_update()
+                .first()
+            )
+
             if not plan:
                 raise HTTPException(status_code=404, detail="プランが見つかりません")
-            
+
+            # typeが2に設定される場合、同じクリエイターの他のプランのtypeを1に更新
+            if update_data.get("type") == PlanStatus.RECOMMENDED:
+                # 同じクリエイターの他のプラン（現在のプラン以外）のtypeを1に更新
+                other_plans = (
+                    db.query(Plans)
+                    .filter(
+                        Plans.creator_user_id == plan.creator_user_id,
+                        Plans.id != plan_id,
+                        Plans.deleted_at.is_(None)
+                    )
+                    .with_for_update()
+                    .all()
+                )
+                for other_plan in other_plans:
+                    other_plan.type = PlanStatus.NORMAL
+                    other_plan.updated_at = datetime.now(timezone.utc)
+
             # プランを更新
             for key, value in update_data.items():
                 if hasattr(plan, key) and value is not None:
                     setattr(plan, key, value)
-            
+
             plan.updated_at = datetime.now(timezone.utc)
             db.flush()  # 変更をフラッシュ
-            
+
             return plan
         except HTTPException:
             raise  # HTTPExceptionは再発生させる
@@ -477,3 +537,179 @@ def _update_plan_with_retry(db: Session, plan_id: UUID, update_data: dict) -> Pl
             else:
                 logger.error("プラン更新が10回失敗しました", e)
                 raise
+
+
+@router.get("/{plan_id}/plan-time-sale", response_model=PaginatedPlanTimeSaleResponse)
+def get_plan_time_sale(
+    plan_id: UUID,
+    page: int = 1,
+    limit: int = 20,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    プランの価格時間販売情報を取得
+    """
+    rows, total = get_plan_time_sale_by_plan_id(db, plan_id, page, limit)
+    total_pages = math.ceil((total - 1) / limit)
+    time_sales = []
+    for row in rows:
+        time_sales.append(
+            PlanTimeSaleResponse(
+                id=str(row.TimeSale.id),
+                post_id=str(row.TimeSale.post_id) if row.TimeSale.post_id else None,
+                plan_id=str(row.TimeSale.plan_id),
+                price_id=str(row.TimeSale.price_id) if row.TimeSale.price_id else None,
+                start_date=row.TimeSale.start_date if row.TimeSale.start_date else None,
+                end_date=row.TimeSale.end_date if row.TimeSale.end_date else None,
+                sale_percentage=row.TimeSale.sale_percentage,
+                max_purchase_count=row.TimeSale.max_purchase_count
+                if row.TimeSale.max_purchase_count
+                else None,
+                purchase_count=row.purchase_count,
+                is_active=row.is_active,
+                is_expired=row.is_expired,
+                created_at=row.TimeSale.created_at if row.TimeSale.created_at else None,
+            )
+        )
+    return PaginatedPlanTimeSaleResponse(
+        time_sales=time_sales,
+        total=total,
+        total_pages=total_pages,
+        page=page,
+        limit=limit,
+        has_next=page < total_pages,
+    )
+
+
+@router.get("/{plan_id}/timesale-edit-init", response_model=PlanTimeSaleEditInitResponse)
+def get_plan_timesale_edit_init(
+    plan_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    プランのタイムセール編集ページ初期化用のデータを取得
+    プラン詳細情報と現在のタイムセール情報を一度に返す
+    """
+    try:
+        # プラン詳細を取得
+        plan_detail = get_plan_detail(db, plan_id, current_user.id)
+        if not plan_detail:
+            raise HTTPException(status_code=404, detail="プランが見つかりません")
+
+        # タイムセール情報を取得（最新のものを1件）
+        rows, total = get_plan_time_sale_by_plan_id(db, plan_id, page=1, limit=1)
+
+        time_sale = None
+        if rows and len(rows) > 0:
+            row = rows[0]
+            time_sale = PlanTimeSaleResponse(
+                id=str(row.TimeSale.id),
+                post_id=str(row.TimeSale.post_id) if row.TimeSale.post_id else None,
+                plan_id=str(row.TimeSale.plan_id),
+                price_id=str(row.TimeSale.price_id) if row.TimeSale.price_id else None,
+                start_date=row.TimeSale.start_date if row.TimeSale.start_date else None,
+                end_date=row.TimeSale.end_date if row.TimeSale.end_date else None,
+                sale_percentage=row.TimeSale.sale_percentage,
+                max_purchase_count=row.TimeSale.max_purchase_count
+                if row.TimeSale.max_purchase_count
+                else None,
+                purchase_count=row.purchase_count,
+                is_active=row.is_active,
+                is_expired=row.is_expired,
+                created_at=row.TimeSale.created_at if row.TimeSale.created_at else None,
+            )
+
+        return PlanTimeSaleEditInitResponse(
+            plan=plan_detail,
+            time_sale=time_sale,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("タイムセール編集初期化データ取得エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timesale-edit/{time_sale_id}")
+def get_plan_timesale_edit_by_id(
+    time_sale_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    タイムセールIDからプランのタイムセール編集ページ初期化用のデータを取得
+    """
+    try:
+        # タイムセール情報を取得
+        row = get_plan_time_sale_by_id(db, time_sale_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="タイムセール情報が見つかりません")
+
+        time_sale_data = row
+        plan_id = time_sale_data.TimeSale.plan_id
+
+        # プラン詳細を取得
+        plan_detail = get_plan_detail(db, plan_id, current_user.id)
+        if not plan_detail:
+            raise HTTPException(status_code=404, detail="プランが見つかりません")
+
+        # タイムセール情報をResponse形式に変換
+        time_sale = PlanTimeSaleResponse(
+            id=str(time_sale_data.TimeSale.id),
+            post_id=str(time_sale_data.TimeSale.post_id) if time_sale_data.TimeSale.post_id else None,
+            plan_id=str(time_sale_data.TimeSale.plan_id),
+            price_id=str(time_sale_data.TimeSale.price_id) if time_sale_data.TimeSale.price_id else None,
+            start_date=time_sale_data.TimeSale.start_date if time_sale_data.TimeSale.start_date else None,
+            end_date=time_sale_data.TimeSale.end_date if time_sale_data.TimeSale.end_date else None,
+            sale_percentage=time_sale_data.TimeSale.sale_percentage,
+            max_purchase_count=time_sale_data.TimeSale.max_purchase_count
+            if time_sale_data.TimeSale.max_purchase_count
+            else None,
+            purchase_count=time_sale_data.purchase_count,
+            is_active=time_sale_data.is_active,
+            is_expired=time_sale_data.is_expired,
+            created_at=time_sale_data.TimeSale.created_at if time_sale_data.TimeSale.created_at else None,
+        )
+
+        return PlanTimeSaleEditInitResponse(
+            plan=plan_detail,
+            time_sale=time_sale,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("タイムセール編集データ取得エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{plan_id}/create-plan-time-sale")
+async def create_plan_time_sale(
+    plan_id: str,
+    payload: PlanTimeSaleCreateRequest,
+    db: Session = Depends(get_db),  
+    current_user: Users = Depends(get_current_user),
+):
+    """価格時間販売情報を作成する"""
+    if payload.start_date and payload.end_date:
+        if check_exists_plan_time_sale_in_period_by_plan_id(db, plan_id, payload.start_date, payload.end_date):
+            raise HTTPException(status_code=400, detail="Plan time sale already exists")
+    
+    time_sale = create_plan_time_sale_by_plan_id(db, plan_id, payload, current_user)
+    if not time_sale:
+        raise HTTPException(status_code=500, detail="Can not create price time sale")
+    return {"message": "ok"}
+
+@router.delete("/delete-plan-time-sale/{time_sale_id}")
+def delete_plan_time_sale(
+    time_sale_id: UUID,
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """価格時間販売情報を削除する"""
+    success = delete_plan_time_sale_by_id(db, time_sale_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Can not delete price time sale")
+
+    return {"message": "ok"}

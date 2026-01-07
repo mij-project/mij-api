@@ -23,6 +23,8 @@ from app.api.endpoints.customer import (
     account,
     auth_email_verify,
     conversations,
+    message_assets as customer_message_assets,
+    bulk_messages,
     order,
     sms_verifications,
     banners,
@@ -36,7 +38,8 @@ from app.api.endpoints.customer import (
     user_banks as customer_user_banks,
     subscriptions,
     user_provider,
-    advertising_agency_tracking
+    advertising_agency_tracking,
+    time_sale,
 )
 
 # Admin routes
@@ -57,6 +60,8 @@ from app.api.endpoints.admin import (
     subscriptions_info as admin_subscriptions_info,
     advertising_agencies as admin_advertising_agencies,
     user as admin_user,
+    message_assets as admin_message_assets,
+    search_history as admin_search_history,
 )
 
 # Debug routes
@@ -113,6 +118,12 @@ api_router.include_router(
 api_router.include_router(
     conversations.router, prefix="/conversations", tags=["Conversations"]
 )
+api_router.include_router(
+    customer_message_assets.router, prefix="/users/me/message-assets", tags=["Message Assets"]
+)
+api_router.include_router(
+    bulk_messages.router, prefix="/bulk-messages", tags=["Bulk Messages"]
+)
 api_router.include_router(order.router, prefix="/orders", tags=["Orders"])
 api_router.include_router(
     sms_verifications.router, prefix="/sms-verifications", tags=["SMS Verifications"]
@@ -138,9 +149,16 @@ api_router.include_router(
 api_router.include_router(
     customer_user_banks.router, prefix="/user-banks", tags=["User Banks"]
 )
-api_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
-api_router.include_router(user_provider.router, prefix="/user-provider", tags=["User Provider"])
-api_router.include_router(advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"])
+api_router.include_router(
+    subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"]
+)
+api_router.include_router(
+    user_provider.router, prefix="/user-provider", tags=["User Provider"]
+)
+api_router.include_router(
+    advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"]
+)
+api_router.include_router(time_sale.router, prefix="/time-sale", tags=["Time Sale"])
 
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])
@@ -200,6 +218,17 @@ api_router.include_router(
     admin_user.router,
     prefix="/admin/users",
     tags=["Admin Users"],
+)
+api_router.include_router(
+    admin_message_assets.router,
+    prefix="/admin/message-assets",
+    tags=["Admin Message Assets"],
+)
+
+api_router.include_router(
+    admin_search_history.router,
+    prefix="/admin/search-history",
+    tags=["Admin Search History"],
 )
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])
