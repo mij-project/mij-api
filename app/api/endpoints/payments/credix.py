@@ -81,8 +81,8 @@ async def create_credix_session(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
-            # if user_provider.cardbrand != "J":
-            #     raise HTTPException(status_code=402, detail="カードがJCBではありません。")
+            if user_provider.cardbrand != "J":
+                raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算
         money, order_id, transaction_type = _set_money(request, db)
@@ -378,8 +378,8 @@ async def create_chip_payment(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
-            # if user_provider.cardbrand != "J":
-            #     raise HTTPException(status_code=402, detail="カードがJCBではありません。")
+            if user_provider.cardbrand != "J":
+                raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算（手数料10%込み）
         money = math.floor(request.amount * 1.1)
