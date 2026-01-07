@@ -269,7 +269,7 @@ def __validate_withdrawal_application_request(
         return False
     if latest_withdrawal_application.created_at.replace(
         tzinfo=timezone.utc
-    ) + timedelta(days=1) < datetime.now(timezone.utc):
+    ) + timedelta(days=1) > datetime.now(timezone.utc):
         return False
     return True
 

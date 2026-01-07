@@ -27,7 +27,7 @@ def get_notifications_admin_paginated(db: Session, page: int = 1, limit: int = 2
     tuple[List[Notifications], int]: (通知リスト, 総件数)
   """
   skip = (page - 1) * limit
-  query = db.query(Notifications).filter(Notifications.type == NotificationType.ADMIN)
+  query = db.query(Notifications).filter(Notifications.type == NotificationType.ADMIN, Notifications.user_id.is_(None))
   if search:
     query = query.filter(
       Notifications.payload["title"].astext.ilike(f"%{search}%")
