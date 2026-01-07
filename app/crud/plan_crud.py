@@ -575,6 +575,7 @@ def request_plan_deletion(db: Session, plan_id: UUID) -> Optional[Plans]:
 
     plan.status = PlanLifecycleStatus.DELETE_REQUESTED
     plan.updated_at = datetime.now(timezone.utc)
+    plan.deleted_at = datetime.now(timezone.utc)
     db.flush()
     subscriptions = (
         db.query(Subscriptions)
