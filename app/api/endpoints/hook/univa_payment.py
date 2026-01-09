@@ -685,7 +685,7 @@ def _handle_chip_payment_notification_for_seller(
     notifications_crud.add_notification_for_selling_info(
         db=db,
         notification={
-            "user_id": UUID(recipient_user_id),
+            "user_id": payment.seller_user_id,
             "type": NotificationType.PAYMENTS,
             "payload": {
                 "title": title,
@@ -695,54 +695,6 @@ def _handle_chip_payment_notification_for_seller(
             },
         },
     )
-
-
-def _handle_chip_payment_failure_notification_for_buyer(
-    charge: ChargeFinishedPayload, db: Session
-) -> None:
-    """Handle chip payment failure notification for buyer event from Univapay"""
-    logger.info(f"Chip payment failure notification for buyer: {charge.data}")
-    
-    metadata = charge.data.get("metadata", {})
-    session_id = metadata.get("session_id")
-    result = _get_transaction_and_payment(db, session_id)
-    if not result:
-        return
-    
-    transaction, payment = result
-    
-    buyer_user = get_user_by_id(db, payment.buyer_user_id)
-    if not buyer_user:
-        logger.error(f"Buyer user not found: {payment.buyer_user_id}")
-        return
-    
-    payment_date = _format_datetime_jst(transaction.updated_at)
-    title = "チップの送信に失敗しました"
-
-    notifications_crud.add_notification_for_selling_info(
-        db=db,
-        notification={
-            "user_id": payment.buyer_user_id,
-            "type": NotificationType.USERS,
-            "payload": {
-                "title": title,
-                "subtitle": title,
-                "avatar": DEFAULT_AVATAR_URL,
-            },
-        },
-    )
-
-    try:
-        send_payment_faild_email(
-            to=buyer_user.email,
-            transaction_id=str(transaction.id),
-            failure_date=payment_date,
-            sendid=transaction.session_id,
-            user_name=buyer_user.profile_name,
-            user_email=buyer_user.email,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send chip payment failure notification for buyer: {e}")
 
 
 def _handle_single_payment_notification_for_buyer(
@@ -846,7 +798,7 @@ def _handle_single_payment_notification_for_seller(
         db=db,
         notification={
             "user_id": payment.seller_user_id,
-            "type": NotificationType.USERS,
+            "type": NotificationType.PAYMENTS,
             "payload": {
                 "title": title,
                 "subtitle": title,
@@ -868,55 +820,6 @@ def _handle_single_payment_notification_for_seller(
         )
     except Exception as e:
         logger.error(f"Failed to send single payment notification for seller: {e}")
-
-
-def _handle_single_payment_failure_notification_for_buyer(
-    charge: ChargeFinishedPayload, db: Session
-) -> None:
-    """Handle single payment failure notification for buyer event from Univapay"""
-    logger.info(f"Single payment failure notification for buyer: {charge.data}")
-    
-    metadata = charge.data.get("metadata", {})
-    session_id = metadata.get("session_id")
-    result = _get_transaction_and_payment(db, session_id)
-    if not result:
-        return
-    
-    transaction, payment = result
-    
-    seller_user = get_user_by_id(db, payment.seller_user_id)
-    if not seller_user:
-        logger.error(f"Seller user not found: {payment.seller_user_id}")
-        return
-    
-    payment_date = _format_datetime_jst(transaction.updated_at)
-    title = "商品の購入に失敗しました"
-
-    notifications_crud.add_notification_for_selling_info(
-        db=db,
-        notification={
-            "user_id": payment.seller_user_id,
-            "type": NotificationType.USERS,
-            "payload": {
-                "title": title,
-                "subtitle": title,
-                "avatar": DEFAULT_AVATAR_URL,
-            },
-        },
-    )
-
-    try:
-        send_payment_faild_email(
-            to=seller_user.email,
-            transaction_id=str(transaction.id),
-            failure_date=payment_date,
-            sendid=transaction.session_id,
-            user_name=seller_user.profile_name,
-            user_email=seller_user.email,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send single payment failure notification for buyer: {e}")
-
 
 # ==================== データベース操作ヘルパー ====================
 
