@@ -49,7 +49,11 @@
           </tr>
           <tr>
             <td style="padding:8px 0;color:#6b7280;font-size:14px;vertical-align:top;">決済種別:</td>
-            <td style="padding:8px 0;color:#111827;font-size:14px;">クレジットカード</td>
+            {% if payment_type == "bank_payment" %}
+              <td style="padding:8px 0;color:#111827;font-size:14px;">銀行振込</td>
+            {% else %}
+              <td style="padding:8px 0;color:#111827;font-size:14px;">クレジットカード</td>
+            {% endif %}
           </tr>
         </table>
       </div>
@@ -85,11 +89,13 @@
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
 
       <!-- 請求名の説明 -->
-      <div style="background-color:#fef3c7;border-left:4px solid #f59e0b;padding:15px;margin:20px 0;border-radius:4px;">
-        <p style="color:#92400e;margin:0;font-size:14px;">
-          <strong>ご注意:</strong> 請求名は「mijfans」「P.V*MGN」等で表記されます。
-        </p>
-      </div>
+      {% if payment_type != "bank_payment" %}
+        <div style="background-color:#fef3c7;border-left:4px solid #f59e0b;padding:15px;margin:20px 0;border-radius:4px;">
+          <p style="color:#92400e;margin:0;font-size:14px;">
+            <strong>ご注意:</strong> 請求名は「mijfans」「P.V*MGN」等で表記されます。
+          </p>
+        </div>
+      {% endif %}
 
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
 
