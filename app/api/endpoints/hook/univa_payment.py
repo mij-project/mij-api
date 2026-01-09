@@ -425,7 +425,7 @@ def _handle_chip_payment_success(charge: ChargeFinishedPayload, db: Session) -> 
         PaymentStatus.SUCCEEDED,
         payment_amount,
         payment_price,
-        paid_at=None,
+        paid_at=datetime.now(timezone.utc),
     )
 
     _update_transaction_status(db, transaction.id, PaymentTransactionStatus.COMPLETED)
