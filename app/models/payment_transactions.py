@@ -27,6 +27,7 @@ class PaymentTransactions(Base):
     session_id: Mapped[str] = mapped_column(String(255), nullable=True, comment="credixから発行されたセッションID")
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    payment_due_date: Mapped[datetime] = mapped_column(nullable=True, comment="決済期限日時")
 
     # Relationships
     user: Mapped["Users"] = relationship("Users", foreign_keys=[user_id], back_populates="user_transactions")

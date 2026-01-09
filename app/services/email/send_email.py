@@ -400,6 +400,7 @@ def send_payment_succuces_email(
     user_name: str | None = None,
     user_email: str | None = None,
     purchase_history_url: str | None = None,
+    payment_type: str | None = None,
 ) -> None:
     """決済完了メール"""
     if not getattr(settings, "EMAIL_ENABLED", True):
@@ -415,6 +416,7 @@ def send_payment_succuces_email(
         "user_name": user_name,
         "user_email": user_email,
         "purchase_history_url": purchase_history_url or "",
+        "payment_type": payment_type or "",
     }
     send_templated_email(
         to=to,
@@ -586,6 +588,7 @@ def send_chip_payment_buyer_success_email(
     transaction_id: str | None = None,
     payment_amount: int | None = None,
     payment_date: str | None = None,
+    payment_type: str | None = None,
 ) -> None:
     """チップ送信完了メール（購入者用）"""
     if not getattr(settings, "EMAIL_ENABLED", True):
@@ -597,6 +600,7 @@ def send_chip_payment_buyer_success_email(
         "transaction_id": transaction_id or "",
         "payment_amount": payment_amount or 0,
         "payment_date": payment_date or "",
+        "payment_type": payment_type or "",
     }
     send_templated_email(
         to=to,

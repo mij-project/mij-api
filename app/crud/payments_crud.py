@@ -2,11 +2,12 @@
 Payments CRUD操作
 """
 from uuid import UUID
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.payments import Payments
 from datetime import datetime, timezone
 from app.constants.enums import PaymentType, PaymentStatus
-from typing import List
+from typing import List, Optional
 from sqlalchemy import func
 
 def create_payment(
@@ -23,23 +24,29 @@ def create_payment(
     payment_price: int,
     status: int = 2,  # 2=succeeded
     platform_fee: int = 0, # プラットフォーム手数料
+    paid_at: Optional[datetime] = datetime.now(timezone.utc),  # Noneの場合は設定しない
 ) -> Payments:
     """決済履歴作成"""
-    payment = Payments(
-        transaction_id=transaction_id,
-        payment_type=payment_type,
-        order_id=order_id,
-        order_type=order_type,
-        provider_id=provider_id,
-        provider_payment_id=provider_payment_id,
-        buyer_user_id=buyer_user_id,
-        seller_user_id=seller_user_id,
-        payment_amount=payment_amount,
-        payment_price=payment_price,
-        status=status,
-        paid_at=datetime.now(timezone.utc),
-        platform_fee=platform_fee,
-    )
+    payment_data = {
+        "transaction_id": transaction_id,
+        "payment_type": payment_type,
+        "order_id": order_id,
+        "order_type": order_type,
+        "provider_id": provider_id,
+        "provider_payment_id": provider_payment_id,
+        "buyer_user_id": buyer_user_id,
+        "seller_user_id": seller_user_id,
+        "payment_amount": payment_amount,
+        "payment_price": payment_price,
+        "status": status,
+        "platform_fee": platform_fee,
+    }
+    
+    # paid_atがNoneでない場合のみ設定
+    if paid_at is not None:
+        payment_data["paid_at"] = paid_at
+    
+    payment = Payments(**payment_data)
     db.add(payment)
     db.commit()
     db.refresh(payment)
@@ -122,3 +129,34 @@ def get_top_buyers_by_user_id(
     if len(top_buyers_results) < 3:
         return []
     return top_buyers_results
+
+def update_payment_status_by_transaction_id(
+    db: Session,
+    transaction_id: UUID,
+    status: int,
+    payment_amount: int,
+    payment_price: int,
+    paid_at: datetime,
+) -> Payments:
+    """
+    Update payment status
+    """
+    payment = db.query(Payments).filter(Payments.transaction_id == transaction_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    payment.status = status
+    payment.payment_amount = payment_amount
+    payment.payment_price = payment_price
+    payment.paid_at = paid_at
+    db.commit()
+    db.refresh(payment)
+    return payment
+
+def get_payment_by_session_id(
+    db: Session,
+    transaction_id: UUID,
+) -> Payments:
+    """
+    Get payment by session id
+    """
+    return db.query(Payments).filter(Payments.transaction_id == transaction_id).first()

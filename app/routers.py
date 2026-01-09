@@ -72,6 +72,7 @@ from app.api.endpoints.debug import debug_email
 from app.api.endpoints.hook.media_convert import router as media_convert_hook
 from app.api.endpoints.hook.conversations import router as conversations_hook
 from app.api.endpoints.hook.payment import router as payment_hook
+from app.api.endpoints.hook.univa_payment import router as univa_payment_hook
 
 # Payment routes
 from app.api.endpoints.payments import credix
@@ -84,6 +85,7 @@ api_router.include_router(
     conversations_hook, prefix="/ws", tags=["WebSocket Conversations"]
 )
 api_router.include_router(payment_hook, prefix="/webhook", tags=["Payment"])
+api_router.include_router(univa_payment_hook, prefix="/webhook/univa", tags=["Univa Payment"])
 
 
 api_router.include_router(videos.router, prefix="/videos", tags=["Videos"])

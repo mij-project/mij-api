@@ -6,6 +6,7 @@ from app.crud.time_sale_crud import (
     create_price_time_sale_by_post_id,
     delete_price_time_sale_by_id,
     get_price_time_sale_by_post_id,
+    get_active_price_timesale,
 )
 from app.db.base import get_db
 from app.deps.auth import get_current_user, get_current_user_optional
@@ -328,6 +329,14 @@ async def get_post_ogp_image(post_id: str, db: Session = Depends(get_db)):
         logger.error("OGP画像URL取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/{post_id}/time-sale/{price_id}")
+async def get_post_time_sale(post_id: str, price_id: str, db: Session = Depends(get_db)):
+    """投稿のタイムセール情報を取得する"""
+    time_sale = get_active_price_timesale(db, post_id, price_id)
+    if not time_sale:
+        return False
+    return time_sale["is_active"]
 
 # utils
 def _determine_visibility(single: bool, plan: bool) -> int:
