@@ -221,7 +221,7 @@ async def get_post_detail(
         )
 
         # salesinfoにprice_idがある場合、振込待ちかの判定
-        # is_pending_payment = False
+        is_pending_payment = False
         # if post_data["price"].id:
         #     is_pending_payment = bool(get_payment_status_by_price_id(db, str(post_data["price"].id)))
 
