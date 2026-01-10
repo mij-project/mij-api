@@ -7,6 +7,8 @@ from app.crud.admin_reports_curd import (
     get_credix_payment_transactions_period_report,
     get_revenue_period_report,
     get_untransferred_withdraws_period_report,
+    get_payment_provider_revenue_period_report,
+    get_payment_provider_revenue_last_month_report,
 )
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
@@ -238,3 +240,45 @@ async def get_credix_income_report(
         "previous_month": prev_month,
         "total_income": total_income,
     }
+
+
+@router.get("/provider-revenue")
+async def get_provider_revenue_report(
+    provider_code: str,
+    start_date: str,
+    end_date: str,
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user),
+):
+    logger.info(f"Getting provider revenue reports for admin: {current_admin.id}, provider: {provider_code}")
+    start_date_dt = datetime.combine(
+        datetime.strptime(start_date, "%Y-%m-%d"), time.min, tzinfo=timezone.utc
+    ) - timedelta(hours=9)
+    end_date_dt = datetime.combine(
+        datetime.strptime(end_date, "%Y-%m-%d"), time.max, tzinfo=timezone.utc
+    ) - timedelta(hours=9)
+    provider_revenue_report = get_payment_provider_revenue_period_report(
+        db, provider_code, start_date_dt, end_date_dt
+    )
+    if provider_revenue_report is None:
+        raise HTTPException(
+            status_code=500, detail="Error getting provider revenue report"
+        )
+    return provider_revenue_report
+
+
+@router.get("/provider-revenue-last-month")
+async def get_provider_revenue_last_month_report(
+    provider_code: str,
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user),
+):
+    logger.info(f"Getting provider revenue last month report for admin: {current_admin.id}, provider: {provider_code}")
+    provider_revenue_report = get_payment_provider_revenue_last_month_report(
+        db, provider_code
+    )
+    if provider_revenue_report is None:
+        raise HTTPException(
+            status_code=500, detail="Error getting provider revenue last month report"
+        )
+    return provider_revenue_report

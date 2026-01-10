@@ -257,6 +257,7 @@ def _create_payment_record(
         payment_price=payment_price,
         status=status,
         platform_fee=platform_fee,
+        paid_at=datetime.now(timezone.utc),
     )
 
 
@@ -1188,6 +1189,7 @@ def _handle_chip_payment_success(
         payment_price=chip_amount,
         status=PaymentStatus.SUCCEEDED,
         platform_fee=creator_info.platform_fee_percent,
+        paid_at=datetime.now(timezone.utc),
     )
 
     _update_or_create_user_provider(
@@ -1276,6 +1278,7 @@ def _handle_chip_payment_failure(
         payment_price=chip_amount,
         status=PaymentStatus.FAILED,
         platform_fee=creator_info.platform_fee_percent,
+        paid_at=datetime.now(timezone.utc),
     )
 
     logger.info(f"Chip payment failure processed: transaction_id={transaction.id}")
