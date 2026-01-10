@@ -160,3 +160,18 @@ def get_payment_by_session_id(
     Get payment by session id
     """
     return db.query(Payments).filter(Payments.transaction_id == transaction_id).first()
+
+def get_payment_status_by_price_id(
+    db: Session,
+    price_id: str,
+) -> Optional[Payments]:
+    """
+    Get payment status by price id
+    """
+    return (
+        db.query(Payments)
+        .filter(Payments.order_id == price_id)
+        .filter(Payments.payment_type == PaymentType.SINGLE)
+        .filter(Payments.status == PaymentStatus.PENDING)
+        .first()
+    )
