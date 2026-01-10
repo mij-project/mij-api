@@ -8,6 +8,7 @@ from app.crud.time_sale_crud import (
     get_price_time_sale_by_post_id,
     get_active_price_timesale,
 )
+from app.crud.payments_crud import get_payment_status_by_price_id
 from app.db.base import get_db
 from app.deps.auth import get_current_user, get_current_user_optional
 from app.constants.enums import PostStatus
@@ -219,6 +220,11 @@ async def get_post_detail(
             post_data["price"], post_data["plans"], post_data["plan_timesale_map"]
         )
 
+        # salesinfoにprice_idがある場合、振込待ちかの判定
+        is_pending_payment = False
+        if post_data["price"].id:
+            is_pending_payment = bool(get_payment_status_by_price_id(db, str(post_data["price"].id)))
+
         # Schedule and Expiration Information
         schedule_info, expiration_info = (
             post_data["post"].scheduled_at,
@@ -248,6 +254,7 @@ async def get_post_detail(
             or is_own_post,  # 購入済み or 自分の投稿
             "is_scheduled": is_scheduled,
             "is_expired": is_expired,
+            "is_pending_payment": is_pending_payment,
         }
 
         return post_detail
