@@ -15,3 +15,5 @@ MAIL_FROM="no-reply@mijfans.jp"
 MAIL_FROM_NAME="mijfans"
 AWS_REGION="ap-northeast-1"
 SES_CONFIGURATION_SET=os.environ.get("SES_CONFIGURATION_SET", "stg-outbound") 
+FRONTEND_URL=os.environ.get("FRONTEND_URL", "http://localhost:3002")
+VAPID_PRIVATE_KEY=os.environ.get("VAPID_PRIVATE_KEY", "")

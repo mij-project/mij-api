@@ -6,8 +6,8 @@ from app.crud.payments_crud import create_free_payment
 from app.crud.plan_crud import get_plan_by_id
 from app.crud.price_crud import get_price_and_post_by_id
 from app.crud.user_crud import get_user_by_id
-from app.crud.notifications_crud import add_notification_for_cancel_subscription, add_notification_for_selling_info
-from app.services.email.send_email import send_cancel_subscription_email, send_selling_info_email
+from app.crud.notifications_crud import add_notification_for_cancel_subscription
+from app.services.email.send_email import send_cancel_subscription_email
 from app.core.logger import Logger
 from app.deps.auth import get_current_user
 from app.models.user import Users
