@@ -47,11 +47,13 @@ origins = [
     # ステージング
     "https://stg.mijfans.jp",
     "https://stg-admin.mijfans.jp",
+    "https://staging.d3gdh8lor8j9n7.amplifyapp.com",
 
     # 本番環境用
     "https://mijfans.jp",
     "https://admin.mijfans.jp",
-    "https://prd-admin.linkle.group"
+    "https://prd-admin.linkle.group",
+    "https://production.d3gdh8lor8j9n7.amplifyapp.com"
 ]
 
 app.add_middleware(
