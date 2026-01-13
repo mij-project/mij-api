@@ -25,6 +25,7 @@ from app.constants.enums import (
     PostStatus,
     MediaAssetKind,
     MediaAssetStatus,
+    PaymentType,
 )
 from app.crud.user_crud import check_super_user
 from app.schemas.notification import NotificationType
@@ -948,11 +949,16 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
 
 
 # ========== トップページ用 ==========
-
-
 def get_ranking_posts(db: Session, limit: int = 5):
     """
-    トップページ用の投稿を取得
+    トップページ用の投稿を取得（ランキング順）
+
+    ランキング基準（優先度順）：
+    1. 購入数（500円以上のコンテンツのみカウント）
+    2. クリエイターのフォロワー数
+    3. クリエイターの登録日（古い順）
+
+    制限：クリエイター1人あたり最大2投稿
     """
     now = func.now()
     active_post_cond = and_(
@@ -962,12 +968,53 @@ def get_ranking_posts(db: Session, limit: int = 5):
         or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
     )
 
-    posts = (
+    # 1) 購入数を集計（500円以上の成功決済のみ）
+    purchase_count_sq = (
+        db.query(
+            Payments.order_id.label("price_id"),
+            func.count(Payments.id).label("purchase_count"),
+        )
+        .filter(Payments.status == PaymentStatus.SUCCEEDED)
+        .filter(Payments.payment_price >= 500)
+        .filter(Payments.order_type == PaymentType.SINGLE)
+        .group_by(Payments.order_id)
+        .subquery()
+    )
+
+    # 2) フォロワー数を集計
+    follower_count_sq = (
+        db.query(
+            Follows.creator_user_id.label("creator_id"),
+            func.count(Follows.follower_user_id).label("follower_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery()
+    )
+
+    # 3) 投稿の価格情報を取得（500円以上のみ）
+    price_sq = (
+        db.query(
+            Prices.post_id,
+            func.coalesce(purchase_count_sq.c.purchase_count, 0).label("purchase_count"),
+        )
+        .outerjoin(
+            purchase_count_sq,
+            Prices.id == cast(purchase_count_sq.c.price_id, PG_UUID(as_uuid=True)),
+        )
+        .filter(Prices.price >= 500)
+        .filter(Prices.is_active == True)
+        .subquery()
+    )
+
+    # 4) メインクエリ：投稿情報 + 購入数 + フォロワー数
+    base_query = (
         db.query(
             Posts,
-            func.count(Likes.post_id).label("likes_count"),
+            func.coalesce(price_sq.c.purchase_count, 0).label("purchase_count"),
+            func.coalesce(follower_count_sq.c.follower_count, 0).label("follower_count"),
             Users.profile_name,
             Users.offical_flg,
+            Users.created_at.label("creator_created_at"),
             Profiles.username,
             Profiles.avatar_url,
             MediaAssets.storage_key.label("thumbnail_key"),
@@ -975,6 +1022,14 @@ def get_ranking_posts(db: Session, limit: int = 5):
         )
         .join(Users, Posts.creator_user_id == Users.id)
         .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            price_sq,
+            Posts.id == price_sq.c.post_id,
+        )
+        .outerjoin(
+            follower_count_sq,
+            Users.id == follower_count_sq.c.creator_id,
+        )
         .outerjoin(
             MediaAssets,
             (Posts.id == MediaAssets.post_id)
@@ -985,23 +1040,74 @@ def get_ranking_posts(db: Session, limit: int = 5):
             (Posts.id == VideoAssets.post_id)
             & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
         )
-        .outerjoin(Likes, Posts.id == Likes.post_id)
-        .filter(Posts.status == PostStatus.APPROVED)  # 公開済みの投稿のみ
-        .filter(Posts.deleted_at.is_(None))  # 削除されていない投稿のみ
         .filter(active_post_cond)
-        .group_by(
-            Posts.id,
+        .subquery()
+    )
+
+    # 5) ウィンドウ関数でクリエイター別にランク付け
+    ranked_query = (
+        db.query(
+            base_query.c.id.label("post_id"),
+            func.row_number()
+            .over(
+                partition_by=base_query.c.creator_user_id,
+                order_by=[
+                    desc(base_query.c.purchase_count),
+                    desc(base_query.c.follower_count),
+                    base_query.c.creator_created_at,
+                ],
+            )
+            .label("creator_post_rank"),
+        )
+        .subquery()
+    )
+
+    # 6) 最終クエリ：クリエイター1人最大2投稿に制限してPostsオブジェクトを取得
+    posts = (
+        db.query(
+            Posts,
+            func.coalesce(price_sq.c.purchase_count, 0).label("purchase_count"),
+            func.coalesce(follower_count_sq.c.follower_count, 0).label("follower_count"),
             Users.profile_name,
             Users.offical_flg,
+            Users.created_at.label("creator_created_at"),
             Profiles.username,
             Profiles.avatar_url,
-            MediaAssets.storage_key,
-            VideoAssets.duration_sec,
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
         )
-        .order_by(desc("likes_count"))
+        .join(ranked_query, Posts.id == ranked_query.c.post_id)
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(
+            price_sq,
+            Posts.id == price_sq.c.post_id,
+        )
+        .outerjoin(
+            follower_count_sq,
+            Users.id == follower_count_sq.c.creator_id,
+        )
+        .outerjoin(
+            MediaAssets,
+            (Posts.id == MediaAssets.post_id)
+            & (MediaAssets.kind == MediaAssetKind.THUMBNAIL),
+        )
+        .outerjoin(
+            VideoAssets,
+            (Posts.id == VideoAssets.post_id)
+            & (VideoAssets.kind == MediaAssetKind.MAIN_VIDEO),
+        )
+        .filter(ranked_query.c.creator_post_rank <= 1)
+        .filter(active_post_cond)
+        .order_by(
+            desc(func.coalesce(price_sq.c.purchase_count, 0)),
+            desc(func.coalesce(follower_count_sq.c.follower_count, 0)),
+            Users.created_at,
+        )
         .limit(limit)
         .all()
     )
+
     post_ids = [row[0].id for row in posts]
     post_sale_map = get_post_sale_flag_map(db, post_ids)
     for row in posts:

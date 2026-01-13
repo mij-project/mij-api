@@ -47,7 +47,7 @@ def get_top_page_data(
                 post_type=p.Posts.post_type,
                 title=p.Posts.description,
                 thumbnail=f"{BASE_URL}/{p.thumbnail_key}" if p.thumbnail_key else None,
-                likes=p.likes_count,
+                likes=None,
                 duration=get_video_duration(p.duration_sec) if p.Posts.post_type == PostType.VIDEO and p.duration_sec else ("画像" if p.Posts.post_type == PostType.IMAGE else ""),
                 rank=idx + 1,
                 creator=PostCreatorResponse(

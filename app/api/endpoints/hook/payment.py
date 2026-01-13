@@ -25,6 +25,7 @@ from app.crud import (
     notifications_crud,
     conversations_crud,
     profile_crud,
+    followes_crud,
 )
 from app.constants.enums import (
     PaymentTransactionStatus,
@@ -443,6 +444,15 @@ def _handle_successful_payment(
             seller_user_id=seller_user_id,
             payment_id=payment.id,
         )
+
+        # プランの場合、購入者を販売者をフォロー
+        if transaction.type == PaymentTransactionType.SUBSCRIPTION:
+            #　フォロー中かの判定
+            is_following = followes_crud.is_following(db, transaction.user_id, seller_user_id)
+            if not is_following:
+                # 購入者を販売者をフォロー
+                followes_crud.toggle_follow(db, transaction.user_id, seller_user_id)
+           
 
         logger.info(f"Payment created: {payment.id}")
         logger.info(f"Subscription created: {subscription.id}")

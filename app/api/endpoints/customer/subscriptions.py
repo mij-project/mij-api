@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.base import get_db
+from app.crud.followes_crud import toggle_follow, is_following
 from app.crud.subscriptions_crud import cancel_subscription, create_free_subscription
 from app.crud.payments_crud import create_free_payment
 from app.crud.plan_crud import get_plan_by_id
@@ -129,6 +130,13 @@ def create_free_subscription_endpoint(
             payment_type = PaymentType.PLAN
             content_name = plan.name
             content_url = f"{FRONTEND_URL}/plan/{plan.id}"
+
+            # 購入者を販売者をフォロー
+            # フォロー中かの判定
+            is_following_user = is_following(db, current_user.id, seller_user_id)
+            if not is_following_user:
+                # フォロー
+                toggle_follow(db, current_user.id, seller_user_id)
         else:
             # 単品購入の場合
             price, post, creator = get_price_and_post_by_id(db, UUID(request_data.order_id))

@@ -20,7 +20,7 @@ class RankingPostResponse(BaseModel):
     post_type: int
     title: str
     thumbnail: Optional[str] = None
-    likes: int
+    likes: Optional[int] = None
     duration: Optional[str] = None
     rank: int
     creator: PostCreatorResponse
