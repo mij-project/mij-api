@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import os
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from app.crud.push_noti_crud import push_notification_to_user
 from app.models import Notifications, Profiles, UserSettings, Users
 from app.models.social import Likes
 from app.models.posts import Posts
@@ -173,6 +174,12 @@ def add_notification_like(db: Session, user_id: UUID, post_id: UUID) -> None:
         )
         db.add(notification)
         db.commit()
+        payload_push_noti = {
+            "title": notification.payload["title"],
+            "body": notification.payload["subtitle"],
+            "url": f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}{notification.payload['redirect_url']}",
+        }
+        push_notification_to_user(db, notification.user_id, payload_push_noti)
     except Exception as e:
         db.rollback()
         logger.error(f"Add notification like error: {e}")

@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
 import os
+import json
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session, aliased
 from models.posts import Posts
 from common.db_session import get_db
@@ -11,6 +12,9 @@ from models.profiles import Profiles
 from models.user import Users
 from models.user_settings import UserSettings
 from models.notifications import Notifications
+from models.push_notifications import PushNotifications
+from pywebpush import webpush, WebPushException
+
 
 class NewPostArrivalDomain:
     def __init__(self, logger: Logger):
@@ -62,7 +66,9 @@ class NewPostArrivalDomain:
             if not post:
                 self.logger.error(f"Post not found: {self.post_id}")
                 return
-            if post.scheduled_at and post.scheduled_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+            if post.scheduled_at and post.scheduled_at.replace(
+                tzinfo=timezone.utc
+            ) > datetime.now(timezone.utc):
                 self.logger.error(f"Post is scheduled: {self.post_id}")
                 return
             should_send = True
@@ -73,6 +79,7 @@ class NewPostArrivalDomain:
             if should_send:
                 self._send_email_notification(follower)
                 self._insert_notification(follower)
+                self._send_push_notification(follower)
         except Exception as e:
             self.logger.exception(
                 f"Error sending notification to follower {follower.follower_username}: {e}"
@@ -111,3 +118,44 @@ class NewPostArrivalDomain:
         self.db.add(notification)
         self.db.commit()
         return
+
+    def _push_notification_to_user(self, follower: Follows) -> None:
+        try:
+            title = f"{follower.creator_username} が新しく投稿しました。"
+            body = f"{follower.creator_username} が新しく投稿しました。"
+            url = f"{os.environ.get('FRONTEND_URL', 'http://localhost:3002')}/post/detail?post_id={self.post_id}"
+            push_notifications = (
+                self.db.query(PushNotifications)
+                .filter(PushNotifications.user_id == follower.Follows.follower_user_id)
+                .filter(PushNotifications.is_active.is_(True))
+                .all()
+            )
+            for push_notification in push_notifications:
+                try:
+                    sub = {
+                        "endpoint": push_notification.endpoint,
+                        "keys": {
+                            "p256dh": push_notification.p256dh,
+                            "auth": push_notification.auth,
+                        },
+                    }
+                    webpush(
+                        subscription_info=sub,
+                        data=json.dumps(
+                            {
+                                "title": title,
+                                "body": body,
+                                "url": url,
+                            }
+                        ),
+                        vapid_private_key=os.environ.get("VAPID_PRIVATE_KEY"),
+                        vapid_claims={
+                            "sub": "mailto:support@mijfans.jp",
+                        },
+                    )
+                except WebPushException as e:
+                    self.logger.error(f"Error pushing notification to user: {e}")
+                    continue
+        except Exception as e:
+            self.logger.error(f"Error pushing notification to user: {e}")
+            return
