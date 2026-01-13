@@ -6,3 +6,4 @@ slack_sdk
 requests
 jinja2
 tenacity
+pywebpush

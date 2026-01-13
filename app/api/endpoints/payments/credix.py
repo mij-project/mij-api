@@ -31,8 +31,9 @@ from app.constants.enums import PaymentTransactionType, TransactionType, Convers
 from app.core.logger import Logger
 import os
 import math
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://mijfans.jp")
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://mijfans.jp")
+ENV = os.getenv("ENV", "dev")
 logger = Logger.get_logger()
 router = APIRouter(prefix="/credix", tags=["CREDIX決済"])
 
@@ -81,7 +82,7 @@ async def create_credix_session(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
-            if user_provider.cardbrand != "J":
+            if user_provider.cardbrand != "J" and ENV == "prd":
                 raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算
@@ -378,7 +379,7 @@ async def create_chip_payment(
             sendid = generate_sendid(length=20)
         else:
             sendid = user_provider.sendid
-            if user_provider.cardbrand != "J":
+            if user_provider.cardbrand != "J" and ENV == "prd":
                 raise HTTPException(status_code=402, detail="カードがJCBではありません。")
 
         # 決済金額計算（手数料10%込み）

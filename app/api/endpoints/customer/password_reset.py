@@ -17,7 +17,6 @@ from app.crud.password_reset_crud import (
 )
 from app.services.email.send_email import send_password_reset_email
 from app.core.security import hash_password
-from app.core.config import settings
 import os
 from app.core.logger import Logger
 

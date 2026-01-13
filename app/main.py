@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.migrations import run_migrations
 from app.middlewares.csrf import CSRFMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from app.db.migrations import run_migrations
 from app.core.logger import Logger
 logger = Logger.get_logger()
 # ========================
