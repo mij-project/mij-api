@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import math
 from typing import Optional
 
@@ -753,4 +753,146 @@ def get_credix_income_period_report(
         }
     except Exception as e:
         logger.error(f"Error getting credix income report: {e}")
+        return None
+
+
+def get_payment_provider_revenue_period_report(
+    db: Session,
+    provider_code: str,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> Optional[dict]:
+    """Get payment revenue for a specific provider in a period"""
+    try:
+        payment_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+        ]
+
+        if start_date is not None:
+            payment_conditions.append(
+                Payments.paid_at >= start_date.replace(tzinfo=None)
+            )
+        if end_date is not None:
+            payment_conditions.append(
+                Payments.paid_at <= end_date.replace(tzinfo=None)
+            )
+
+        stmt = (
+            select(
+                func.coalesce(
+                    func.sum(Payments.payment_amount),
+                    0,
+                ).label("total_amount"),
+                func.coalesce(
+                    func.count(Payments.id),
+                    0,
+                ).label("transaction_count"),
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == provider_code,
+                *payment_conditions,
+            )
+        )
+
+        row = db.execute(stmt).one()
+
+        return {
+            "total_amount": row.total_amount or 0,
+            "transaction_count": row.transaction_count or 0,
+        }
+    except Exception as e:
+        logger.error(f"Error getting payment provider revenue report: {e}")
+        return None
+
+
+def get_payment_provider_revenue_last_month_report(
+    db: Session,
+    provider_code: str,
+) -> Optional[dict]:
+    """Get payment revenue for a specific provider for previous month with fee deduction"""
+    try:
+        now_utc = datetime.now(timezone.utc)
+
+        # Calculate previous month
+        if now_utc.month == 1:
+            prev_year = now_utc.year - 1
+            prev_month = 12
+        else:
+            prev_year = now_utc.year
+            prev_month = now_utc.month - 1
+
+        # Start of previous month (JST 00:00)
+        start_date = datetime(
+            prev_year, prev_month, 1, 0, 0, 0, 0, tzinfo=timezone.utc
+        ) - timedelta(hours=9)
+
+        # Start of current month (JST 00:00)
+        start_date_of_current_month = datetime(
+            now_utc.year, now_utc.month, 1, 0, 0, 0, 0, tzinfo=timezone.utc
+        ) - timedelta(hours=9)
+        end_date = start_date_of_current_month - timedelta(microseconds=1)
+
+        # Get provider with settings using LEFT JOIN to handle no data case
+        stmt = (
+            select(
+                func.coalesce(
+                    func.sum(Payments.payment_amount),
+                    0,
+                ).label("total_amount"),
+                func.coalesce(
+                    func.count(Payments.id),
+                    0,
+                ).label("transaction_count"),
+                Providers.settings.label("provider_settings"),
+            )
+            .select_from(Providers)
+            .outerjoin(
+                Payments,
+                (Payments.provider_id == Providers.id)
+                & (Payments.status == PaymentStatus.SUCCEEDED)
+                & (Payments.payment_price > 0)
+                & (Payments.paid_at >= start_date.replace(tzinfo=None))
+                & (Payments.paid_at <= end_date.replace(tzinfo=None)),
+            )
+            .where(Providers.code == provider_code)
+            .group_by(Providers.id, Providers.settings)
+        )
+
+        row = db.execute(stmt).one_or_none()
+
+        if row is None:
+            # No provider found
+            return {
+                "total_amount": 0,
+                "net_amount": 0,
+                "total_fee": 0,
+                "transaction_count": 0,
+                "previous_month": prev_month,
+                "fee_percent": 0,
+            }
+
+        total_amount = int(row.total_amount or 0)
+        transaction_count = int(row.transaction_count or 0)
+        provider_settings = row.provider_settings or {}
+
+        # Calculate fee and net amount
+        fee_percent = float(provider_settings.get("fee", 0))
+        tx_success_fee = float(provider_settings.get("tx_successs_fee", 0))
+
+        total_fee = math.ceil(total_amount * fee_percent / 100) + int(transaction_count * tx_success_fee)
+        net_amount = max(total_amount - total_fee, 0)
+
+        return {
+            "total_amount": total_amount,
+            "net_amount": net_amount,
+            "total_fee": total_fee,
+            "transaction_count": transaction_count,
+            "previous_month": prev_month,
+            "fee_percent": fee_percent,
+        }
+    except Exception as e:
+        logger.error(f"Error getting payment provider revenue last month report: {e}")
         return None

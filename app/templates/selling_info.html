@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {% if contents_type == 2 %}
-      <title>{{ buyer_name }}さんが{{ contents_name }}に加入しました。</title>
+      <title>{{ buyer_name }}さんがプランに加入しました。</title>
     {% else %}
       <title>{{ buyer_name }}さんが{{ contents_name }}を購入しました。</title>
     {% endif %}
@@ -13,9 +13,9 @@
     <div style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
       <!-- ヘッダー -->
       {% if contents_type == 2 %}
-      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんが{{ contents_name }}プランに加入しました</h2>
+      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんがプランに加入しました</h2>
       {% else %}
-      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんが{{ contents_name }}を購入しました</h2>
+      <h2 style="color:#111827;margin-bottom:20px;font-size:24px;">{{ buyer_name }}さんがコンテンツを購入しました</h2>
       {% endif %}
 
       <p style="color:#374151;line-height:1.6;margin-bottom:20px;">

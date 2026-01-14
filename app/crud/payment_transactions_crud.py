@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.models.payment_transactions import PaymentTransactions
 from datetime import datetime
+from typing import Optional
 
 
 def create_payment_transaction(
@@ -15,6 +16,7 @@ def create_payment_transaction(
     transaction_type: int,  # 1=single, 2=plan
     session_id: str,
     order_id: str,
+    payment_due_date: Optional[datetime] = None,
 ) -> PaymentTransactions:
     """決済トランザクション作成"""
     transaction = PaymentTransactions(
@@ -24,6 +26,7 @@ def create_payment_transaction(
         session_id=session_id,
         order_id=order_id,
         status=1,  # 1=pending
+        payment_due_date=payment_due_date,
     )
     db.add(transaction)
     db.commit()

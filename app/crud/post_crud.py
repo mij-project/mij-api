@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import cast, distinct, func, desc, and_, BigInteger, union_all, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from app.crud.push_noti_crud import push_notification_to_user
 from app.crud.subscriptions_crud import check_viewing_rights
 from app.crud.time_sale_crud import (
     get_active_plan_timesale_map,
@@ -3635,6 +3636,12 @@ def add_notification_for_post(
                 )
                 db.add(notification)
                 db.commit()
+                payload_push_noti = {
+                    "title": notification.payload["title"],
+                    "body": notification.payload["subtitle"],
+                    "url": f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/notifications",
+                }
+                push_notification_to_user(db, notification.user_id, payload_push_noti)
             except Exception as e:
                 db.rollback()
                 logger.error(f"Add notification for post approved error: {e}")
@@ -3685,6 +3692,12 @@ def add_notification_for_post(
                 )
                 db.add(notification)
                 db.commit()
+                payload_push_noti = {
+                    "title": notification.payload["title"],
+                    "body": notification.payload["subtitle"],
+                    "url": f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/notifications",
+                }
+                push_notification_to_user(db, notification.user_id, payload_push_noti)
             except Exception as e:
                 db.rollback()
                 logger.error(f"Add notification for post rejected error: {e}")
@@ -3729,6 +3742,12 @@ def add_notification_for_post(
                 )
                 db.add(notification)
                 db.commit()
+                payload_push_noti = {
+                    "title": notification.payload["title"],
+                    "body": notification.payload["subtitle"],
+                    "url": f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/notifications",
+                }
+                push_notification_to_user(db, notification.user_id, payload_push_noti)
             except Exception as e:
                 db.rollback()
                 logger.error(f"Add notification for post like error: {e}")

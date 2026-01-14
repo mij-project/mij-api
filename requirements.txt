@@ -20,3 +20,4 @@ itsdangerous
 tenacity
 openpyxl
 slack_sdk
+pywebpush

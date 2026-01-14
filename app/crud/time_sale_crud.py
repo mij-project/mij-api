@@ -317,7 +317,7 @@ def get_active_price_timesale(db: Session, post_id: UUID, price_id: UUID) -> Tim
     purchase_count_sq = (
         select(func.count(Payments.id))
         .where(
-            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.status in [PaymentStatus.SUCCEEDED, PaymentStatus.PENDING],
             Payments.paid_at.is_not(None),
             Payments.paid_at >= start_bound,
             Payments.paid_at <= end_bound,
