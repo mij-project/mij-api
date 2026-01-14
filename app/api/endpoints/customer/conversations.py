@@ -467,7 +467,6 @@ def send_conversation_message(
                 recipient_user = db.query(Users).filter(Users.id == recipient.user_id).first()
                 if not recipient_user:
                     continue
-
                 notifications_crud.add_notification_for_new_message(
                     db=db,
                     recipient_user_id=recipient_user.id,

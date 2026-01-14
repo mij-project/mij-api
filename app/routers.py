@@ -40,6 +40,7 @@ from app.api.endpoints.customer import (
     user_provider,
     advertising_agency_tracking,
     time_sale,
+    push_noti,
 )
 
 # Admin routes
@@ -121,7 +122,9 @@ api_router.include_router(
     conversations.router, prefix="/conversations", tags=["Conversations"]
 )
 api_router.include_router(
-    customer_message_assets.router, prefix="/users/me/message-assets", tags=["Message Assets"]
+    customer_message_assets.router,
+    prefix="/users/me/message-assets",
+    tags=["Message Assets"],
 )
 api_router.include_router(
     bulk_messages.router, prefix="/bulk-messages", tags=["Bulk Messages"]
@@ -161,6 +164,9 @@ api_router.include_router(
     advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"]
 )
 api_router.include_router(time_sale.router, prefix="/time-sale", tags=["Time Sale"])
+
+api_router.include_router(push_noti.router, prefix="/push", tags=["Push Notification"])
+
 
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])
@@ -232,5 +238,6 @@ api_router.include_router(
     prefix="/admin/search-history",
     tags=["Admin Search History"],
 )
+
 # Debug routes
 api_router.include_router(debug_email.router, prefix="/_debug", tags=["Debug"])
