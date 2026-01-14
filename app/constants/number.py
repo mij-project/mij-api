@@ -8,3 +8,6 @@ class PlatformFeePercent:
 
 class PaymentPlanPlatformFeePercent:
     DEFAULT = 10 # デフォルトのプランフォーム手数料(%)
+
+class AlbatalRecurringInterval:
+    PERIOD_DAYS = 30 # 日数

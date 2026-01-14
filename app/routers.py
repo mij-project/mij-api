@@ -74,10 +74,11 @@ from app.api.endpoints.hook.media_convert import router as media_convert_hook
 from app.api.endpoints.hook.conversations import router as conversations_hook
 from app.api.endpoints.hook.payment import router as payment_hook
 from app.api.endpoints.hook.univa_payment import router as univa_payment_hook
+from app.api.endpoints.hook.albatal_payment import router as albatal_payment_hook
 
 # Payment routes
 from app.api.endpoints.payments import credix
-
+from app.api.endpoints.payments import albatal
 api_router = APIRouter()
 
 # Hook routes
@@ -87,7 +88,7 @@ api_router.include_router(
 )
 api_router.include_router(payment_hook, prefix="/webhook", tags=["Payment"])
 api_router.include_router(univa_payment_hook, prefix="/webhook/univa", tags=["Univa Payment"])
-
+api_router.include_router(albatal_payment_hook, prefix="/webhook/albatal", tags=["Albatal Payment"])
 
 api_router.include_router(videos.router, prefix="/videos", tags=["Videos"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
@@ -170,7 +171,7 @@ api_router.include_router(push_noti.router, prefix="/push", tags=["Push Notifica
 
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])
-
+api_router.include_router(albatal.router, prefix="/payments/albatal", tags=["Albatal"])
 
 # Admin routes
 api_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["Admin Auth"])

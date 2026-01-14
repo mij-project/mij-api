@@ -78,6 +78,16 @@ def generate_sendid(length: int = 20) -> str:
     characters = string.ascii_letters + string.digits
     return ''.join(secrets.choice(characters) for _ in range(length))
 
+
+def generate_consumer_id(length: int = 20) -> str:
+    """
+    Albatal決済用のランダムなコンシューマーIDを生成
+    """
+    if length > 25:
+        raise ValueError("consumer_id length must be 25 or less")
+    characters = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(characters) for _ in range(length))
+
 def get_video_duration(duration_sec: float) -> str:
     """
     動画の再生時間をmm:ss形式に変換
