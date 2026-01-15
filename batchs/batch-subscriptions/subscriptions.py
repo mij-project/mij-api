@@ -1,5 +1,5 @@
 import os
-import time
+# import time
 import requests
 from threading import Thread
 from datetime import datetime, timezone
@@ -62,7 +62,7 @@ class SubscriptionsDomain:
                 .label("rn"),
             )
             .filter(
-                UP.is_valid == True,
+                UP.is_valid.is_(True),
                 UP.cardbrand.isnot(None),
                 UP.cardnumber.isnot(None),
                 UP.yuko.isnot(None),
@@ -86,27 +86,28 @@ class SubscriptionsDomain:
 
     def _task_process_subscription(self, subscription: tuple):
         db: Session = next(get_db())
-        done = False
+        # done = False
         need_change_status = None
         try:
-            while not done:
-                try:
-                    subs: Subscriptions = subscription[0]
-                    user_provider: UserProviders = subscription[1]
-                    payment: Payments = subscription[2]
+            # while not done:
+            try:
+                subs: Subscriptions = subscription[0]
+                user_provider: UserProviders = subscription[1]
+                payment: Payments = subscription[2]
 
-                    if subs.status == 2:
-                        self.__mark_subscription_as_cancelled(db, subs)
-                        self.logger.info(f"Subscription {subs.id} marked as cancelled")
-                    elif subs.status == 1:
-                        self.__process_next_subscription(db, subs, user_provider, payment)
-                        need_change_status = subs.id
-                    done = True
-                except Exception as e:
-                    db.rollback()
-                    self.logger.exception(f"Error processing subscription: {e}")
-                    self.__slack_error_notification(str(subscription[0].user_id))
-                    time.sleep(60)
+                if subs.status == 2:
+                    self.__mark_subscription_as_cancelled(db, subs)
+                    self.logger.info(f"Subscription {subs.id} marked as cancelled")
+                elif subs.status == 1:
+                    self.__process_next_subscription(db, subs, user_provider, payment)
+                    need_change_status = subs.id
+                # done = True
+            except Exception as e:
+                db.rollback()
+                self.logger.exception(f"Error processing subscription: {e}")
+                self.__slack_error_notification(str(subscription[0].user_id))
+                need_change_status = subs.id
+                # time.sleep(60)
 
             if need_change_status:
                 self.__change_status_of_subscription(db, need_change_status)
@@ -152,6 +153,8 @@ class SubscriptionsDomain:
         user_provider: UserProviders,
         payment: Payments,
     ):
+        if user_provider.cardbrand != "J":
+            return
         now = datetime.now(timezone.utc)
         txn = PaymentTransactions(
             type=2,
