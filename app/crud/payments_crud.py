@@ -175,3 +175,18 @@ def get_payment_status_by_price_id(
         .filter(Payments.status == PaymentStatus.PENDING)
         .first()
     )
+
+def get_payment_by_transaction_id(
+    db: Session,
+    transaction_id: UUID,
+) -> Optional[Payments]:
+    """
+    Get payment by transaction id
+    """
+    return (
+        db.query(Payments)
+        .filter(Payments.transaction_id == transaction_id)
+        .filter(Payments.payment_type == PaymentType.PLAN)
+        .order_by(Payments.paid_at.desc())
+        .first()
+    )

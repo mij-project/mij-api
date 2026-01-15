@@ -135,3 +135,27 @@ class SlackService:
             SlackService._client.chat_postMessage(channel=admin_channel, text=message)
         except Exception:
             SlackService._logger.exception("Error sending Slack message")
+
+    def _alert_subscription_expired(self, user_profile_name: str, plan_name: str, creator_name: str, plan_url: str):
+        admin_channel = "C0A0YDFF5PS"
+        if not admin_channel:
+            SlackService._logger.error("Missing SLACK_ADMIN_APPROVALS_ALERTS")
+            return
+
+        env = os.getenv('ENV', 'dev')
+        if env in ['dev', 'local']:
+            return
+
+        try:
+            message = (
+                f"環境：[{env}]\n"
+                f"<!channel>\n:fire::fire::fire:\n"
+                f"ユーザー：{user_profile_name}\n"
+                "支払い失敗により、プランが解約されました。"
+                f"プラン名：{plan_name}\n"
+                f"クリエイター名：{creator_name}\n"
+                f"プランURL：{plan_url}\n"
+            )
+            SlackService._client.chat_postMessage(channel=admin_channel, text=message)
+        except Exception:
+            SlackService._logger.exception("Error sending Slack message")

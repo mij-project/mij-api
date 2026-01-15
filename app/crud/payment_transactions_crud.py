@@ -51,6 +51,13 @@ def get_transaction_by_id(
     result = db.query(PaymentTransactions).filter(PaymentTransactions.id == transaction_id).first()
     return result
 
+def get_transaction_by_session_id(
+    db: Session,
+    session_id: str
+) -> PaymentTransactions | None:
+    """セッションIDでトランザクション取得"""
+    result = db.query(PaymentTransactions).filter(PaymentTransactions.session_id == session_id).first()
+    return result
 
 def update_transaction_status(
     db: Session,

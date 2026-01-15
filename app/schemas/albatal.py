@@ -19,6 +19,13 @@ class AlbatalSessionRequest(BaseModel):
     provider_email: Optional[str] = Field(None, description="プロバイダーのメールアドレス")
     return_url: Optional[str] = Field(None, description="定期決済完了後のリダイレクトURL")
 
+class AlbatalChipPaymentRequest(BaseModel):
+    recipient_user_id: str = Field(..., description="受取人ユーザーID")
+    amount: int = Field(..., description="投げ銭金額", ge=500, le=10000)
+    message: Optional[str] = Field(None, description="メッセージ")
+    provider_email: Optional[str] = Field(None, description="プロバイダーのメールアドレス")
+    return_url: Optional[str] = Field(None, description="決済完了後のリダイレクトURL")
+
 class AlbatalSessionResponse(BaseModel):
     success_url: str = Field(..., description="決済成功後のリダイレクトURL")
     failure_url: str = Field(..., description="決済失敗後のリダイレクトURL")
