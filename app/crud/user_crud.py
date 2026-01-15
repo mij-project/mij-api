@@ -525,3 +525,17 @@ def get_creator_by_user_id(db: Session, user_id: str) -> Creators:
     ユーザーIDによるクリエイター情報取得
     """
     return db.scalar(select(Creators).where(Creators.user_id == user_id))
+
+def update_password_for_user(db: Session, user_id: str, new_password: str):
+    """
+    ユーザーのパスワードを変更
+    """
+    try:
+        user = get_user_by_id(db, user_id)
+        user.password_hash = hash_password(new_password)
+        db.add(user)
+        db.commit()
+        return
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"パスワード変更エラー: {e}")

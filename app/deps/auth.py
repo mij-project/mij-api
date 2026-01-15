@@ -1,14 +1,15 @@
 # app/deps/auth.py
+import os
+import time
+import jwt
 from fastapi import Depends, HTTPException, status, Cookie, Header
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.core.security import decode_token
 from app.core.cookies import ACCESS_COOKIE
-from app.models.user import Users
 from app.models.admins import Admins
 from app.crud.user_crud import get_user_by_id
 from app.crud.admin_crud import get_admin_by_id
-import time, os, jwt
 
 def get_current_user(
     db: Session = Depends(get_db),
@@ -114,7 +115,7 @@ def get_current_user_for_me(
     try:
         payload = decode_token(access_token)
     except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid or expired access token")
+        raise HTTPException(status_code=401, detail=f"Invalid or expired access token: {e}")
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
     user_id = payload.get("sub")

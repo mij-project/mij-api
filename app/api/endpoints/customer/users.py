@@ -1,8 +1,11 @@
+import os
 import calendar
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
+from app.core.security import verify_password
 from app.crud.sales_crud import get_payments_by_user_id
 from app.schemas.user import (
+    ChangePasswordRequest,
     UserCreate,
     UserOut,
     UserProfileResponse,
@@ -18,13 +21,18 @@ from app.crud.user_crud import (
     get_user_profile_by_username,
     get_plan_details,
     get_user_by_id,
+    update_password_for_user,
 )
 from app.deps.auth import get_current_user, get_current_user_optional
 from app.crud.companies_crud import get_company_by_code
 from app.models.profiles import Profiles
 from app.models.user import Users
 from app.api.commons.utils import generate_code
-from app.crud.profile_crud import create_profile, get_profile_ogp_data, get_profile_by_user_id
+from app.crud.profile_crud import (
+    create_profile,
+    get_profile_ogp_data,
+    get_profile_by_user_id,
+)
 from app.schemas.user import (
     ProfilePostResponse,
     ProfilePlanResponse,
@@ -37,9 +45,8 @@ from app.models.subscriptions import Subscriptions
 from app.models.payments import Payments
 from app.constants.enums import ItemType, SubscriptionStatus, PaymentStatus, PaymentType
 from app.models.plans import Plans
-from sqlalchemy import func, select, cast, String
+from sqlalchemy import cast, String
 from app.api.commons.utils import generate_email_verification_url
-import os
 from app.crud.email_verification_crud import issue_verification_token
 from app.services.email.send_email import send_email_verification
 from typing import Tuple, Optional
@@ -148,7 +155,7 @@ def get_user_profile_by_username_endpoint(
     try:
         now = datetime.now(timezone.utc)
         profile_data = get_user_profile_by_username(db, username)
-        
+
         if not profile_data:
             raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
 
@@ -223,12 +230,14 @@ def get_user_profile_by_username_endpoint(
                         Subscriptions.user_id == current_user.id,
                         Subscriptions.order_id == str(plan.id),
                         Subscriptions.order_type == ItemType.PLAN,  # 2=ItemType.PLAN
-                        Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # 1=ACTIVE
+                        Subscriptions.status.in_(
+                            [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]
+                        ),  # 1=ACTIVE
                     )
                     .first()
                     is not None
                 )
-            
+
             profile_plans.append(
                 ProfilePlanResponse(
                     id=plan.id,
@@ -325,7 +334,9 @@ def get_user_profile_by_username_endpoint(
                     TopBuyerResponse(
                         profile_name=buyer_user.profile_name if buyer_user else "",
                         username=buyer_profile.username if buyer_profile else None,
-                        avatar_url=f"{BASE_URL}/{buyer_profile.avatar_url}" if buyer_profile and buyer_profile.avatar_url else None,
+                        avatar_url=f"{BASE_URL}/{buyer_profile.avatar_url}"
+                        if buyer_profile and buyer_profile.avatar_url
+                        else None,
                     )
                 )
 
@@ -353,9 +364,11 @@ def get_user_profile_by_username_endpoint(
                 .filter(
                     Subscriptions.user_id == current_user.id,
                     Subscriptions.order_type == ItemType.PLAN,
-                    Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),
+                    Subscriptions.status.in_(
+                        [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]
+                    ),
                     Plans.creator_user_id == user.id,
-                    Plans.open_dm_flg == True,
+                    Plans.open_dm_flg.is_(True),
                 )
                 .first()
                 is not None
@@ -555,3 +568,22 @@ def __get_month_ranges(ym: str):
     ) - timedelta(hours=9)
 
     return (start_date, end_date, prev_start_date, prev_end_date)
+
+
+@router.post("/change-password")
+async def change_password_hdl(
+    change_password: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """パスワードを変更"""
+    if not verify_password(
+        change_password.old_password, current_user.password_hash
+    ):
+        raise HTTPException(status_code=400, detail="現在のパスワードが間違っています")
+    try:
+        update_password_for_user(db, current_user.id, change_password.new_password)
+    except Exception as e:
+        logger.error("パスワード変更エラー: ", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"message": "Done!"}
