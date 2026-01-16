@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
-from typing import List, Optional
 import os
+from datetime import datetime, timezone
+from typing import List
 from sqlalchemy.orm import Session
-import json
 from uuid import UUID
 from pathlib import Path
 from common.db_session import get_db
@@ -30,9 +29,9 @@ class SendReservationMessage:
     def __init__(self, logger: Logger):
         self.logger: Logger = logger
         self.db: Session = next(get_db())
-        self.sender_user_id = os.environ.get("SENDER_USER_ID")
+        self.sender_user_id = os.environ.get("SENDER_USER_ID", "0d3c6214-977a-456e-b93b-2e953da114b5")
         # GROUP_BYの値を取得し、前後の空白と引用符を削除
-        group_by_raw = os.environ.get("GROUP_BY")
+        group_by_raw = os.environ.get("GROUP_BY", "2c751bde-8e8c-461b-ba31-4a62912c544e")
         if group_by_raw:
             # 空白を削除
             group_by_raw = group_by_raw.strip()
@@ -84,7 +83,7 @@ class SendReservationMessage:
                     .all()
                 )
                 if sample_messages:
-                    self.logger.info(f"Sample messages with group_by (first 5):")
+                    self.logger.info("Sample messages with group_by (first 5):")
                     for msg in sample_messages:
                         self.logger.info(f"  - message_id={msg.id}, group_by={repr(msg.group_by)}, status={msg.status}")
             
