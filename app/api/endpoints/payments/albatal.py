@@ -53,22 +53,6 @@ def _get_albatal_provider(db: Session):
     return albatal_provider
 
 
-def _check_user_provider(db: Session, user_id: UUID, provider_id: UUID) -> tuple[bool, Any]:
-    """
-    ユーザープロバイダーを確認
-    
-    Returns:
-        (is_first_payment, user_provider) のタプル
-    """
-    user_provider = user_providers_crud.get_user_provider(
-        db=db,
-        user_id=user_id,
-        provider_id=provider_id
-    )
-    is_first_payment = user_provider is None or user_provider.sendid is None
-    return is_first_payment, user_provider
-
-
 @router.post("/session", response_model=AlbatalSessionResponse)
 async def create_albatal_session(
     request: AlbatalSessionRequest,
@@ -83,13 +67,6 @@ async def create_albatal_session(
     try:
         # Albatalプロバイダー取得
         albatal_provider = _get_albatal_provider(db)
-
-        # user_providersテーブル確認
-        is_first_payment, _ = _check_user_provider(
-            db=db,
-            user_id=current_user.id,
-            provider_id=albatal_provider.id
-        )
 
         # 決済金額計算
         money, order_id, transaction_type = _set_money(request, db)
@@ -122,17 +99,7 @@ async def create_albatal_session(
         albatal_response = await _call_albatal_api(wpf_payload)
         payment_url = _extract_payment_url(albatal_response)
 
-        if is_first_payment:
-            user_providers_crud.create_albatal_user_provider(
-                db=db,
-                user_id=current_user.id,
-                provider_id=albatal_provider.id,
-                provider_email=request.provider_email,
-                is_valid=False,
-            )
-
         transaction.session_id = albatal_response.get("unique_id")
-        transaction.id = albatal_response.get("transaction_id")
         db.commit()
         db.refresh(transaction)
 
@@ -159,13 +126,6 @@ async def create_albatal_chip_session(
     try:
         # Albatalプロバイダー取得
         albatal_provider = _get_albatal_provider(db)
-
-        # user_providersテーブル確認
-        is_first_payment, _ = _check_user_provider(
-            db=db,
-            user_id=current_user.id,
-            provider_id=albatal_provider.id
-        )
 
         # クリエイター情報を取得
         creator_user = user_crud.get_user_by_id(db, request.recipient_user_id)
@@ -246,18 +206,7 @@ async def create_albatal_chip_session(
         albatal_response = await _call_albatal_api(wpf_payload)
         payment_url = _extract_payment_url(albatal_response)
 
-
-        if is_first_payment:
-            user_providers_crud.create_albatal_user_provider(
-                db=db,
-                user_id=current_user.id,
-                provider_id=albatal_provider.id,
-                provider_email=request.provider_email,
-                is_valid=False,
-            )
-
         transaction.session_id = albatal_response.get("unique_id")
-        transaction.id = albatal_response.get("transaction_id")
         db.commit()
         db.refresh(transaction)
 
@@ -343,9 +292,10 @@ async def _call_albatal_api(wpf_payload: dict) -> dict:
     Raises:
         HTTPException: API呼び出しが失敗した場合
     """
+    request_url = f"{ALBATAL_API_WPF_URL}/api/wpf/create"
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            ALBATAL_API_WPF_URL,
+            request_url,
             json=wpf_payload,
             headers={
                 "Content-Type": "application/json",

@@ -6,8 +6,9 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.payments import Payments
 from datetime import datetime, timezone
+from app.models.providers import Providers
 from app.constants.enums import PaymentType, PaymentStatus
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from sqlalchemy import func
 
 def create_payment(
@@ -188,5 +189,22 @@ def get_payment_by_transaction_id(
         .filter(Payments.transaction_id == transaction_id)
         .filter(Payments.payment_type == PaymentType.PLAN)
         .order_by(Payments.paid_at.desc())
+        .first()
+    )
+
+def get_payment_by_id(
+    db: Session,
+    payment_id: UUID,
+) -> Tuple[Payments, str]:
+    """
+    Get payment by id
+    """
+    return (
+        db.query(
+            Payments,
+            Providers.code.label("provider_code"),
+        )
+        .join(Providers, Providers.id == Payments.provider_id)
+        .filter(Payments.id == payment_id)
         .first()
     )

@@ -191,28 +191,3 @@ def get_albatal_provider_email(db: Session, user_id: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Get provider email error: {e}")
         return None
-
-def update_user_provider_is_valid(
-    db: Session,
-    user_id: UUID,
-    is_valid: bool
-) -> Optional[UserProviders]:
-    """ユーザープロバイダー情報を更新"""
-    # まず albatal プロバイダーのIDを取得
-    albatal_provider = db.query(Providers).filter(Providers.code == "albatal").first()
-    if not albatal_provider:
-        logger.error("Albatal provider not found")
-        return None
-    
-    # join()を使わずに直接更新
-    user_provider = db.query(UserProviders).filter(
-        UserProviders.user_id == user_id,
-        UserProviders.provider_id == albatal_provider.id
-    ).first()
-    
-    if user_provider:
-        user_provider.is_valid = is_valid
-        db.commit()
-        db.refresh(user_provider)
-    
-    return user_provider
