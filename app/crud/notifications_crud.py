@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from uuid import UUID
 
+from app.models.conversation_participants import ConversationParticipants
 from app.models.notifications import Notifications
 from app.schemas.notification import NotificationType
 from app.core.logger import Logger
@@ -235,7 +236,7 @@ def add_notification_for_message_asset_rejection(
                 "subtitle": "メッセージに含まれる画像/動画が審査で拒否されました",
                 "message": f"拒否理由: {reject_comments}",
                 "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
-                "redirect_url": f"/account/message/{group_by}",
+                "redirect_url": f"/account/message/edit/{group_by}",
             },
             is_read=False,
             created_at=datetime.now(timezone.utc),
@@ -396,5 +397,46 @@ def add_notification_for_bulk_message(
         push_notification_to_user(db, recipient_user_id, payload_push_noti)
     except Exception as e:
         logger.error(f"Add notification for bulk message error: {e}")
+        db.rollback()
+        pass
+
+def add_notification_for_delusion_message(
+    db: Session,
+    conversation_id: UUID,
+) -> None:
+    """
+    妄想メッセージ受信時の通知を追加
+    """
+    try:
+        conversation_participant = db.query(ConversationParticipants).filter(ConversationParticipants.conversation_id == conversation_id).first()
+        if conversation_participant is None:
+            return
+        user_id = conversation_participant.user_id
+        notification = Notifications(
+            user_id=user_id,
+            type=NotificationType.ADMIN,
+            payload={
+                "type": "message",
+                "title": "新しい妄想メッセージが届きました",
+                "subtitle": "新しい妄想メッセージが届きました",
+                "message": "新しい妄想メッセージが届きました",
+                "avatar": "https://logo.mijfans.jp/bimi/logo.svg",
+                "redirect_url": "/message/delusion",
+            },
+            is_read=False,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(notification)
+        db.commit()
+        logger.info(f"Delusion message notification sent to user {user_id}")
+        payload_push_noti = {
+            "title": notification.payload["title"],
+            "body": notification.payload["subtitle"],
+            "url": f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/delusion",
+        }
+        push_notification_to_user(db, user_id, payload_push_noti)
+    except Exception as e:
+        logger.error(f"Add notification for delusion message error: {e}")
         db.rollback()
         pass

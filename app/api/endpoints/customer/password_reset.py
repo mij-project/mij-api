@@ -41,7 +41,6 @@ def request_password_reset(
     """
     # ユーザーを検索
     user = get_user_by_email(db, payload.email)
-
     # セキュリティのため、ユーザーが存在しない場合でも同じメッセージを返す
     if not user:
         return PasswordResetRequestResponse(

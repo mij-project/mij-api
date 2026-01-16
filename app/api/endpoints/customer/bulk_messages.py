@@ -254,7 +254,7 @@ def _define_ecs_task_schedule(db: Session, group_by: str, scheduled_at: datetime
             }
         }
 
-        env = os.environ.get("ENV")
+        # env = os.environ.get("ENV")
 
         task_definition = os.environ["ECS_SEND_RESERVATION_MESSAGE_TASK_ARN"]
         
@@ -277,6 +277,7 @@ def _define_ecs_task_schedule(db: Session, group_by: str, scheduled_at: datetime
             ScheduleExpressionTimezone="Asia/Tokyo",
             FlexibleTimeWindow={"Mode": "OFF"},
             State="ENABLED",
+            ActionAfterCompletion="DELETE",
             Target={
                 # ECS RunTask ターゲット
                 "Arn": os.environ["ECS_SEND_RESERVATION_MESSAGE_CLUSTER_ARN"],      # ※クラスターARNを入れる

@@ -1,7 +1,7 @@
 # app/models/password_reset_token.py
 from __future__ import annotations
 from typing import TYPE_CHECKING
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, func
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from app.db.base import Base
