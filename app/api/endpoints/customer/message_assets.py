@@ -1,7 +1,7 @@
 # app/api/endpoints/customer/message_assets.py
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
 import json
@@ -13,7 +13,6 @@ from app.models.conversation_messages import ConversationMessages
 from app.models.conversations import Conversations
 from app.models.conversation_participants import ConversationParticipants
 from app.models.reservation_message import ReservationMessage
-from app.models.profiles import Profiles
 from app.crud import message_assets_crud, user_crud, profile_crud
 from app.schemas.message_asset import (
     UserMessageAssetResponse,

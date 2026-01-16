@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc
 from datetime import datetime, timezone
@@ -233,10 +233,13 @@ def get_users_paginated(
     query = db.query(Users).options(joinedload(Users.profile))
 
     if search:
-        query = query.join(Profiles).filter(
-            (Profiles.username.ilike(f"%{search}%")) |
-            (Users.profile_name.ilike(f"%{search}%")) |
-            (Users.email.ilike(f"%{search}%"))
+        query = query.join(Profiles).join(Creators).filter(
+            or_(
+                (Profiles.username.ilike(f"%{search}%")),
+                (Users.profile_name.ilike(f"%{search}%")),
+                (Users.email.ilike(f"%{search}%")),
+                (Creators.name.ilike(f"%{search}%"))
+            )
         )
 
     if role:
@@ -641,7 +644,7 @@ def add_notification_for_creator_application(
                         "subtitle": "クリエイター申請が承認されました",
                         "message": "クリエイター申請が承認されました",
                         "avatar": None,
-                        "redirect_url": f"/account",
+                        "redirect_url": "/account",
                     },
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -664,7 +667,7 @@ def add_notification_for_creator_application(
                         "title": "クリエイター申請が拒否されました",
                         "subtitle": "クリエイター申請が拒否されました",
                         "avatar": None,
-                        "redirect_url": f"/account",
+                        "redirect_url": "/account",
                     },
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),

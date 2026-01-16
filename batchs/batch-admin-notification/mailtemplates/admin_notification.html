@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+
+<body
+    style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;padding:20px;background-color:#f9fafb;">
+    <div
+        style="max-width:600px;margin:0 auto;background-color:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+        <h2 style="color:#111827;margin-bottom:20px;">{{ brand }} 運営からのお知らせ</h2>
+
+        <p style="color:#374151;line-height:1.6;">いつも mijfans をご利用いただきありがとうございます。</p>
+        <p style="color:#374151;line-height:1.6;">mijfans運営チームです。</p>
+
+        <p style="color:#374151;line-height:1.6;">下記のお知らせを公開しました。</p>
+        <p style="color:#374151;line-height:1.6;">{{ message }}</p>
+
+        <p style="color:#374151;line-height:1.6;">▼ 詳細はこちら</p>
+        <p style="color:#374151;line-height:1.6;">
+            <a href="{{ notification_url }}" style="color:#2563eb;text-decoration:none;">
+                <button
+                    style="background-color:#2563eb;color:white;padding:10px 20px;border-radius:5px;border:none;">[お知らせを確認する]
+                </button>
+            </a>
+        </p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
+
+        <p style="color:#6b7280;font-size:14px;line-height:1.6;">
+            ■ お問い合わせ:
+            <br>
+            ご質問等がございましたら、お問い合わせよりお知らせください。
+            <br>
+            内容を確認し、1営業日以内にご返答させて頂きます
+            <br>
+            ※ このメールは送信専用メールです。ご返信いただいてもお応えいたしかねますのでご了承ください。
+            <br>
+            <a href="mailto:{{ support_email }}" style="color:#2563eb;text-decoration:none;">{{ support_email}}</a>
+        </p>
+
+        <p style="color:#9ca3af;font-size:12px;margin-top:20px;">
+            エロは日本の宝｜ここでしか見れないプレミアムエロ動画が集まるmijfans（ミジュファンズ）
+            <br>
+            <a href="https://mijfans.jp" style="color:#2563eb;text-decoration:none;">https://mijfans.jp</a>
+        </p>
+    </div>
+</body>
+
+</html>

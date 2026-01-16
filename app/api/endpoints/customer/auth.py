@@ -1,22 +1,19 @@
-import os, httpx
+import os
+import httpx
 import urllib.parse as up
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Response, Request
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi.responses import RedirectResponse
 from app.core.security import create_access_token, decode_token
 from app.db.base import get_db
 from app.models.creators import Creators
 from app.models.events import Events, UserEvents
-from app.models.preregistrations import Preregistrations
-from app.schemas.auth import LoginIn, TokenOut, LoginCookieOut
+from app.schemas.auth import LoginIn, LoginCookieOut
 from app.models.user import Users
 from sqlalchemy.orm import Session
 from app.core.security import verify_password
 from app.crud.user_crud import get_user_by_email, get_user_by_id, check_email_exists
 from app.core.security import (
-    verify_password,
-    create_access_token,
     create_refresh_token,
-    decode_token,
     new_csrf_token,
 )
 from app.core.cookies import (
@@ -27,20 +24,17 @@ from app.core.cookies import (
     ACCESS_COOKIE,
 )
 from app.core.config import settings
-from app.deps.auth import get_current_user, get_current_user_for_me
+from app.deps.auth import get_current_user_for_me
 from datetime import datetime, timedelta, timezone
 from requests_oauthlib import OAuth1Session
-from app.deps.auth import issue_app_jwt_for
 from app.crud.user_crud import create_user_by_x
 from app.crud.profile_crud import (
     create_profile,
     update_profile_by_x,
-    exist_profile_by_username,
     get_profile_by_username,
 )
 from app.constants.enums import AccountType, AccountStatus
 from typing import Tuple
-from app.models.user import Users
 from app.models.profiles import Profiles
 from app.crud.companies_crud import get_company_by_code, add_company_user
 from app.constants.number import CompanyFeePercent

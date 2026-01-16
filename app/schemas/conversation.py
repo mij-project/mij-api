@@ -16,7 +16,8 @@ class MessageAssetInfo(BaseModel):
     asset_type: int  # 1=画像, 2=動画
     cdn_url: Optional[str] = None  # 承認済みの場合のみ
     storage_key: str
-
+    thumbnail_storage_key: Optional[str] = None
+    cdn_thumbnail_url: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -38,6 +39,7 @@ class MessageResponse(BaseModel):
 
     # アセット情報（オプション）
     asset: Optional[MessageAssetInfo] = None
+    group_by: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -87,6 +89,7 @@ class MarkAsReadRequest(BaseModel):
 # 会話メッセージレスポンス（相手のプロフィール情報を含む）
 class ConversationMessagesResponse(BaseModel):
     messages: List[MessageResponse]
+    has_next: bool = False
     partner_user_id: Optional[UUID] = None
     partner_username: Optional[str] = None
     partner_profile_name: Optional[str] = None
@@ -104,6 +107,13 @@ class ConversationMessagesResponse(BaseModel):
     # クリエイター ⇔ クリエイター 用フラグ
     is_current_user_seller: bool = False  # 購入されている側（相手がプラン加入 OR チップ送信）
     is_current_user_buyer: bool = False  # 購入者側（自分がプラン購入 OR チップ送信）
+
+    class Config:
+        from_attributes = True
+
+class DelusionMessagesResponse(BaseModel):
+    messages: List[MessageResponse]
+    has_next: bool = False
 
     class Config:
         from_attributes = True

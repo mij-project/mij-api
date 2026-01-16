@@ -38,7 +38,6 @@ from app.crud.user_events_crud import check_user_event_exists
 from app.constants.event_code import EventCode
 from app.constants.number import PlatformFeePercent
 from app.schemas.creator import CreatorUpdate
-from app.constants.enums import VerificationStatus
 from app.crud.notifications_crud import add_notification_for_identity_verification
 logger = Logger.get_logger()
 router = APIRouter()

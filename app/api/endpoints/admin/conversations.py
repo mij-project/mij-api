@@ -59,7 +59,7 @@ def get_conversation_messages_admin(
     if conversation.type != ConversationType.DELUSION:
         raise HTTPException(status_code=403, detail="Not a delusion conversation")
 
-    messages = conversations_crud.get_messages_by_conversation(
+    messages, has_next = conversations_crud.get_messages_by_conversation(
         db, conversation_id, skip, limit
     )
 
