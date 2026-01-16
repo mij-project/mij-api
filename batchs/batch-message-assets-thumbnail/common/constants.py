@@ -3,7 +3,7 @@ import os
 ENV = os.environ.get("ENV", "stg")
 POSTGRES_USER=os.environ.get("POSTGRES_USER", "user")
 POSTGRES_PASSWORD=os.environ.get("POSTGRES_PASSWORD", "password")
-POSTGRES_DB=os.environ.get("POSTGRES_DB", "prd-mij_db")
+POSTGRES_DB=os.environ.get("POSTGRES_DB", "mij_db")
 POSTGRES_SERVER=os.environ.get("POSTGRES_SERVER", "localhost")
 POSTGRES_PORT=os.environ.get("POSTGRES_PORT", "5432")
 

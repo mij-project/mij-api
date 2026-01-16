@@ -1,22 +1,16 @@
 # app/crud/bulk_message_crud.py
 from sqlalchemy.orm import Session
-from sqlalchemy import func, distinct, cast
+from sqlalchemy import func, distinct
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from uuid import UUID
 import uuid
-import json
 from typing import List, Dict, Optional
 from datetime import datetime
 from sqlalchemy.types import String
 from app.constants.enums import ConversationMessageStatus
-from app.services.s3.ecs_task import run_ecs_task
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
 from app.models.plans import Plans
-from app.models.conversations import Conversations
-from app.models.conversation_participants import ConversationParticipants
-from app.models.conversation_messages import ConversationMessages
-from app.models.message_assets import MessageAssets
 from app.constants.enums import (
     PaymentType,
     PaymentStatus,
@@ -24,11 +18,8 @@ from app.constants.enums import (
     SubscriptionType,
     ItemType,
     MessageAssetStatus,
-    ConversationMessageStatus
 )
 from app.crud import conversations_crud, message_assets_crud
-from app.services.s3.client import scheduler_client
-import os
 from app.core.logger import Logger
 logger = Logger.get_logger()
 
