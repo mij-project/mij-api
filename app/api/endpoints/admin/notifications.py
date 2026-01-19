@@ -50,6 +50,7 @@ async def get_notifications(
           payload=n.payload,
           is_read=n.is_read,
           read_at=n.read_at,
+          target_role=n.target_role,
           created_at=n.created_at,
           updated_at=n.updated_at
         ) for n in notifications],
@@ -76,6 +77,7 @@ async def create_notification(
     return NotificationCreateResponse(
       id=done.id,
       type=done.type,
+      target_role=done.target_role,
       payload=done.payload,
       is_read=done.is_read,
       read_at=done.read_at,
@@ -101,6 +103,7 @@ async def update_notification(
     return NotificationCreateResponse(
       id=done.id,
       type=done.type,
+      target_role=done.target_role,
       payload=done.payload,
       is_read=done.is_read,
       read_at=done.read_at,

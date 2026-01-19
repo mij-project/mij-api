@@ -8,8 +8,8 @@ class SubscriptionAdminInfo(BaseModel):
     id: str
     subscriber_username: str
     creator_username: str
-    money: int
-    payment_amount: int
+    money: Optional[int] = None
+    payment_amount: Optional[int] = None
     access_start: datetime
     access_end: Optional[datetime] = None
     status: int

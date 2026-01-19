@@ -1,8 +1,7 @@
 # app/api/endpoints/admin/message_assets.py
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from app.db.base import get_db
@@ -21,12 +20,23 @@ from app.schemas.message_asset import (
     AdminMessageAssetListResponse,
     AdminMessageAssetDetailResponse,
 )
-from app.services.s3 import client as s3_client
-from app.services.email.send_email import send_message_content_approval_email, send_message_content_rejection_email, send_message_notification_email
+from app.services.email.send_email import (
+    send_message_content_approval_email,
+    send_message_content_rejection_email,
+    send_message_notification_email,
+)
 from app.api.commons.function import CommonFunction
-from app.constants.enums import MessageAssetStatus, MessageAssetType, ConversationMessageType, ConversationMessageStatus
+from app.constants.enums import (
+    MessageAssetType,
+    ConversationMessageType,
+    ConversationMessageStatus,
+)
 import os
 import logging
+
+from app.utils.trigger_batch_generate_thumbnail_messageassets import (
+    trigger_batch_generate_thumbnail_messageassets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +44,7 @@ router = APIRouter()
 
 MESSAGE_ASSETS_CDN_URL = os.getenv("MESSAGE_ASSETS_CDN_URL", "")
 BASE_URL = os.getenv("CDN_BASE_URL")
+
 
 @router.get("", response_model=dict)
 def get_message_assets(
@@ -61,7 +72,7 @@ def get_message_assets(
     for group in grouped_data:
         message = group["message"]
         asset = group["asset"]
-        
+
         if not message or not asset:
             continue
 
@@ -76,10 +87,14 @@ def get_message_assets(
         sender_username = None
         sender_profile_name = None
         sender_avatar = None
-        
+
         if sender_profile:
             sender_username = sender_profile.username
-            sender_avatar = f"{BASE_URL}/{sender_profile.avatar_url}" if sender_profile.avatar_url else None
+            sender_avatar = (
+                f"{BASE_URL}/{sender_profile.avatar_url}"
+                if sender_profile.avatar_url
+                else None
+            )
             # profile_nameはUsersテーブルから取得
             if sender_user_id:
                 sender_user = user_crud.get_user_by_id(db, sender_user_id)
@@ -130,7 +145,9 @@ def get_message_asset_detail(
     - group_byでグループ化されたアセット情報を取得
     - 送信者・メッセージ情報含む（受信者情報は含まない）
     """
-    detail = message_assets_crud.get_message_asset_detail_by_group_by_for_admin(db, group_by)
+    detail = message_assets_crud.get_message_asset_detail_by_group_by_for_admin(
+        db, group_by
+    )
 
     if not detail:
         raise HTTPException(status_code=404, detail="Message asset not found")
@@ -147,10 +164,14 @@ def get_message_asset_detail(
     sender_username = None
     sender_profile_name = None
     sender_avatar = None
-    
+
     if sender_profile:
         sender_username = sender_profile.username
-        sender_avatar = f"{BASE_URL}/{sender_profile.avatar_url}" if sender_profile.avatar_url else None
+        sender_avatar = (
+            f"{BASE_URL}/{sender_profile.avatar_url}"
+            if sender_profile.avatar_url
+            else None
+        )
         # profile_nameはUsersテーブルから取得
         if sender_user_id:
             sender_user = user_crud.get_user_by_id(db, sender_user_id)
@@ -194,9 +215,11 @@ def approve_message_asset(
         raise HTTPException(status_code=404, detail="Message asset not found")
 
     # メッセージ情報を取得（送信者・会話ID取得のため）
-    message = db.query(ConversationMessages).filter(
-        ConversationMessages.id == asset.message_id
-    ).first()
+    message = (
+        db.query(ConversationMessages)
+        .filter(ConversationMessages.id == asset.message_id)
+        .first()
+    )
 
     if message and message.sender_user_id:
         sender_user_id = message.sender_user_id
@@ -226,28 +249,50 @@ def approve_message_asset(
                         display_name=sender_user.profile_name or "User",
                         redirect_url=f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
                     )
-                    logger.info(f"Approval email sent to {sender_user.email} for message asset {asset.id}")
+                    logger.info(
+                        f"Approval email sent to {sender_user.email} for message asset {asset.id}"
+                    )
                 except Exception as e:
-                    logger.error(f"Failed to send approval email to {sender_user.email}: {e}")
+                    logger.error(
+                        f"Failed to send approval email to {sender_user.email}: {e}"
+                    )
 
         # 受信者への通知処理（ベストエフォート）
         # typeが1（USER）の時だけ通知処理を実行
         if message.type == ConversationMessageType.USER:
             try:
                 # 受信者を取得（送信者以外の参加者）
-                recipients = db.query(ConversationParticipants).filter(
-                    ConversationParticipants.conversation_id == conversation_id,
-                    ConversationParticipants.user_id != sender_user_id
-                ).all()
+                recipients = (
+                    db.query(ConversationParticipants)
+                    .filter(
+                        ConversationParticipants.conversation_id == conversation_id,
+                        ConversationParticipants.user_id != sender_user_id,
+                    )
+                    .all()
+                )
 
                 # 送信者のプロフィール情報を取得
-                sender_profile = db.query(Profiles).filter(Profiles.user_id == sender_user_id).first()
-                sender_name = sender_profile.username if sender_profile else "Unknown User"
-                sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
+                sender_profile = (
+                    db.query(Profiles)
+                    .filter(Profiles.user_id == sender_user_id)
+                    .first()
+                )
+                sender_name = (
+                    sender_profile.username if sender_profile else "Unknown User"
+                )
+                sender_avatar_url = (
+                    f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}"
+                    if sender_profile and sender_profile.avatar_url
+                    else None
+                )
 
                 # メッセージプレビューを生成
                 if message.body_text:
-                    message_preview = message.body_text[:50] if len(message.body_text) > 50 else message.body_text
+                    message_preview = (
+                        message.body_text[:50]
+                        if len(message.body_text) > 50
+                        else message.body_text
+                    )
                 else:
                     # アセットのみの場合
                     if asset.asset_type == MessageAssetType.IMAGE:  # 画像
@@ -259,13 +304,17 @@ def approve_message_asset(
 
                 # 各受信者に通知とメールを送信
                 for recipient in recipients:
-                    need_to_send_recipient_notification = CommonFunction.get_user_need_to_send_notification(
-                        db, recipient.user_id, "userMessages"
+                    need_to_send_recipient_notification = (
+                        CommonFunction.get_user_need_to_send_notification(
+                            db, recipient.user_id, "userMessages"
+                        )
                     )
                     if not need_to_send_recipient_notification:
                         continue
 
-                    recipient_user = db.query(Users).filter(Users.id == recipient.user_id).first()
+                    recipient_user = (
+                        db.query(Users).filter(Users.id == recipient.user_id).first()
+                    )
                     if not recipient_user:
                         continue
 
@@ -280,15 +329,25 @@ def approve_message_asset(
                     )
 
                     # メール通知を送信
-                    need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(
-                        db, recipient_user.id, "message"
+                    need_to_send_email_notification = (
+                        CommonFunction.get_user_need_to_send_notification(
+                            db, recipient_user.id, "message"
+                        )
                     )
                     if need_to_send_email_notification and recipient_user.email:
                         try:
                             conversation_url = f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation/{conversation_id}"
 
-                            recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
-                            recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
+                            recipient_profile = (
+                                db.query(Profiles)
+                                .filter(Profiles.user_id == recipient_user.id)
+                                .first()
+                            )
+                            recipient_name = (
+                                recipient_profile.username
+                                if recipient_profile and recipient_profile.username
+                                else recipient_user.profile_name
+                            )
 
                             send_message_notification_email(
                                 to=recipient_user.email,
@@ -297,44 +356,76 @@ def approve_message_asset(
                                 message_preview=message_preview,
                                 conversation_url=conversation_url,
                             )
-                            logger.info(f"Message notification email sent to {recipient_user.email} for message asset {asset.id}")
+                            logger.info(
+                                f"Message notification email sent to {recipient_user.email} for message asset {asset.id}"
+                            )
                         except Exception as e:
-                            logger.error(f"Failed to send notification email to {recipient_user.email}: {e}")
+                            logger.error(
+                                f"Failed to send notification email to {recipient_user.email}: {e}"
+                            )
             except Exception as e:
                 # 受信者への通知エラーはログに記録するが、承認は成功とする
-                logger.error(f"Failed to send notification to recipients for message asset {asset.id}: {e}")
+                logger.error(
+                    f"Failed to send notification to recipients for message asset {asset.id}: {e}"
+                )
 
-        elif message.type == ConversationMessageType.BULK and message.status != ConversationMessageStatus.PENDING:
+        elif (
+            message.type == ConversationMessageType.BULK
+            and message.status != ConversationMessageStatus.PENDING
+        ):
             # BULK メッセージで status != PENDING の場合、同じ group_by の受信者に通知とメール送信
             try:
                 # 同じ group_by を持つメッセージから受信者を取得
                 # Conversations -> ConversationParticipants -> Users の関係から受信者を取得
-                bulk_messages = db.query(ConversationMessages).filter(
-                    ConversationMessages.group_by == message.group_by
-                ).all()
+                bulk_messages = (
+                    db.query(ConversationMessages)
+                    .filter(ConversationMessages.group_by == message.group_by)
+                    .all()
+                )
 
                 if not bulk_messages:
-                    logger.warning(f"No bulk messages found for group_by={message.group_by}")
+                    logger.warning(
+                        f"No bulk messages found for group_by={message.group_by}"
+                    )
                 else:
                     # 各メッセージの会話から受信者を取得
                     recipient_user_ids = set()
                     for bulk_msg in bulk_messages:
-                        recipients = db.query(ConversationParticipants).filter(
-                            ConversationParticipants.conversation_id == bulk_msg.conversation_id,
-                            ConversationParticipants.user_id != sender_user_id
-                        ).all()
+                        recipients = (
+                            db.query(ConversationParticipants)
+                            .filter(
+                                ConversationParticipants.conversation_id
+                                == bulk_msg.conversation_id,
+                                ConversationParticipants.user_id != sender_user_id,
+                            )
+                            .all()
+                        )
                         for recipient in recipients:
                             if recipient.user_id:
                                 recipient_user_ids.add(recipient.user_id)
 
                     # 送信者のプロフィール情報を取得
-                    sender_profile = db.query(Profiles).filter(Profiles.user_id == sender_user_id).first()
-                    sender_name = sender_profile.username if sender_profile else "Unknown User"
-                    sender_avatar_url = f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}" if sender_profile and sender_profile.avatar_url else None
+                    sender_profile = (
+                        db.query(Profiles)
+                        .filter(Profiles.user_id == sender_user_id)
+                        .first()
+                    )
+                    sender_name = (
+                        sender_profile.username if sender_profile else "Unknown User"
+                    )
+                    sender_avatar_url = (
+                        f"{os.getenv('CDN_BASE_URL')}/{sender_profile.avatar_url}"
+                        if sender_profile and sender_profile.avatar_url
+                        else None
+                    )
 
                     # メッセージプレビューを生成
                     if message.body_text:
-                        message_preview = message.body_text[:50] if len(message.body_text) > 50 else message.body_text
+                        message_preview = (
+                            message.body_text[:50]
+                            if len(message.body_text) > 50
+                            else message.body_text
+                        )
                     else:
                         # アセットのみの場合
                         if asset.asset_type == MessageAssetType.IMAGE:
@@ -347,13 +438,19 @@ def approve_message_asset(
                     # 各受信者に通知とメールを送信
                     for recipient_user_id in recipient_user_ids:
                         try:
-                            need_to_send_recipient_notification = CommonFunction.get_user_need_to_send_notification(
-                                db, recipient_user_id, "userMessages"
+                            need_to_send_recipient_notification = (
+                                CommonFunction.get_user_need_to_send_notification(
+                                    db, recipient_user_id, "userMessages"
+                                )
                             )
                             if not need_to_send_recipient_notification:
                                 continue
 
-                            recipient_user = db.query(Users).filter(Users.id == recipient_user_id).first()
+                            recipient_user = (
+                                db.query(Users)
+                                .filter(Users.id == recipient_user_id)
+                                .first()
+                            )
                             if not recipient_user:
                                 continue
 
@@ -367,13 +464,24 @@ def approve_message_asset(
                             )
 
                             # メール通知を送信
-                            need_to_send_email_notification = CommonFunction.get_user_need_to_send_notification(
-                                db, recipient_user.id, "message"
+                            need_to_send_email_notification = (
+                                CommonFunction.get_user_need_to_send_notification(
+                                    db, recipient_user.id, "message"
+                                )
                             )
                             if need_to_send_email_notification and recipient_user.email:
                                 try:
-                                    recipient_profile = db.query(Profiles).filter(Profiles.user_id == recipient_user.id).first()
-                                    recipient_name = recipient_profile.username if recipient_profile and recipient_profile.username else recipient_user.profile_name
+                                    recipient_profile = (
+                                        db.query(Profiles)
+                                        .filter(Profiles.user_id == recipient_user.id)
+                                        .first()
+                                    )
+                                    recipient_name = (
+                                        recipient_profile.username
+                                        if recipient_profile
+                                        and recipient_profile.username
+                                        else recipient_user.profile_name
+                                    )
 
                                     send_message_notification_email(
                                         to=recipient_user.email,
@@ -382,18 +490,26 @@ def approve_message_asset(
                                         message_preview=message_preview,
                                         conversation_url=f"{os.getenv('FRONTEND_URL', 'https://mijfans.jp/')}/message/conversation-list",
                                     )
-                                    logger.info(f"Bulk message notification email sent to {recipient_user.email} for message asset {asset.id}")
+                                    logger.info(
+                                        f"Bulk message notification email sent to {recipient_user.email} for message asset {asset.id}"
+                                    )
                                 except Exception as e:
-                                    logger.error(f"Failed to send notification email to {recipient_user.email}: {e}")
+                                    logger.error(
+                                        f"Failed to send notification email to {recipient_user.email}: {e}"
+                                    )
                         except Exception as e:
-                            logger.error(f"Failed to send notification to recipient {recipient_user_id}: {e}")
+                            logger.error(
+                                f"Failed to send notification to recipient {recipient_user_id}: {e}"
+                            )
             except Exception as e:
                 # 受信者への通知エラーはログに記録するが、承認は成功とする
-                logger.error(f"Failed to send bulk message notifications for message asset {asset.id}: {e}")
+                logger.error(
+                    f"Failed to send bulk message notifications for message asset {asset.id}: {e}"
+                )
 
     # 承認済みなのでCDN URLを設定
     cdn_url = f"{MESSAGE_ASSETS_CDN_URL}/{asset.storage_key}"
-
+    trigger_batch_generate_thumbnail_messageassets(asset.id)
     return MessageAssetResponse(
         id=asset.id,
         status=asset.status,
@@ -433,9 +549,11 @@ def reject_message_asset(
         raise HTTPException(status_code=404, detail="Message asset not found")
 
     # メッセージ情報を取得（通知送信のため）
-    message = db.query(ConversationMessages).filter(
-        ConversationMessages.id == asset.message_id
-    ).first()
+    message = (
+        db.query(ConversationMessages)
+        .filter(ConversationMessages.id == asset.message_id)
+        .first()
+    )
 
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -479,9 +597,13 @@ def reject_message_asset(
                     reject_comments=request.reject_comments,
                     group_by=group_by,
                 )
-                logger.info(f"Rejection email sent to {sender_user.email} for message asset {asset.id}")
+                logger.info(
+                    f"Rejection email sent to {sender_user.email} for message asset {asset.id}"
+                )
             except Exception as e:
-                logger.error(f"Failed to send rejection email to {sender_user.email}: {e}")
+                logger.error(
+                    f"Failed to send rejection email to {sender_user.email}: {e}"
+                )
 
     # レスポンスを保存
     response = MessageAssetResponse(
@@ -518,6 +640,7 @@ def delete_message_asset(
     # S3からオブジェクトを削除
     try:
         from app.services.s3.presign import delete_object
+
         delete_object(resource="message-assets", key=asset.storage_key)
     except Exception as e:
         # S3削除失敗してもログに記録してDBレコードは削除

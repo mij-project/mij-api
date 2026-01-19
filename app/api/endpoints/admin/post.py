@@ -17,7 +17,7 @@ from app.crud.admin_crud import (
     reject_post_with_comments,
 )
 from app.crud.post_crud import add_mail_notification_for_post, add_notification_for_post, get_post_and_categories_by_id, update_post_status as update_post_status_crud, get_post_by_id
-from app.crud.media_assets_crud import get_media_assets_by_post_id_and_kind, get_media_asset_by_post_id, update_media_asset
+from app.crud.media_assets_crud import get_media_assets_by_post_id_and_kind, update_media_asset
 from app.models.media_assets import MediaAssets
 from app.api.commons.utils import resolve_media_asset_storage_key
 from app.constants.enums import MediaAssetKind, AuthenticatedFlag, PostType, PostStatus, MediaAssetStatus

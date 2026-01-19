@@ -7,3 +7,4 @@ requests
 jinja2
 tenacity
 pywebpush
+pillow

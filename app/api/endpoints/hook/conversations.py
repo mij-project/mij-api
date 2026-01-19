@@ -14,7 +14,7 @@ from app.crud.user_crud import get_user_by_id
 from app.crud.admin_crud import get_admin_by_id
 from app.crud import conversations_crud
 from app.core.logger import Logger
-
+from app.crud import notifications_crud
 logger = Logger.get_logger()
 BASE_URL = os.getenv("CDN_BASE_URL")
 
@@ -171,7 +171,7 @@ async def websocket_delusion_endpoint(
                     continue
 
                 # メッセージをDBに保存
-                logger.info(f"💾 Saving message to DB...")
+                logger.info("💾 Saving message to DB...")
                 message = conversations_crud.create_message(
                     db=db,
                     conversation_id=UUID(conversation_id),
@@ -204,7 +204,6 @@ async def websocket_delusion_endpoint(
                     },
                 }
                 await manager.broadcast_to_conversation(conversation_id, broadcast_data)
-
             elif message_type == "ping":
                 # Ping/Pongでコネクション維持
                 await websocket.send_json({"type": "pong"})
@@ -277,7 +276,6 @@ async def websocket_admin_delusion_endpoint(
                     sender_admin_id=admin.id,
                     body_text=body_text,
                 )
-
                 # 会話に接続している全員に配信
                 await manager.broadcast_to_conversation(
                     conversation_id,
@@ -296,6 +294,7 @@ async def websocket_admin_delusion_endpoint(
                         },
                     },
                 )
+                notifications_crud.add_notification_for_delusion_message(db, message.conversation_id)
 
             elif message_type == "mark_read":
                 # 既読マーク
