@@ -1,5 +1,3 @@
-import sys
-import os
 
 from common.logger import Logger
 from send_reservation_message import SendReservationMessage

@@ -1,7 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
 from os import getenv
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
@@ -15,9 +14,7 @@ from app.schemas.admin import (
     CreateAdminRequest,
     AdminResponse,
 )
-from app.models.user import Users
 from app.models.creators import Creators
-from app.models.profiles import Profiles
 from app.models.admins import Admins
 from app.core.security import hash_password
 from app.crud.admin_crud import (
@@ -29,8 +26,6 @@ from app.crud.admin_crud import (
     update_creator_application_status,
     create_admin,
 )
-from app.services.s3.presign import presign_get
-from app.constants.enums import MediaAssetKind
 from app.core.logger import Logger
 
 logger = Logger.get_logger()
@@ -91,7 +86,7 @@ def get_users(
     )
 
 @router.patch("/users/{user_id}/status")
-def update_user_status(
+def update_user_status_hdl(
     user_id: str,
     status: str,
     db: Session = Depends(get_db),

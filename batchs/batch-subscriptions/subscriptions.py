@@ -1,9 +1,10 @@
 import os
+
 # import time
 import requests
 from threading import Thread
 from datetime import datetime, timezone
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, and_
 from sqlalchemy.orm import Session, aliased
 from common.db_session import get_db
 from common.logger import Logger
@@ -11,6 +12,7 @@ from models.subscriptions import Subscriptions
 from models.user_providers import UserProviders
 from models.payments import Payments
 from models.payment_transactions import PaymentTransactions
+from models.providers import Providers
 from slack_sdk import WebClient
 from common.constants import ENV
 
@@ -43,16 +45,18 @@ class SubscriptionsDomain:
 
     def _query_inday_need_to_pay_subscriptions(self, db: Session):
         now = datetime.now(timezone.utc)
+        now_date = now.date()
 
         UP = UserProviders
 
         provider_ranked_sq = (
             db.query(
+                UP.id.label("up_id"),
                 UP.provider_id.label("provider_id"),
                 UP.user_id.label("user_id"),
                 func.row_number()
                 .over(
-                    partition_by=UP.provider_id,
+                    partition_by=[UP.user_id, UP.provider_id],
                     order_by=[
                         desc(UP.is_main_card),
                         desc(UP.last_used_at).nullslast(),
@@ -69,16 +73,24 @@ class SubscriptionsDomain:
             )
             .subquery()
         )
+
         BestProvider = aliased(UserProviders)
 
         return (
-            db.query(Subscriptions, BestProvider, Payments)
-            .join(provider_ranked_sq, provider_ranked_sq.c.provider_id == Subscriptions.provider_id)
-            .join(BestProvider, BestProvider.user_id == provider_ranked_sq.c.user_id)
+            db.query(Subscriptions, BestProvider, Payments, Providers)
+            .join(
+                provider_ranked_sq,
+                and_(
+                    provider_ranked_sq.c.provider_id == Subscriptions.provider_id,
+                    provider_ranked_sq.c.user_id == Subscriptions.user_id,
+                ),
+            )
+            .join(BestProvider, BestProvider.id == provider_ranked_sq.c.up_id)
             .join(Payments, Subscriptions.payment_id == Payments.id)
+            .join(Providers, Subscriptions.provider_id == Providers.id)
             .filter(
                 provider_ranked_sq.c.rn == 1,
-                func.date(Subscriptions.next_billing_date) == now.date(),
+                func.date(Subscriptions.next_billing_date) == now_date,
                 Subscriptions.access_type == 1,
             )
             .all()
@@ -94,12 +106,14 @@ class SubscriptionsDomain:
                 subs: Subscriptions = subscription[0]
                 user_provider: UserProviders = subscription[1]
                 payment: Payments = subscription[2]
-
+                provider: Providers = subscription[3]
                 if subs.status == 2:
                     self.__mark_subscription_as_cancelled(db, subs)
                     self.logger.info(f"Subscription {subs.id} marked as cancelled")
                 elif subs.status == 1:
-                    self.__process_next_subscription(db, subs, user_provider, payment)
+                    self.__process_next_subscription(
+                        db, subs, user_provider, payment, provider
+                    )
                     need_change_status = subs.id
                 # done = True
             except Exception as e:
@@ -129,12 +143,12 @@ class SubscriptionsDomain:
             ],
         )
 
-    def __mark_subscription_as_cancelled(self, db: Session, subscription: Subscriptions):
+    def __mark_subscription_as_cancelled(
+        self, db: Session, subscription: Subscriptions
+    ):
         now = datetime.now(timezone.utc)
         subs = (
-            db.query(Subscriptions)
-            .filter(Subscriptions.id == subscription.id)
-            .first()
+            db.query(Subscriptions).filter(Subscriptions.id == subscription.id).first()
         )
         if not subs:
             self.logger.error(f"Subscription {subscription.id} not found")
@@ -152,8 +166,15 @@ class SubscriptionsDomain:
         subscription: Subscriptions,
         user_provider: UserProviders,
         payment: Payments,
+        provider: Providers,
     ):
+        if provider.code != "credix":
+            self.logger.info(f"Provider {provider.code} is not supported")
+            return
         if user_provider.cardbrand != "J":
+            self.logger.info(
+                f"User provider {user_provider.cardbrand} is not supported"
+            )
             return
         now = datetime.now(timezone.utc)
         txn = PaymentTransactions(
@@ -202,9 +223,7 @@ class SubscriptionsDomain:
     def __change_status_of_subscription(self, db: Session, subscription_id: str):
         now = datetime.now(timezone.utc)
         subs = (
-            db.query(Subscriptions)
-            .filter(Subscriptions.id == subscription_id)
-            .first()
+            db.query(Subscriptions).filter(Subscriptions.id == subscription_id).first()
         )
         if not subs:
             self.logger.error(f"Subscription {subscription_id} not found")

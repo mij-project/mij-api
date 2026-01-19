@@ -113,3 +113,7 @@ class UserOGPResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=8)

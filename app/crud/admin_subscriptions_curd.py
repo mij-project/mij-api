@@ -1,4 +1,3 @@
-from ast import Sub
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, or_, select, func
 from sqlalchemy.orm import Session, aliased
@@ -265,5 +264,5 @@ def __get_subscriptions_info_failed(
         .limit(limit)
         .all()
     )
-
+    
     return rows, total

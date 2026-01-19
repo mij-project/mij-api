@@ -32,6 +32,7 @@ class NotificationType(IntEnum):
 class NotificationCreateRequest(BaseModel):
   type: NotificationType = Field(..., description='通知種別: 1: admin -> users 2: users -> users 3: payments')
   payload: dict = Field(..., description='通知内容: 通知内容をJSON形式で指定')
+  target_role: Optional[int] = Field(None, description='通知対象: 0: all 2: creator only')
   @model_validator(mode='after')
   def validate_payload_by_type(self):
     if self.type == NotificationType.ADMIN:
@@ -47,6 +48,7 @@ class NotificationCreateRequest(BaseModel):
 class NotificationCreateResponse(BaseModel):
   id: UUID = Field(..., description='通知ID')
   type: NotificationType = Field(..., description='通知種別: 1: admin -> users 2: users -> users 3: payments')
+  target_role: Optional[int] = Field(None, description='通知対象: 0: all 2: creator only')
   payload: dict = Field(..., description='通知内容: 通知内容をJSON形式で指定')
   is_read: bool = Field(..., description='既読フラグ')
   read_at: Optional[datetime] = Field(None, description='既読日時')

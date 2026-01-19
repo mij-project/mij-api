@@ -1,3 +1,4 @@
+import os
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, exists, or_, func
 from typing import Optional, List, Tuple
@@ -10,10 +11,15 @@ from app.models.conversation_messages import ConversationMessages
 from app.models.conversation_participants import ConversationParticipants
 from app.models.user import Users
 from app.models.admins import Admins
-from app.constants.enums import ConversationType, ParticipantType, ConversationMessageType, ConversationMessageStatus
+from app.constants.enums import (
+    ConversationType,
+    ParticipantType,
+    ConversationMessageType,
+    ConversationMessageStatus,
+)
 from app.models.profiles import Profiles
 from app.constants.messages import WelcomeMessage
-import os
+
 BASE_URL = os.getenv("CDN_BASE_URL")
 
 logger = Logger.get_logger()
@@ -33,7 +39,7 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
         .filter(
             ConversationParticipants.user_id == user_id,
             Conversations.type == ConversationType.DELUSION,
-            Conversations.is_active == True,
+            Conversations.is_active.is_(True),
         )
         .first()
     )
@@ -103,13 +109,14 @@ def get_or_create_delusion_conversation(db: Session, user_id: UUID) -> Conversat
 
     return conversation
 
+
 def get_conversation_by_id(
     db: Session, conversation_id: UUID
 ) -> Optional[Conversations]:
     """会話IDで会話を取得"""
     return (
         db.query(Conversations)
-        .filter(Conversations.id == conversation_id, Conversations.is_active == True)
+        .filter(Conversations.id == conversation_id, Conversations.is_active.is_(True))
         .first()
     )
 
@@ -141,7 +148,10 @@ def _update_conversation_last_message(
 
     # INACTIVEメッセージの場合は更新しない（決済完了時に更新される）
     # PENDINGメッセージの場合は更新しない（実際の送信時に更新される）
-    if message.status in (ConversationMessageStatus.INACTIVE, ConversationMessageStatus.PENDING):
+    if message.status in (
+        ConversationMessageStatus.INACTIVE,
+        ConversationMessageStatus.PENDING,
+    ):
         return
 
     conversation = (
@@ -263,6 +273,7 @@ def create_chip_message(
         status=status,
     )
 
+
 def get_messages_by_conversation(
     db: Session, conversation_id: UUID, skip: int = 0, limit: int = 50
 ) -> List[
@@ -274,7 +285,7 @@ def get_messages_by_conversation(
     システムメッセージ（sender_user_id/sender_admin_id共にNULL）も含む
     Returns: (message, user, profile, admin) のタプルリスト
     """
-    messages = (
+    q = (
         db.query(ConversationMessages, Users, Profiles, Admins)
         .join(Users, ConversationMessages.sender_user_id == Users.id, isouter=True)
         .join(Profiles, Users.id == Profiles.user_id, isouter=True)
@@ -282,8 +293,7 @@ def get_messages_by_conversation(
         .filter(
             ConversationMessages.conversation_id == conversation_id,
             or_(
-                ConversationMessages.status != 0,
-                ConversationMessages.status.is_(None),
+                ConversationMessages.status != 0, ConversationMessages.status.is_(None)
             ),
             ConversationMessages.deleted_at.is_(None),
             or_(
@@ -291,13 +301,17 @@ def get_messages_by_conversation(
                 ConversationMessages.status.is_(None),
             ),
         )
-        .order_by(ConversationMessages.created_at.asc(), ConversationMessages.updated_at.asc())
+        .order_by(
+            ConversationMessages.created_at.desc(), ConversationMessages.id.desc()
+        )
         .offset(skip)
-        .limit(limit)
-        .all()
+        .limit(limit + 1)
     )
 
-    return messages
+    rows = q.all()
+    has_next = len(rows) > limit
+    rows = rows[:limit]
+    return rows, has_next
 
 
 def get_message_by_id(db: Session, message_id: UUID) -> Optional[ConversationMessages]:
@@ -329,6 +343,7 @@ def delete_message(db: Session, message_id: UUID) -> bool:
 def mark_as_read(db: Session, conversation_id: UUID, user_id: UUID, message_id: UUID):
     """メッセージを既読にする"""
     from app.core.logger import Logger
+
     logger = Logger.get_logger()
 
     # 既存のparticipantレコードを取得
@@ -342,14 +357,20 @@ def mark_as_read(db: Session, conversation_id: UUID, user_id: UUID, message_id: 
     )
 
     if participant:
-        logger.info(f"Marking message {message_id} as read for user {user_id} in conversation {conversation_id}")
+        logger.info(
+            f"Marking message {message_id} as read for user {user_id} in conversation {conversation_id}"
+        )
         participant.last_read_message_id = message_id
         participant.updated_at = func.now()
         db.commit()
         db.refresh(participant)
-        logger.info(f"Successfully marked message as read. last_read_message_id={participant.last_read_message_id}")
+        logger.info(
+            f"Successfully marked message as read. last_read_message_id={participant.last_read_message_id}"
+        )
     else:
-        logger.warning(f"Participant not found for user {user_id} in conversation {conversation_id}")
+        logger.warning(
+            f"Participant not found for user {user_id} in conversation {conversation_id}"
+        )
 
 
 def get_unread_count(db: Session, conversation_id: UUID, user_id: UUID) -> int:
@@ -414,7 +435,7 @@ def get_all_delusion_conversations_for_admin(
     has_user_message = exists().where(
         ConversationMessages.conversation_id == Conversations.id,
         ConversationMessages.sender_user_id.isnot(None),
-        ConversationMessages.deleted_at.is_(None)
+        ConversationMessages.deleted_at.is_(None),
     )
 
     # 妄想メッセージタイプの全会話を取得
@@ -436,7 +457,7 @@ def get_all_delusion_conversations_for_admin(
         .join(Profiles, Users.id == Profiles.user_id)
         .filter(
             Conversations.type == ConversationType.DELUSION,
-            Conversations.is_active == True,
+            Conversations.is_active.is_(True),
             has_user_message,  # 一度でもユーザーメッセージがある会話のみ
         )
         .order_by(desc(Conversations.last_message_at))
@@ -467,7 +488,9 @@ def get_all_delusion_conversations_for_admin(
                 "user_id": conv.user_id,
                 "user_username": conv.username,
                 "user_profile_name": conv.profile_name,
-                "user_avatar": f"{BASE_URL}/{conv.avatar_url}" if conv.avatar_url else None,
+                "user_avatar": f"{BASE_URL}/{conv.avatar_url}"
+                if conv.avatar_url
+                else None,
                 "last_message_text": last_message,
                 "last_message_at": conv.last_message_at,
                 "unread_count": 0,  # 後で実装可能
@@ -503,20 +526,19 @@ def get_new_conversations_unread(db: Session, user_id: UUID) -> int:
         )
         if participant is None:
             return False
-        
+
         # タプルの場合、インデックスでアクセス
         # participant[0] = ConversationParticipants
         # participant[1] = last_message_at
         # participant[2] = ConversationMessages
         if len(participant) < 3 or participant[2] is None:
             return False
-        
+
         conversation_messages = participant[2]
         conversation_participants = participant[0]
-        
+
         if (conversation_messages.sender_admin_id is not None) and (
-            conversation_participants.joined_at
-            < conversation_messages.created_at
+            conversation_participants.joined_at < conversation_messages.created_at
         ):
             return True
         return False
@@ -562,12 +584,13 @@ def get_user_conversations(
         )
         .join(
             ConversationParticipants,
-            Conversations.id == ConversationParticipants.conversation_id
+            Conversations.id == ConversationParticipants.conversation_id,
         )
         .filter(
             ConversationParticipants.user_id == user_id,
-            Conversations.type == ConversationType.DM,  # type=2: クリエイターとユーザーのDM
-            Conversations.is_active == True,
+            Conversations.type
+            == ConversationType.DM,  # type=2: クリエイターとユーザーのDM
+            Conversations.is_active.is_(True),
             Conversations.deleted_at.is_(None),
         )
     )
@@ -575,31 +598,31 @@ def get_user_conversations(
     # 相手ユーザー情報を取得するために、もう一つのConversationParticipantsとJOIN
     # self-join を使用して相手を特定
     from sqlalchemy.orm import aliased
+
     PartnerParticipant = aliased(ConversationParticipants)
 
-    query = query.join(
-        PartnerParticipant,
-        (PartnerParticipant.conversation_id == Conversations.id) &
-        (PartnerParticipant.user_id != user_id)
-    ).join(
-        Users,
-        Users.id == PartnerParticipant.user_id
-    ).outerjoin(
-        Profiles,
-        Profiles.user_id == Users.id
+    query = (
+        query.join(
+            PartnerParticipant,
+            (PartnerParticipant.conversation_id == Conversations.id)
+            & (PartnerParticipant.user_id != user_id),
+        )
+        .join(Users, Users.id == PartnerParticipant.user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
     )
 
     # 検索フィルター（相手の名前で検索）
     if search:
-        query = query.filter(
-            Users.profile_name.ilike(f"%{search}%")
-        )
+        query = query.filter(Users.profile_name.ilike(f"%{search}%"))
 
     # 未読フィルター
     if unread_only:
         query = query.filter(
-            (ConversationParticipants.last_read_message_id.is_(None)) |
-            (ConversationParticipants.last_read_message_id != Conversations.last_message_id)
+            (ConversationParticipants.last_read_message_id.is_(None))
+            | (
+                ConversationParticipants.last_read_message_id
+                != Conversations.last_message_id
+            )
         )
 
     # 最終メッセージがある会話のみをカウントするためのサブクエリ
@@ -610,8 +633,8 @@ def get_user_conversations(
             ConversationMessages.deleted_at.is_(None),
             or_(
                 ConversationMessages.status.is_(None),
-                ConversationMessages.status == ConversationMessageStatus.ACTIVE
-            )
+                ConversationMessages.status == ConversationMessageStatus.ACTIVE,
+            ),
         )
         .group_by(ConversationMessages.conversation_id)
         .subquery()
@@ -619,9 +642,7 @@ def get_user_conversations(
 
     # 最終メッセージがある会話のみをフィルタリング
     query = query.filter(
-        Conversations.id.in_(
-            db.query(messages_with_valid_status.c.conversation_id)
-        )
+        Conversations.id.in_(db.query(messages_with_valid_status.c.conversation_id))
     )
 
     # ソート
@@ -650,8 +671,8 @@ def get_user_conversations(
                     ConversationMessages.deleted_at.is_(None),
                     or_(
                         ConversationMessages.status.is_(None),
-                        ConversationMessages.status == ConversationMessageStatus.ACTIVE
-                    )
+                        ConversationMessages.status == ConversationMessageStatus.ACTIVE,
+                    ),
                 )
                 .order_by(ConversationMessages.created_at.desc())
                 .first()
@@ -670,7 +691,8 @@ def get_user_conversations(
                 db.query(ConversationMessages)
                 .filter(
                     ConversationMessages.conversation_id == conv.conversation_id,
-                    ConversationMessages.created_at > (
+                    ConversationMessages.created_at
+                    > (
                         db.query(ConversationMessages.created_at)
                         .filter(ConversationMessages.id == conv.last_read_message_id)
                         .scalar_subquery()
@@ -679,8 +701,8 @@ def get_user_conversations(
                     ConversationMessages.deleted_at.is_(None),
                     or_(
                         ConversationMessages.status.is_(None),
-                        ConversationMessages.status == ConversationMessageStatus.ACTIVE
-                    )
+                        ConversationMessages.status == ConversationMessageStatus.ACTIVE,
+                    ),
                 )
                 .count()
             )
@@ -694,22 +716,26 @@ def get_user_conversations(
                     ConversationMessages.deleted_at.is_(None),
                     or_(
                         ConversationMessages.status.is_(None),
-                        ConversationMessages.status == ConversationMessageStatus.ACTIVE
-                    )
+                        ConversationMessages.status == ConversationMessageStatus.ACTIVE,
+                    ),
                 )
                 .count()
             )
 
-        result.append({
-            "id": str(conv.conversation_id),
-            "partner_user_id": str(conv.partner_user_id),
-            "partner_name": conv.partner_name,
-            "partner_avatar": f"{BASE_URL}/{conv.partner_avatar}" if conv.partner_avatar else None,
-            "last_message_text": last_message_text,
-            "last_message_at": conv.last_message_at,
-            "unread_count": unread_count,
-            "created_at": conv.created_at,
-        })
+        result.append(
+            {
+                "id": str(conv.conversation_id),
+                "partner_user_id": str(conv.partner_user_id),
+                "partner_name": conv.partner_name,
+                "partner_avatar": f"{BASE_URL}/{conv.partner_avatar}"
+                if conv.partner_avatar
+                else None,
+                "last_message_text": last_message_text,
+                "last_message_at": conv.last_message_at,
+                "unread_count": unread_count,
+                "created_at": conv.created_at,
+            }
+        )
 
     return result, total
 
@@ -744,7 +770,7 @@ def get_or_create_dm_conversation(
         )
         .filter(
             Conversations.type == ConversationType.DM,
-            Conversations.is_active == True,
+            Conversations.is_active.is_(True),
             Conversations.deleted_at.is_(None),
             ConversationParticipants.user_id == user_id_1,
         )
@@ -813,11 +839,13 @@ def get_unread_conversation_count(db: Session, user_id: UUID) -> int:
     # ユーザーが参加しているtype=2（DM）の会話を取得
     participants = (
         db.query(ConversationParticipants)
-        .join(Conversations, ConversationParticipants.conversation_id == Conversations.id)
+        .join(
+            Conversations, ConversationParticipants.conversation_id == Conversations.id
+        )
         .filter(
             ConversationParticipants.user_id == user_id,
             Conversations.type == ConversationType.DM,  # type=2: DM
-            Conversations.is_active == True,
+            Conversations.is_active.is_(True),
             Conversations.deleted_at.is_(None),
         )
         .all()
@@ -844,8 +872,8 @@ def get_unread_conversation_count(db: Session, user_id: UUID) -> int:
                 ConversationMessages.deleted_at.is_(None),
                 or_(
                     ConversationMessages.status.is_(None),
-                    ConversationMessages.status == ConversationMessageStatus.ACTIVE
-                )
+                    ConversationMessages.status == ConversationMessageStatus.ACTIVE,
+                ),
             )
             .first()
         )
@@ -855,3 +883,45 @@ def get_unread_conversation_count(db: Session, user_id: UUID) -> int:
             unread_count += 1
 
     return unread_count
+
+
+def get_delusion_unread(db: Session, user_id: UUID) -> bool:
+    """
+    妄想メッセージの新着メッセージ数を取得
+    """
+    try:
+        participant = (
+            db.query(
+                ConversationParticipants,
+                Conversations.last_message_at.label("last_message_at"),
+                ConversationMessages,
+            )
+            .join(
+                Conversations,
+                ConversationParticipants.conversation_id == Conversations.id,
+            )
+            .join(
+                ConversationMessages,
+                Conversations.last_message_id == ConversationMessages.id,
+                isouter=True,
+            )
+            .filter(ConversationParticipants.user_id == user_id, Conversations.type == ConversationType.DELUSION)
+            .first()
+        )
+        if participant is None:
+            return False
+        
+        if len(participant) < 3 or participant[2] is None:
+            return False
+
+        conversation_messages = participant[2]
+        conversation_participants = participant[0]
+
+        if (conversation_messages.sender_admin_id is not None) and (
+            conversation_participants.joined_at < conversation_messages.created_at
+        ):
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Get delusion unread error: {e}", exc_info=True)
+        return False
