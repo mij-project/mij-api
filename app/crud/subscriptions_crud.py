@@ -1,11 +1,13 @@
 """
 Subscriptions CRUD操作
 """
+
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+from app.api.endpoints.hook.payment import SUBSCRIPTION_DURATION_DAYS
 from app.models.subscriptions import Subscriptions
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import or_
@@ -14,7 +16,12 @@ from sqlalchemy import cast
 from app.models.prices import Prices
 from app.models.plans import Plans, PostPlans
 from datetime import datetime, timezone
-from app.constants.enums import SubscriptionStatus, SubscriptionType, PaymentTransactionType
+from app.constants.enums import (
+    SubscriptionStatus,
+    SubscriptionType,
+    PaymentTransactionType,
+)
+
 
 def create_subscription(
     db: Session,
@@ -44,21 +51,24 @@ def create_subscription(
         payment_id=payment_id,
         status=status,
         cancel_at_period_end=False,
-        failed_payment_count=0
+        failed_payment_count=0,
     )
     db.add(subscription)
     db.commit()
     db.refresh(subscription)
     return subscription
 
-def create_expired_subscription(    
+
+def create_expired_subscription(
     db: Session,
     user_id: UUID,
     creator_id: UUID,
     order_id: str,
     order_type: int,
+    payment_id: UUID,
 ) -> Subscriptions:
-
+    now = datetime.now(timezone.utc)
+    next_billing_date = now + timedelta(days=SUBSCRIPTION_DURATION_DAYS)
     subscription = Subscriptions(
         access_type=SubscriptionType.PLAN,
         user_id=user_id,
@@ -68,14 +78,18 @@ def create_expired_subscription(
         status=SubscriptionStatus.EXPIRED,
         cancel_at_period_end=True,
         failed_payment_count=1,
-        last_payment_failed_at=datetime.now(timezone.utc),
+        last_payment_failed_at=now,
         next_billing_date=None,
-        canceled_at=datetime.now(timezone.utc),
+        access_start=now,
+        access_end=next_billing_date,
+        canceled_at=now,
+        payment_id=payment_id,
     )
     db.add(subscription)
     db.commit()
     db.refresh(subscription)
     return subscription
+
 
 def check_viewing_rights(db: Session, post_id: str, user_id: str | None) -> bool:
     """
@@ -114,12 +128,11 @@ def check_viewing_rights(db: Session, post_id: str, user_id: str | None) -> bool
         db.query(Subscriptions)
         .filter(
             Subscriptions.user_id == user_id,
-            Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # active
+            Subscriptions.status.in_(
+                [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]
+            ),  # active
             Subscriptions.order_id.in_(valid_order_ids),
-            or_(
-                Subscriptions.access_end.is_(None),
-                Subscriptions.access_end > now
-            )
+            or_(Subscriptions.access_end.is_(None), Subscriptions.access_end > now),
         )
         .first()
     )
@@ -130,7 +143,7 @@ def check_viewing_rights(db: Session, post_id: str, user_id: str | None) -> bool
 def cancel_subscription(db: Session, plan_id: str, user_id: UUID):
     """
     サブスクリプションをキャンセル
-    
+
     Note: order_typeの値について
     - payment.pyの_create_subscription_recordでは order_type=transaction.type を使用
     - PaymentTransactionType.SUBSCRIPTION = 2 がプラン購読
@@ -140,10 +153,11 @@ def cancel_subscription(db: Session, plan_id: str, user_id: UUID):
         db.query(Subscriptions)
         .filter(
             Subscriptions.order_id == plan_id,
-            Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,  # 2 = プラン購読
+            Subscriptions.order_type
+            == PaymentTransactionType.SUBSCRIPTION,  # 2 = プラン購読
             Subscriptions.user_id == user_id,
             Subscriptions.status == SubscriptionStatus.ACTIVE,
-            Subscriptions.canceled_at.is_(None)  # まだキャンセルされていない
+            Subscriptions.canceled_at.is_(None),  # まだキャンセルされていない
         )
         .first()
     )
@@ -151,24 +165,23 @@ def cancel_subscription(db: Session, plan_id: str, user_id: UUID):
         # デバッグ用: 該当するサブスクリプションが存在するか確認
         all_subscriptions = (
             db.query(Subscriptions)
-            .filter(
-                Subscriptions.order_id == plan_id,
-                Subscriptions.user_id == user_id
-            )
+            .filter(Subscriptions.order_id == plan_id, Subscriptions.user_id == user_id)
             .all()
         )
         if not all_subscriptions:
             raise HTTPException(
-                status_code=404, 
-                detail=f"Subscription not found for plan_id={plan_id}, user_id={user_id}"
+                status_code=404,
+                detail=f"Subscription not found for plan_id={plan_id}, user_id={user_id}",
             )
         else:
             # サブスクリプションは存在するが、条件に一致しない
-            details = [f"order_type={s.order_type}, status={s.status}, canceled_at={s.canceled_at}" 
-                      for s in all_subscriptions]
+            details = [
+                f"order_type={s.order_type}, status={s.status}, canceled_at={s.canceled_at}"
+                for s in all_subscriptions
+            ]
             raise HTTPException(
                 status_code=404,
-                detail=f"Active subscription not found. Found subscriptions: {details}"
+                detail=f"Active subscription not found. Found subscriptions: {details}",
             )
     subscription.status = SubscriptionStatus.CANCELED
     subscription.canceled_at = datetime.now(timezone.utc)
@@ -184,16 +197,20 @@ def get_subscription_by_order_id(db: Session, order_id: str):
             Subscriptions.order_id == order_id,
             Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION,
             Subscriptions.status == SubscriptionStatus.ACTIVE,
-            Subscriptions.canceled_at.is_(None)
+            Subscriptions.canceled_at.is_(None),
         )
         .all()
     )
 
 
 def update_subscription_status(db: Session, subscription_id: UUID, status: int):
-    subscription = db.query(Subscriptions).filter(Subscriptions.id == subscription_id).first()
+    subscription = (
+        db.query(Subscriptions).filter(Subscriptions.id == subscription_id).first()
+    )
     if not subscription:
-        raise HTTPException(status_code=404, detail=f"Subscription not found: {subscription_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Subscription not found: {subscription_id}"
+        )
     subscription.status = status
     db.commit()
     db.refresh(subscription)
@@ -223,25 +240,33 @@ def create_free_subscription(
         payment_id=payment_id,
         status=SubscriptionStatus.ACTIVE,
         cancel_at_period_end=False,
-        failed_payment_count=0
+        failed_payment_count=0,
     )
     db.add(subscription)
     db.flush()
     return subscription
+
 
 def get_subscription_by_user_id(db: Session, user_id: UUID, partner_user_id: UUID):
     """
     ユーザーが相手のプランに加入しているかを取得
     （プランの種類やopen_dm_flgの値に関わらず、加入状態を判定）
     """
-    has_subscription = db.query(Subscriptions).join(
-        Plans,
-        (Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION) & (cast(Subscriptions.order_id, PG_UUID) == Plans.id)
-    ).filter(
-        Subscriptions.user_id == user_id,
-        Subscriptions.creator_id == partner_user_id,
-        Subscriptions.status == SubscriptionStatus.ACTIVE
-    ).first() is not None
+    has_subscription = (
+        db.query(Subscriptions)
+        .join(
+            Plans,
+            (Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION)
+            & (cast(Subscriptions.order_id, PG_UUID) == Plans.id),
+        )
+        .filter(
+            Subscriptions.user_id == user_id,
+            Subscriptions.creator_id == partner_user_id,
+            Subscriptions.status == SubscriptionStatus.ACTIVE,
+        )
+        .first()
+        is not None
+    )
 
     return has_subscription
 
@@ -250,14 +275,21 @@ def get_dm_release_plan_subscription(db: Session, user_id: UUID, partner_user_id
     """
     ユーザーが相手のDM解放プラン（open_dm_flg=true）に加入しているかを取得
     """
-    has_dm_subscription = db.query(Subscriptions).join(
-        Plans,
-        (Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION) & (cast(Subscriptions.order_id, PG_UUID) == Plans.id)
-    ).filter(
-        Subscriptions.user_id == user_id,
-        Subscriptions.creator_id == partner_user_id,
-        Subscriptions.status == SubscriptionStatus.ACTIVE,
-        Plans.open_dm_flg == True
-    ).first() is not None
+    has_dm_subscription = (
+        db.query(Subscriptions)
+        .join(
+            Plans,
+            (Subscriptions.order_type == PaymentTransactionType.SUBSCRIPTION)
+            & (cast(Subscriptions.order_id, PG_UUID) == Plans.id),
+        )
+        .filter(
+            Subscriptions.user_id == user_id,
+            Subscriptions.creator_id == partner_user_id,
+            Subscriptions.status == SubscriptionStatus.ACTIVE,
+            Plans.open_dm_flg == True,
+        )
+        .first()
+        is not None
+    )
 
     return has_dm_subscription
