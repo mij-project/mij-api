@@ -72,7 +72,6 @@ async def get_subscriptions_for_admin(
             and subscription.Subscriptions.last_payment_failed_at is not None
         ):
             status = 2
-
         subscriptions_admin_info.append(
             SubscriptionAdminInfo(
                 id=str(subscription.Subscriptions.id),

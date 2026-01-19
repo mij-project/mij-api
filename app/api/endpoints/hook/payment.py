@@ -2,7 +2,6 @@
 CREDIX決済Webhookエンドポイント
 """
 
-import math
 from fastapi import APIRouter, Query, Depends
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
@@ -527,7 +526,7 @@ def _handle_failed_payment(
         and transaction.type == PaymentTransactionType.SUBSCRIPTION
     ):
         # 既存のアクティブなサブスクリプションを期限切れにする
-        _expire_existing_subscriptions(db, transaction.order_id)
+        # _expire_existing_subscriptions(db, transaction.order_id)
 
         # 期限切れサブスクリプションレコードを作成
         subscriptions_crud.create_expired_subscription(
@@ -536,6 +535,7 @@ def _handle_failed_payment(
             creator_id=seller_user_id,
             order_id=transaction.order_id,
             order_type=transaction.type,
+            payment_id=payment.id,
         )
         logger.info(
             f"Expired subscription created for batch failed payment: transaction_id={transaction.id}"
