@@ -52,7 +52,7 @@ from app.services.email.send_email import send_email_verification
 from typing import Tuple, Optional
 from uuid import UUID
 from app.core.logger import Logger
-
+from app.crud.user_providers_crud import get_albatal_provider_email
 logger = Logger.get_logger()
 router = APIRouter()
 
@@ -419,6 +419,30 @@ async def get_user_ogp_image(user_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error("OGP画像URL取得エラーが発生しました", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/provider/email")
+async def get_provider_email(
+    current_user: Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """プロバイダーのメールアドレスを取得"""
+    try:
+        provider_email = get_albatal_provider_email(db, current_user.id)
+
+        if not provider_email:
+            provider_email = current_user.email
+
+        # アドレスにnot-found.comが含まれていたら空で返す
+        if provider_email and "not-found.com" in provider_email:
+            return None
+
+        return provider_email
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("プロバイダーのメールアドレス取得エラーが発生しました", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

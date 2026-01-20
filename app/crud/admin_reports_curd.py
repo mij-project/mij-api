@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy import select, func, case
 from sqlalchemy.orm import Session
 
-from app.constants.enums import PaymentStatus, PaymentType, WithdrawStatus
+from app.constants.enums import PaymentStatus, PaymentType, WithdrawStatus, PaymentTransactionStatus
 from app.core.logger import Logger
 from app.models import CompanyUsers, Payments, Withdraws
 from app.models.payment_transactions import PaymentTransactions
@@ -895,4 +895,436 @@ def get_payment_provider_revenue_last_month_report(
         }
     except Exception as e:
         logger.error(f"Error getting payment provider revenue last month report: {e}")
+        return None
+
+
+def get_albatal_payment_transactions_period_report(
+    db: Session,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> Optional[dict]:
+    try:
+        # Failed payment transaction count
+        fail_paymenttransaction_conditions = [PaymentTransactions.status == PaymentTransactionStatus.FAILED]
+        if start_date is not None:
+            fail_paymenttransaction_conditions.append(
+                PaymentTransactions.created_at >= start_date.replace(tzinfo=None)
+            )
+        if end_date is not None:
+            fail_paymenttransaction_conditions.append(
+                PaymentTransactions.created_at <= end_date.replace(tzinfo=None)
+            )
+
+        failed_stmt = (
+            select(func.coalesce(func.count(PaymentTransactions.id), 0))
+            .select_from(PaymentTransactions)
+            .join(Providers, PaymentTransactions.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *fail_paymenttransaction_conditions,
+            )
+        )
+        failed_row = db.execute(failed_stmt).scalar() or 0
+
+        # Albatal success payment count and fee calculation
+        success_paymenttransaction_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+        ]
+        if start_date is not None:
+            success_paymenttransaction_conditions.append(
+                Payments.paid_at >= start_date.replace(tzinfo=None)
+            )
+        if end_date is not None:
+            success_paymenttransaction_conditions.append(
+                Payments.paid_at <= end_date.replace(tzinfo=None)
+            )
+
+        fee_per_payment = func.round(
+            func.round(Payments.payment_amount * 0.082, 3) + 50, 3
+        )
+        fee_per_payment_transaction_fee_excluding = func.round(
+            Payments.payment_amount * 0.082, 3
+        )
+
+        success_stmt = (
+            select(
+                func.coalesce(
+                    func.sum(fee_per_payment),
+                    0,
+                ).label("total_transaction_fee"),
+                func.coalesce(
+                    func.sum(fee_per_payment_transaction_fee_excluding),
+                    0,
+                ).label("total_payment_transaction_fee_excluding"),
+                func.coalesce(
+                    func.count(Payments.id),
+                    0,
+                ).label("successful_payment_transaction_count"),
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *success_paymenttransaction_conditions,
+            )
+        )
+        success_row = db.execute(success_stmt).one()
+        total_transaction_count = success_row.successful_payment_transaction_count + failed_row
+        total_payment_transaction_fee = float(
+            success_row.total_transaction_fee + 10000
+        )
+        return {
+            "success_payment_transaction_fee": success_row.total_transaction_fee,
+            "success_payment_transaction_count": total_transaction_count,
+            "total_payment_transaction_fee": total_payment_transaction_fee,
+            "total_payment_transaction_fee_excluding": success_row.total_payment_transaction_fee_excluding,
+        }
+    except Exception as e:
+        logger.error(f"Error getting albatal payment transactions period reports: {e}")
+        return None
+
+
+def get_albatal_income_period_report(
+    db: Session,
+    now_utc: datetime,
+) -> Optional[dict]:
+    try:
+        # Convert to JST for checking payment cycle date
+        now_jst = now_utc + timedelta(hours=9)
+
+        # Determine payment cycle and target period
+        if now_jst.day < 15:
+            # Payment on 15th (next month): target period is previous month 1~15
+            payment_cycle_date = 15
+            response_period_start = 1
+            response_period_end = 15
+            target_period_start = 1
+            target_period_end = 15
+
+            # Calculate target month (previous month)
+            if now_utc.month == 1:
+                target_year = now_utc.year - 1
+                target_month = 12
+            else:
+                target_year = now_utc.year
+                target_month = now_utc.month - 1
+
+            # For response display - same as target month for 15th payment
+            response_month = target_month
+        else:
+            # Payment on end of month: target period is previous month 16~end
+            payment_cycle_date = "末日"
+            response_period_start = 16
+            response_period_end = None  # Will be calculated (last day of month)
+            target_period_start = 16
+            target_period_end = None  # Will be calculated (last day of month)
+
+            # Previous month (for sales data calculation - the actual sales month for end-of-month payment)
+            if now_utc.month == 1:
+                target_year = now_utc.year - 1
+                target_month = 12
+            else:
+                target_year = now_utc.year
+                target_month = now_utc.month - 1
+
+            # For response display - same as target month
+            response_month = target_month
+
+        # Calculate corresponding period 6 months prior
+        # For 16~end period: December (12) -> July (7), January (1) -> August (8), etc.
+        # This represents the deposition data from 6 months back
+        six_months_ago_month = target_month - 5
+        if six_months_ago_month <= 0:
+            six_months_ago_month += 12
+            six_months_ago_year = target_year - 1
+        else:
+            six_months_ago_year = target_year
+
+        # Calculate date ranges for target month period
+        if target_period_end is None:
+            # Last day of month
+            if target_month == 12:
+                target_period_end_date = datetime(target_year, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+            else:
+                target_period_end_date = (datetime(target_year, target_month + 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(microseconds=1)) - timedelta(hours=9)
+        else:
+            target_period_end_date = datetime(target_year, target_month, target_period_end, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        target_period_start_date = datetime(target_year, target_month, target_period_start, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        # Query for target month period
+        target_month_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+            Payments.paid_at >= target_period_start_date.replace(tzinfo=None),
+            Payments.paid_at <= target_period_end_date.replace(tzinfo=None),
+        ]
+
+        target_month_stmt = (
+            select(
+                func.coalesce(func.sum(Payments.payment_amount), 0).label("total_amount")
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *target_month_conditions,
+            )
+        )
+
+        target_month_amount = float(db.execute(target_month_stmt).scalar() or 0)
+        income_90_percent = round(target_month_amount * 0.9, 3)
+
+        # Set start date for 6 months ago period
+        # Use the corresponding period based on current JST day
+        if now_jst.day < 15:
+            # If current day is 1-14, use 1-15 in 6 months ago
+            six_months_ago_period_start = 1
+            six_months_ago_period_end = 15
+        else:
+            # If current day is 15+, use 16-end of month in 6 months ago
+            six_months_ago_period_start = 16
+            six_months_ago_period_end = None
+
+        # Set end date for 6 months ago period
+        if six_months_ago_period_end is None:
+            # Last day of month
+            if six_months_ago_month == 12:
+                six_months_ago_end_date = datetime(six_months_ago_year, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+            else:
+                six_months_ago_end_date = (datetime(six_months_ago_year, six_months_ago_month + 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(microseconds=1)) - timedelta(hours=9)
+        else:
+            six_months_ago_end_date = datetime(six_months_ago_year, six_months_ago_month, six_months_ago_period_end, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        six_months_ago_start_date = datetime(six_months_ago_year, six_months_ago_month, six_months_ago_period_start, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        # Query for 6 months ago period
+        six_months_ago_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+            Payments.paid_at >= six_months_ago_start_date.replace(tzinfo=None),
+            Payments.paid_at <= six_months_ago_end_date.replace(tzinfo=None),
+        ]
+
+        six_months_ago_stmt = (
+            select(
+                func.coalesce(func.sum(Payments.payment_amount), 0).label("total_amount")
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *six_months_ago_conditions,
+            )
+        )
+
+        six_months_ago_amount = float(db.execute(six_months_ago_stmt).scalar() or 0)
+        income_10_percent = round(six_months_ago_amount * 0.1, 3)
+
+        # Calculate total income
+        total_income = round(income_90_percent + income_10_percent, 3)
+
+        # Determine response month (for display on frontend)
+        if payment_cycle_date == "末日":
+            # End-of-month payment: show previous month (12月16～末日)
+            response_display_month = response_month
+        else:
+            # 15th payment: show target month (previous month 16～end)
+            response_display_month = target_month
+
+        return {
+            "this_month": now_utc.month,
+            "previous_month": response_display_month,
+            "payment_cycle_date": payment_cycle_date,
+            "total_income": total_income,
+            "income_90_percent": income_90_percent,
+            "income_10_percent": income_10_percent,
+            "target_period_start": response_period_start,
+            "target_period_end": response_period_end if response_period_end is not None else "末日",
+        }
+    except Exception as e:
+        logger.error(f"Error getting albatal income report: {e}")
+        return None
+
+
+def get_albatal_consolidated_monthly_income_report(
+    db: Session,
+    target_year: int,
+    target_month: int,
+) -> Optional[dict]:
+    """Calculate total albatal income for a specific month (both payment cycles)"""
+    try:
+        # ========================================
+        # 6ヶ月前の月を計算
+        # ========================================
+        if target_month <= 6:
+            six_months_ago_year = target_year - 1
+            six_months_ago_month = target_month + 6
+        else:
+            six_months_ago_year = target_year
+            six_months_ago_month = target_month - 6
+
+        # ========================================
+        # Period 1: 当月1~15の売上（15日支払い分）
+        # ========================================
+        period1_start = datetime(target_year, target_month, 1, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=9)
+        period1_end = datetime(target_year, target_month, 15, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        period1_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+            Payments.paid_at >= period1_start.replace(tzinfo=None),
+            Payments.paid_at <= period1_end.replace(tzinfo=None),
+        ]
+
+        period1_stmt = (
+            select(
+                func.coalesce(func.sum(Payments.payment_amount), 0).label("total_amount")
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *period1_conditions,
+            )
+        )
+        period1_amount = float(db.execute(period1_stmt).scalar() or 0)
+
+        # ========================================
+        # Period 2: 前月16~末日の売上（末日支払い分）
+        # ========================================
+        if target_month == 1:
+            prev_year = target_year - 1
+            prev_month = 12
+        else:
+            prev_year = target_year
+            prev_month = target_month - 1
+
+        period2_start = datetime(prev_year, prev_month, 16, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        if prev_month == 12:
+            period2_end = datetime(prev_year, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+        else:
+            period2_end = (datetime(prev_year, prev_month + 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(microseconds=1)) - timedelta(hours=9)
+
+        period2_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+            Payments.paid_at >= period2_start.replace(tzinfo=None),
+            Payments.paid_at <= period2_end.replace(tzinfo=None),
+        ]
+
+        period2_stmt = (
+            select(
+                func.coalesce(func.sum(Payments.payment_amount), 0).label("total_amount")
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *period2_conditions,
+            )
+        )
+        period2_amount = float(db.execute(period2_stmt).scalar() or 0)
+
+        # ========================================
+        # Period 1の所得計算（90% + 10%デポジット）
+        # ========================================
+        # 当月1~15の売上から90%を計算
+        period1_90_percent = round(period1_amount * 0.9, 3)
+
+        # 6ヶ月前の1~15のデポジット10%を計算
+        if six_months_ago_month <= 6:
+            six_months_before_year = six_months_ago_year - 1
+            six_months_before_month = six_months_ago_month + 6
+        else:
+            six_months_before_year = six_months_ago_year
+            six_months_before_month = six_months_ago_month - 6
+
+        period1_six_months_start = datetime(six_months_ago_year, six_months_ago_month, 1, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=9)
+        period1_six_months_end = datetime(six_months_ago_year, six_months_ago_month, 15, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        period1_six_months_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+            Payments.paid_at >= period1_six_months_start.replace(tzinfo=None),
+            Payments.paid_at <= period1_six_months_end.replace(tzinfo=None),
+        ]
+
+        period1_six_months_stmt = (
+            select(
+                func.coalesce(func.sum(Payments.payment_amount), 0).label("total_amount")
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *period1_six_months_conditions,
+            )
+        )
+        period1_six_months_amount = float(db.execute(period1_six_months_stmt).scalar() or 0)
+        period1_10_percent = round(period1_six_months_amount * 0.1, 3)
+
+        # Period 1の合計（当月90% + 6ヶ月前の10%）
+        period1_total = round(period1_90_percent + period1_10_percent, 3)
+
+        # ========================================
+        # Period 2の所得計算（90% + 10%デポジット）
+        # ========================================
+        # 前月16~末日の売上から90%を計算
+        period2_90_percent = round(period2_amount * 0.9, 3)
+
+        # 6ヶ月前の16~末日のデポジット10%を計算
+        if prev_month == 1:
+            period2_six_months_year = prev_year - 1
+            period2_six_months_month = 12
+        else:
+            period2_six_months_year = prev_year
+            period2_six_months_month = prev_month - 6 if prev_month > 6 else prev_month + 6
+
+        period2_six_months_start = datetime(period2_six_months_year, period2_six_months_month, 16, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=9)
+
+        if period2_six_months_month == 12:
+            period2_six_months_end = datetime(period2_six_months_year, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
+        else:
+            period2_six_months_end = (datetime(period2_six_months_year, period2_six_months_month + 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(microseconds=1)) - timedelta(hours=9)
+
+        period2_six_months_conditions = [
+            Payments.status == PaymentStatus.SUCCEEDED,
+            Payments.payment_price > 0,
+            Payments.paid_at >= period2_six_months_start.replace(tzinfo=None),
+            Payments.paid_at <= period2_six_months_end.replace(tzinfo=None),
+        ]
+
+        period2_six_months_stmt = (
+            select(
+                func.coalesce(func.sum(Payments.payment_amount), 0).label("total_amount")
+            )
+            .select_from(Payments)
+            .join(Providers, Payments.provider_id == Providers.id)
+            .where(
+                Providers.code == "albatal",
+                *period2_six_months_conditions,
+            )
+        )
+        period2_six_months_amount = float(db.execute(period2_six_months_stmt).scalar() or 0)
+        period2_10_percent = round(period2_six_months_amount * 0.1, 3)
+
+        # Period 2の合計（前月90% + 6ヶ月前の10%）
+        period2_total = round(period2_90_percent + period2_10_percent, 3)
+
+        # ========================================
+        # 月間合計所得
+        # ========================================
+        monthly_total_income = round(period1_total + period2_total, 3)
+
+        # ========================================
+        # レスポンス返却
+        # ========================================
+        return {
+            "monthly_total_income": monthly_total_income,  # 月間合計（period1 + period2）
+        }
+    except Exception as e:
+        logger.error(f"Error getting albatal consolidated monthly income report: {e}")
         return None
