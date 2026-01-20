@@ -300,8 +300,8 @@ async def get_albatal_income_report(
 
     # Combine reports
     albatal_income_report["monthly_total_income"] = albatal_consolidated_report["monthly_total_income"]
-    albatal_income_report["period1_total"] = albatal_consolidated_report["period1_total"]
-    albatal_income_report["period2_total"] = albatal_consolidated_report["period2_total"]
+    albatal_income_report["period1_total"] = albatal_consolidated_report["period2_total"]  
+    albatal_income_report["period2_total"] = albatal_consolidated_report["period1_total"] 
 
     return albatal_income_report
 

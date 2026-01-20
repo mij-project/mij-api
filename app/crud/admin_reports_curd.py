@@ -997,6 +997,8 @@ def get_albatal_income_period_report(
         if now_jst.day < 15:
             # Payment on 15th (next month): target period is previous month 16~end
             payment_cycle_date = 15
+            response_period_start = 16
+            response_period_end = None  # Will be calculated (last day of month)
             target_period_start = 16
             target_period_end = None  # Will be calculated (last day of month)
 
@@ -1007,23 +1009,37 @@ def get_albatal_income_period_report(
             else:
                 target_year = now_utc.year
                 target_month = now_utc.month - 1
+
+            # For response display - same as target month for 15th payment
+            response_month = target_month
         else:
-            # Payment on end of month: target period is current month 1~15
+            # Payment on end of month: target period is previous month 16~end
             payment_cycle_date = "末日"
-            target_period_start = 1
-            target_period_end = 15
+            response_period_start = 16
+            response_period_end = None  # Will be calculated (last day of month)
+            target_period_start = 16
+            target_period_end = None  # Will be calculated (last day of month)
 
-            # Current month
-            target_year = now_utc.year
-            target_month = now_utc.month
+            # Previous month (for sales data calculation - the actual sales month for end-of-month payment)
+            if now_utc.month == 1:
+                target_year = now_utc.year - 1
+                target_month = 12
+            else:
+                target_year = now_utc.year
+                target_month = now_utc.month - 1
 
-        # Calculate 6 months ago (same month number, but 6 years/months before)
-        if target_month <= 6:
+            # For response display - same as target month
+            response_month = target_month
+
+        # Calculate corresponding period 6 months prior
+        # For 16~end period: December (12) -> July (7), January (1) -> August (8), etc.
+        # This represents the deposition data from 6 months back
+        six_months_ago_month = target_month - 5
+        if six_months_ago_month <= 0:
+            six_months_ago_month += 12
             six_months_ago_year = target_year - 1
-            six_months_ago_month = target_month + 6
         else:
             six_months_ago_year = target_year
-            six_months_ago_month = target_month - 6
 
         # Calculate date ranges for target month period
         if target_period_end is None:
@@ -1109,15 +1125,23 @@ def get_albatal_income_period_report(
         # Calculate total income
         total_income = round(income_90_percent + income_10_percent, 3)
 
+        # Determine response month (for display on frontend)
+        if payment_cycle_date == "末日":
+            # End-of-month payment: show previous month (12月16～末日)
+            response_display_month = response_month
+        else:
+            # 15th payment: show target month (previous month 16～end)
+            response_display_month = target_month
+
         return {
             "this_month": now_utc.month,
-            "previous_month": target_month,
+            "previous_month": response_display_month,
             "payment_cycle_date": payment_cycle_date,
             "total_income": total_income,
             "income_90_percent": income_90_percent,
             "income_10_percent": income_10_percent,
-            "target_period_start": target_period_start,
-            "target_period_end": target_period_end if target_period_end is not None else "末日",
+            "target_period_start": response_period_start,
+            "target_period_end": response_period_end if response_period_end is not None else "末日",
         }
     except Exception as e:
         logger.error(f"Error getting albatal income report: {e}")

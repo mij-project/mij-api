@@ -850,7 +850,7 @@ def _handle_recurring_payment_failure(
         return
 
     # 失敗トランザクションを作成
-    payment_transactions_crud.create_failed_payment_transaction(
+    failed_payment_transaction = payment_transactions_crud.create_failed_payment_transaction(
         db,
         payment_transaction.user_id,
         payment_transaction.provider_id,
@@ -858,6 +858,24 @@ def _handle_recurring_payment_failure(
         payment_transaction.session_id,
         payment_transaction.order_id,
         PaymentTransactionStatus.FAILED,
+    )
+
+    # paymentを失敗レコードを追加
+    payments_crud.create_payment(
+        db,
+        failed_payment_transaction.id,
+        PaymentType.PLAN,
+        failed_payment_transaction.order_id,
+        ItemType.PLAN,
+        payment.provider_id,
+        payment.provider_payment_id,
+        payment.buyer_user_id,
+        payment.seller_user_id,
+        payment.payment_amount,
+        payment.payment_price,
+        PaymentStatus.FAILED,
+        creator.platform_fee_percent,
+        None,
     )
 
     # Albatalサブスクリプションをキャンセル
