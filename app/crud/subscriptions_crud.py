@@ -207,6 +207,7 @@ def update_subscription_status_by_payment_id(
     access_end: Optional[datetime] = None,
     cansel_at_period_end: bool = False,
     canceled_at: Optional[datetime] = None,
+    last_payment_failed_at: Optional[datetime] = None,
 ):
     subscription = (
         db.query(Subscriptions)
@@ -226,6 +227,9 @@ def update_subscription_status_by_payment_id(
         subscription.access_end = datetime.now(timezone.utc)
     if canceled_at:
         subscription.canceled_at = canceled_at
+
+    if last_payment_failed_at:
+        subscription.last_payment_failed_at = last_payment_failed_at
 
     db.commit()
     db.refresh(subscription)

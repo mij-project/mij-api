@@ -70,7 +70,7 @@ def update_cancel_subscription(
 
         payment, provider_code = get_payment_by_id(db, result.payment_id)
         if provider_code == "albatal":
-            _handole_albatal_subscription_cancel(db, payment)
+            _handle_albatal_subscription_cancel(db, payment)
 
         if CommonFunction.get_user_need_to_send_notification(db, creator_user.id, str(NotificationType.PAYMENTS)):
             # プラン解約の通知を追加
@@ -199,7 +199,7 @@ def create_free_subscription_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _handole_albatal_subscription_cancel(db: Session, payment: Payments):
+def _handle_albatal_subscription_cancel(db: Session, payment: Payments):
     """
     Albatalサブスクリプション解約処理
 

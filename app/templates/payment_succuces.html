@@ -89,7 +89,7 @@
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:30px 0;">
 
       <!-- 請求名の説明 -->
-      {% if payment_type != "bank_payment" %}
+      {% if payment_type not in ["bank_payment", "albatal"] %}
         <div style="background-color:#fef3c7;border-left:4px solid #f59e0b;padding:15px;margin:20px 0;border-radius:4px;">
           <p style="color:#92400e;margin:0;font-size:14px;">
             <strong>ご注意:</strong> 請求名は「mijfans」「P.V*MGN」等で表記されます。

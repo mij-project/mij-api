@@ -143,8 +143,8 @@ class SlackService:
             return
 
         env = os.getenv('ENV', 'dev')
-        # if env in ['dev', 'local']:
-        #     return
+        if env in ['dev', 'local']:
+            return
 
         try:
             message = (

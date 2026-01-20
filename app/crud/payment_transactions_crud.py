@@ -72,3 +72,26 @@ def update_transaction_status(
         db.commit()
         db.refresh(transaction)
     return transaction
+
+def create_failed_payment_transaction(
+    db: Session,
+    user_id: UUID,
+    provider_id: UUID,
+    transaction_type: int,
+    session_id: str,
+    order_id: str,
+    status: int,
+) -> PaymentTransactions:
+    """失敗トランザクション作成"""
+    transaction = PaymentTransactions(
+        user_id=user_id,
+        provider_id=provider_id,
+        type=transaction_type,
+        session_id=session_id,
+        order_id=order_id,
+        status=status,
+    )
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
+    return transaction

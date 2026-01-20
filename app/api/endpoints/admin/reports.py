@@ -9,6 +9,9 @@ from app.crud.admin_reports_curd import (
     get_untransferred_withdraws_period_report,
     get_payment_provider_revenue_period_report,
     get_payment_provider_revenue_last_month_report,
+    get_albatal_income_period_report,
+    get_albatal_payment_transactions_period_report,
+    get_albatal_consolidated_monthly_income_report,
 )
 from app.db.base import get_db
 from app.deps.auth import get_current_admin_user
@@ -175,6 +178,30 @@ async def get_credix_payment_transactions_report(
         )
     return credix_payment_transactions_reports_period
 
+@router.get("/albatal-payment-transaction-fee")
+async def get_albatal_payment_transactions_report(
+    start_date: str,
+    end_date: str,
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user),
+):
+    logger.info(
+        f"Getting albatal payment transactions reports for admin: {current_admin.id}"
+    )
+    start_date = datetime.combine(
+        datetime.strptime(start_date, "%Y-%m-%d"), time.min, tzinfo=timezone.utc
+    ) - timedelta(hours=9)
+    end_date = datetime.combine(
+        datetime.strptime(end_date, "%Y-%m-%d"), time.max, tzinfo=timezone.utc
+    ) - timedelta(hours=9)
+    albatal_payment_transactions_reports_period = get_albatal_payment_transactions_period_report(db, start_date, end_date)
+
+    if albatal_payment_transactions_reports_period is None:
+        raise HTTPException(
+            status_code=500, detail="Error getting albatal payment transactions reports"
+        )
+    return albatal_payment_transactions_reports_period
+
 
 @router.get("/untransferred-withdraws")
 async def get_untransferred_withdraws_report(
@@ -240,6 +267,43 @@ async def get_credix_income_report(
         "previous_month": prev_month,
         "total_income": total_income,
     }
+
+@router.get("/albatal-income")
+async def get_albatal_income_report(
+    db: Session = Depends(get_db),
+    current_admin: Admins = Depends(get_current_admin_user),
+):
+    logger.info(f"Getting albatal income reports for admin: {current_admin.id}")
+    now_utc = datetime.now(timezone.utc)
+
+    if now_utc.month == 1:
+        prev_year = now_utc.year - 1
+        prev_month = 12
+    else:
+        prev_year = now_utc.year
+        prev_month = now_utc.month - 1
+
+    albatal_income_report = get_albatal_income_period_report(db, now_utc)
+    if albatal_income_report is None:
+        raise HTTPException(
+            status_code=500, detail="Error getting albatal income report"
+        )
+
+    # Get consolidated monthly income for the current month
+    albatal_consolidated_report = get_albatal_consolidated_monthly_income_report(
+        db, now_utc.year, now_utc.month
+    )
+    if albatal_consolidated_report is None:
+        raise HTTPException(
+            status_code=500, detail="Error getting albatal consolidated income report"
+        )
+
+    # Combine reports
+    albatal_income_report["monthly_total_income"] = albatal_consolidated_report["monthly_total_income"]
+    albatal_income_report["period1_total"] = albatal_consolidated_report["period1_total"]
+    albatal_income_report["period2_total"] = albatal_consolidated_report["period2_total"]
+
+    return albatal_income_report
 
 
 @router.get("/provider-revenue")
