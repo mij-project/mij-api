@@ -995,12 +995,12 @@ def get_albatal_income_period_report(
 
         # Determine payment cycle and target period
         if now_jst.day < 15:
-            # Payment on 15th (next month): target period is previous month 16~end
+            # Payment on 15th (next month): target period is previous month 1~15
             payment_cycle_date = 15
-            response_period_start = 16
-            response_period_end = None  # Will be calculated (last day of month)
-            target_period_start = 16
-            target_period_end = None  # Will be calculated (last day of month)
+            response_period_start = 1
+            response_period_end = 15
+            target_period_start = 1
+            target_period_end = 15
 
             # Calculate target month (previous month)
             if now_utc.month == 1:
@@ -1155,7 +1155,9 @@ def get_albatal_consolidated_monthly_income_report(
 ) -> Optional[dict]:
     """Calculate total albatal income for a specific month (both payment cycles)"""
     try:
-        # Calculate 6 months ago
+        # ========================================
+        # 6ヶ月前の月を計算
+        # ========================================
         if target_month <= 6:
             six_months_ago_year = target_year - 1
             six_months_ago_month = target_month + 6
@@ -1163,7 +1165,9 @@ def get_albatal_consolidated_monthly_income_report(
             six_months_ago_year = target_year
             six_months_ago_month = target_month - 6
 
-        # Period 1: target_month 1~15
+        # ========================================
+        # Period 1: 当月1~15の売上（15日支払い分）
+        # ========================================
         period1_start = datetime(target_year, target_month, 1, 0, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=9)
         period1_end = datetime(target_year, target_month, 15, 23, 59, 59, 999999, tzinfo=timezone.utc) - timedelta(hours=9)
 
@@ -1187,7 +1191,9 @@ def get_albatal_consolidated_monthly_income_report(
         )
         period1_amount = float(db.execute(period1_stmt).scalar() or 0)
 
-        # Period 2: target_month-1 16~end of month
+        # ========================================
+        # Period 2: 前月16~末日の売上（末日支払い分）
+        # ========================================
         if target_month == 1:
             prev_year = target_year - 1
             prev_month = 12
@@ -1222,10 +1228,13 @@ def get_albatal_consolidated_monthly_income_report(
         )
         period2_amount = float(db.execute(period2_stmt).scalar() or 0)
 
-        # Period 1 (90% + 10%): target_month 1~15
+        # ========================================
+        # Period 1の所得計算（90% + 10%デポジット）
+        # ========================================
+        # 当月1~15の売上から90%を計算
         period1_90_percent = round(period1_amount * 0.9, 3)
 
-        # 6 months ago - 1~15
+        # 6ヶ月前の1~15のデポジット10%を計算
         if six_months_ago_month <= 6:
             six_months_before_year = six_months_ago_year - 1
             six_months_before_month = six_months_ago_month + 6
@@ -1257,12 +1266,16 @@ def get_albatal_consolidated_monthly_income_report(
         period1_six_months_amount = float(db.execute(period1_six_months_stmt).scalar() or 0)
         period1_10_percent = round(period1_six_months_amount * 0.1, 3)
 
+        # Period 1の合計（当月90% + 6ヶ月前の10%）
         period1_total = round(period1_90_percent + period1_10_percent, 3)
 
-        # Period 2 (90% + 10%): prev_month 16~end
+        # ========================================
+        # Period 2の所得計算（90% + 10%デポジット）
+        # ========================================
+        # 前月16~末日の売上から90%を計算
         period2_90_percent = round(period2_amount * 0.9, 3)
 
-        # 6 months ago - 16~end
+        # 6ヶ月前の16~末日のデポジット10%を計算
         if prev_month == 1:
             period2_six_months_year = prev_year - 1
             period2_six_months_month = 12
@@ -1298,15 +1311,19 @@ def get_albatal_consolidated_monthly_income_report(
         period2_six_months_amount = float(db.execute(period2_six_months_stmt).scalar() or 0)
         period2_10_percent = round(period2_six_months_amount * 0.1, 3)
 
+        # Period 2の合計（前月90% + 6ヶ月前の10%）
         period2_total = round(period2_90_percent + period2_10_percent, 3)
 
-        # Monthly total
+        # ========================================
+        # 月間合計所得
+        # ========================================
         monthly_total_income = round(period1_total + period2_total, 3)
 
+        # ========================================
+        # レスポンス返却
+        # ========================================
         return {
-            "monthly_total_income": monthly_total_income,
-            "period1_total": period1_total,  # 1~15 cycle income
-            "period2_total": period2_total,  # 16~end cycle income
+            "monthly_total_income": monthly_total_income,  # 月間合計（period1 + period2）
         }
     except Exception as e:
         logger.error(f"Error getting albatal consolidated monthly income report: {e}")
