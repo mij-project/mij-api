@@ -31,6 +31,25 @@ def get_user_provider(
     return result
 
 
+def get_user_user_provider_by_card_info(
+    db: Session,
+    user_id: UUID,
+    provider_id: UUID,
+    cardbrand: str,
+    cardnumber: str,
+    yuko: str,
+) -> UserProviders | None:
+    """"""
+    result = db.query(UserProviders).filter(
+        UserProviders.user_id == user_id,
+        UserProviders.provider_id == provider_id,
+        UserProviders.is_valid == True,
+        UserProviders.cardbrand == cardbrand,
+        UserProviders.cardnumber == cardnumber,
+        UserProviders.yuko == yuko
+    ).first()
+    return result
+
 def create_user_provider(
     db: Session,
     user_id: UUID,
@@ -107,7 +126,8 @@ def get_user_providers_by_user_id(
     """
     result = db.query(UserProviders).filter(
         UserProviders.user_id == user_id,
-        UserProviders.is_valid == True
+        UserProviders.is_valid == True,
+        UserProviders.cardbrand.isnot(None),
     ).order_by(UserProviders.last_used_at.desc()).all()
     return result
 
