@@ -223,12 +223,17 @@ async def receive_albatal_payment_webhook(
     consumer_id: Optional[str] = Form(None),
     notification_type: Optional[str] = Form(None),
     signature: Optional[str] = Form(None),
+    apc_card_brand: Optional[str] = Form(None),
+    apc_card_last_four_digits: Optional[str] = Form(None),
+    apc_card_expiration_year: Optional[str] = Form(None),
+    apc_card_expiration_month: Optional[str] = Form(None),
     # 定期決済通知パラメータ
     transaction_id: Optional[str] = Form(None),
     unique_id: Optional[str] = Form(None),
     merchant_transaction_id: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
     amount: Optional[str] = Form(None),
+    error_code: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -239,6 +244,7 @@ async def receive_albatal_payment_webhook(
     2. 定期決済（Managed Recurring）通知
     """
     try:
+        # 決済完了通知の場合
         if wpf_status:
             # 初回決済完了通知の場合
 
@@ -262,6 +268,10 @@ async def receive_albatal_payment_webhook(
                 consumer_id,
                 notification_type,
                 signature,
+                apc_card_brand,
+                apc_card_last_four_digits,
+                apc_card_expiration_year,
+                apc_card_expiration_month,
             )
         
         elif status:
@@ -298,6 +308,10 @@ async def receive_albatal_chip_payment_webhook(
     consumer_id: Optional[str] = Form(None),
     notification_type: Optional[str] = Form(None),
     signature: Optional[str] = Form(None),
+    apc_card_brand: Optional[str] = Form(None),
+    apc_card_last_four_digits: Optional[str] = Form(None),
+    apc_card_expiration_year: Optional[str] = Form(None),
+    apc_card_expiration_month: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     """Albatal投げ銭決済完了通知受信エンドポイント"""
@@ -320,6 +334,10 @@ async def receive_albatal_chip_payment_webhook(
             payment_transaction_unique_id,
             payment_transaction_amount,
             consumer_id,
+            apc_card_brand,
+            apc_card_last_four_digits,
+            apc_card_expiration_year,
+            apc_card_expiration_month,
         )
       
         
@@ -343,6 +361,10 @@ def _handle_wpf_payment(
     consumer_id: Optional[str],
     notification_type: Optional[str],
     signature: Optional[str],
+    apc_card_brand: Optional[str],
+    apc_card_last_four_digits: Optional[str],
+    apc_card_expiration_year: Optional[str],
+    apc_card_expiration_month: Optional[str],
 ) -> None:
     """
     Albatal初回決済完了通知の処理
@@ -359,6 +381,10 @@ def _handle_wpf_payment(
             payment_transaction_amount,
             payment_transaction,
             consumer_id,
+            apc_card_brand,
+            apc_card_last_four_digits,
+            apc_card_expiration_year,
+            apc_card_expiration_month,
         )
 
         if payment:
@@ -378,6 +404,10 @@ def _handle_wpf_payment_success(
     payment_transaction_amount: Optional[str],
     payment_transaction: Optional[PaymentTransactions],
     consumer_id: Optional[str],
+    apc_card_brand: Optional[str],
+    apc_card_last_four_digits: Optional[str],
+    apc_card_expiration_year: Optional[str],
+    apc_card_expiration_month: Optional[str],
 ) -> Optional[Payments]:
     """Albatal初回決済完了通知の処理"""
     provider = providers_crud.get_provider_by_code(db, "albatal")
@@ -461,7 +491,7 @@ def _handle_wpf_payment_success(
     )
 
     # ユーザープロバイダーを有効化
-    _handle_update_creator_user_provider(db, buyer_user_id, consumer_id, provider.id)
+    _handle_update_creator_user_provider(db, buyer_user_id, consumer_id, provider.id, apc_card_brand, apc_card_last_four_digits, apc_card_expiration_year, apc_card_expiration_month)
 
     logger.info(f"Payment transaction status updated: {payment_transaction.id}")
     return payment
@@ -547,6 +577,10 @@ def _handle_wpf_chip_payment(
     payment_transaction_unique_id: Optional[str],
     payment_transaction_amount: Optional[str],
     consumer_id: Optional[str],
+    apc_card_brand: Optional[str],
+    apc_card_last_four_digits: Optional[str],
+    apc_card_expiration_year: Optional[str],
+    apc_card_expiration_month: Optional[str],
 ) -> None:
     """
     Albatal投げ銭決済完了通知の処理
@@ -563,6 +597,10 @@ def _handle_wpf_chip_payment(
             payment_transaction_amount,
             payment_transaction,
             consumer_id,
+            apc_card_brand,
+            apc_card_last_four_digits,
+            apc_card_expiration_year,
+            apc_card_expiration_month,
         )
 
         # 決済完了通知を送信
@@ -583,6 +621,10 @@ def _handle_wpf_chip_payment_success(
     payment_transaction_amount: Optional[str],
     payment_transaction: Optional[PaymentTransactions],
     consumer_id: Optional[str],
+    apc_card_brand: Optional[str],
+    apc_card_last_four_digits: Optional[str],
+    apc_card_expiration_year: Optional[str],
+    apc_card_expiration_month: Optional[str],
 ) -> Optional[Payments]:
     """Albatal投げ銭決済完了通知の処理"""
     provider = providers_crud.get_provider_by_code(db, "albatal")
@@ -666,7 +708,7 @@ def _handle_wpf_chip_payment_success(
     )
 
     # ユーザープロバイダーを有効化
-    _handle_update_creator_user_provider(db, buyer_user_id, consumer_id, provider.id)
+    _handle_update_creator_user_provider(db, buyer_user_id, consumer_id, provider.id, apc_card_brand, apc_card_last_four_digits, apc_card_expiration_year, apc_card_expiration_month)
 
     logger.info(f"Payment transaction status updated: {payment_transaction.id}")
     return payment
@@ -910,12 +952,29 @@ def _handle_update_creator_user_provider(
     buyer_user_id: Optional[UUID],
     consumer_id: Optional[str],
     provider_id: Optional[UUID],
+    apc_card_brand: Optional[str],
+    apc_card_last_four_digits: Optional[str],
+    apc_card_expiration_year: Optional[str],
+    apc_card_expiration_month: Optional[str],
 ) -> None:
     """ユーザープロバイダーを作成または更新"""
-    user_provider = user_providers_crud.get_user_provider(
+
+    card_brand = "V" if apc_card_brand == "visa" else "M" if apc_card_brand == "master" else None
+    yuko = None
+    if apc_card_expiration_year and apc_card_expiration_month:
+        # 月を2桁に変換（"9" -> "09", "10" -> "10"）
+        month = apc_card_expiration_month.zfill(2)
+        # 年の下2桁を取得（"2025" -> "25"）
+        year = apc_card_expiration_year[-2:]
+        yuko = f"{month}{year}"
+
+    user_provider = user_providers_crud.get_user_user_provider_by_card_info(
         db=db,
         user_id=buyer_user_id,
-        provider_id=provider_id
+        provider_id=provider_id,
+        cardbrand=card_brand,
+        cardnumber=apc_card_last_four_digits,
+        yuko=yuko,
     )
     if not user_provider:
         logger.info(f"Creating user provider: {buyer_user_id}, {provider_id}, {consumer_id}")
@@ -924,10 +983,10 @@ def _handle_update_creator_user_provider(
             user_id=buyer_user_id,
             provider_id=provider_id,
             sendid=consumer_id,
-            cardbrand=None,
-            cardnumber=None,
-            yuko=None,
-            main_card=True,
+            cardbrand=card_brand,
+            cardnumber=apc_card_last_four_digits,
+            yuko=yuko,
+            main_card=False,
         )
     else:
         user_provider.last_used_at = datetime.now(timezone.utc)
