@@ -208,3 +208,12 @@ def get_payment_by_id(
         .filter(Payments.id == payment_id)
         .first()
     )
+
+def check_payment_status_by_transaction_id(
+    db: Session,
+    transaction_id: UUID,
+) -> bool:
+    """
+    Check payment status by transaction id
+    """
+    return db.query(Payments).filter(Payments.transaction_id == transaction_id).filter(Payments.status == PaymentStatus.SUCCEEDED).first() is not None

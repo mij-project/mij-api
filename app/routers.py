@@ -41,6 +41,7 @@ from app.api.endpoints.customer import (
     advertising_agency_tracking,
     time_sale,
     push_noti,
+    transaction,
 )
 
 # Admin routes
@@ -165,7 +166,7 @@ api_router.include_router(
     advertising_agency_tracking.router, prefix="/tracking", tags=["Tracking"]
 )
 api_router.include_router(time_sale.router, prefix="/time-sale", tags=["Time Sale"])
-
+api_router.include_router(transaction.router, prefix="/transaction", tags=["Transaction"])
 api_router.include_router(push_noti.router, prefix="/push", tags=["Push Notification"])
 
 
