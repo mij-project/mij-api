@@ -972,7 +972,7 @@ def get_albatal_payment_transactions_period_report(
         success_row = db.execute(success_stmt).one()
         total_transaction_count = success_row.successful_payment_transaction_count + failed_row
         total_payment_transaction_fee = float(
-            success_row.total_transaction_fee + 10000
+            success_row.total_transaction_fee + 11000
         )
         return {
             "success_payment_transaction_fee": success_row.total_transaction_fee,
