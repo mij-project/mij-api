@@ -245,7 +245,8 @@ def _build_wpf_payload(
     Returns:
         WPFペイロード辞書
     """
-    base_url = f"{FRONTEND_URL}{return_url}" if return_url else FRONTEND_URL
+    base_url = _build_return_url(return_url, transaction_id)
+    return_cancel_url = f"{FRONTEND_URL}{return_url}" if return_url else FRONTEND_URL
     
     payload = {
         "transaction_id": str(transaction_id),
@@ -258,9 +259,9 @@ def _build_wpf_payload(
         "notification_url": notification_url,
         "remember_card": True,
         "return_success_url": base_url,
-        "return_failure_url": base_url,
-        "return_cancel_url": base_url,
-        "return_pending_url": base_url,
+        "return_failure_url": return_cancel_url,
+        "return_cancel_url": return_cancel_url,
+        "return_pending_url": return_cancel_url,
         "transaction_type_name": "sale3d",
     }
     
@@ -495,6 +496,23 @@ def _set_money(request: AlbatalSessionRequest, db: Session) -> tuple[int, str, i
             status_code=500,
             detail=f"Albatal set money failed: {str(e)}"
         )
+
+def _build_return_url(return_url: str | None, transaction_id: UUID) -> str:
+    """
+    リターンURLを作成
+    
+    Args:
+        return_url: リターンURL
+        transaction_id: トランザクションID
+
+    Returns:
+        リターンURL
+    """
+    # return_urlにplanが含まれている場合は?transaction_id={transaction_id}を追加
+    if "plan" in return_url:
+        return f"{FRONTEND_URL}{return_url}?transaction_id={transaction_id}"
+    else:
+        return f"{FRONTEND_URL}{return_url}&transaction_id={transaction_id}"
 
 
 def _create_transaction(
