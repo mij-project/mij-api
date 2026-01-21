@@ -3,7 +3,7 @@ from typing import Optional, TYPE_CHECKING
 from uuid import UUID
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, SmallInteger, func
+from sqlalchemy import ForeignKey, Text, SmallInteger, func, Float
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
@@ -64,3 +64,23 @@ class Bookmarks(Base):
 
     user: Mapped["Users"] = relationship("Users")
     post: Mapped["Posts"] = relationship("Posts")
+
+class ProfileViewsTracking(Base):
+    """プロフィール閲覧履歴"""
+    __tablename__ = "profile_views_tracking"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    viewer_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    profile_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+class PostViewsTracking(Base):
+    """投稿閲覧履歴"""
+    __tablename__ = "post_views_tracking"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    viewer_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    post_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    watched_duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    video_duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
