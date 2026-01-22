@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 import math
 from typing import Optional
 
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, cast, Numeric
 from sqlalchemy.orm import Session
 
 from app.constants.enums import PaymentStatus, PaymentType, WithdrawStatus, PaymentTransactionStatus
@@ -10,6 +10,7 @@ from app.core.logger import Logger
 from app.models import CompanyUsers, Payments, Withdraws
 from app.models.payment_transactions import PaymentTransactions
 from app.models.providers import Providers
+from app.constants.number import AlbatalMonthlyFee
 
 logger = Logger.get_logger()
 
@@ -941,10 +942,18 @@ def get_albatal_payment_transactions_period_report(
             )
 
         fee_per_payment = func.round(
-            func.round(Payments.payment_amount * 0.082, 3) + 50, 3
+            func.round(
+                Payments.payment_amount * func.coalesce(
+                    cast(Providers.settings['fee'], Numeric), 8.25
+                ) / 100, 3
+            ) + func.coalesce(
+                cast(Providers.settings['tx_successs_fee'], Numeric), 55
+            ), 3
         )
         fee_per_payment_transaction_fee_excluding = func.round(
-            Payments.payment_amount * 0.082, 3
+            Payments.payment_amount * func.coalesce(
+                cast(Providers.settings['fee'], Numeric), 8.25
+            ) / 100, 3
         )
 
         success_stmt = (
@@ -972,7 +981,7 @@ def get_albatal_payment_transactions_period_report(
         success_row = db.execute(success_stmt).one()
         total_transaction_count = success_row.successful_payment_transaction_count + failed_row
         total_payment_transaction_fee = float(
-            success_row.total_transaction_fee + 11000
+            success_row.total_transaction_fee + AlbatalMonthlyFee.DEFAULT
         )
         return {
             "success_payment_transaction_fee": success_row.total_transaction_fee,
