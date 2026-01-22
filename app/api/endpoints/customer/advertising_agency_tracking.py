@@ -9,7 +9,7 @@ from app.deps.auth import get_current_user_optional
 from app.deps.initial_domain import initial_tracking_domain
 from app.domain.tracking.tracking_domain import TrackingDomain
 from app.models.user import Users
-from app.schemas.tracking import PostViewTrackingPayload, ProfileViewTrackingPayload
+from app.schemas.tracking import PostPurchaseTrackingPayload, PostViewTrackingPayload, ProfileViewTrackingPayload
 
 
 router = APIRouter()
@@ -112,4 +112,12 @@ async def post_view_tracking(
     tracking_domain: TrackingDomain = Depends(initial_tracking_domain),
 ):
     tracking_domain.track_post_view(payload)
+    return {"message": "Done"}
+
+@router.post("/post-purchase-tracking")
+async def post_purchase_tracking(
+    payload: PostPurchaseTrackingPayload,
+    tracking_domain: TrackingDomain = Depends(initial_tracking_domain),
+):
+    tracking_domain.track_post_purchase(payload)
     return {"message": "Done"}

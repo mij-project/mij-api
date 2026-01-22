@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from app.core.logger import Logger as CoreLogger
 from app.crud.social_crud import SocialCrud
-from app.schemas.tracking import PostViewTrackingPayload, ProfileViewTrackingPayload
+from app.schemas.tracking import PostPurchaseTrackingPayload, PostViewTrackingPayload, ProfileViewTrackingPayload
 from app.models.user import Users
 
 class TrackingDomain:
@@ -44,4 +44,16 @@ class TrackingDomain:
                 raise Exception(f"Error tracking post view: {result}")
         except Exception as e:
             self.logger.error(f"Error tracking post view: {e}")
+            raise e
+
+    def track_post_purchase(self, payload: PostPurchaseTrackingPayload):
+        try:
+            post_id = payload.post_id
+            user_id = payload.user_id
+            result = self.social_crud.create_post_purchase_tracking(post_id, user_id)
+            if not result:
+                self.logger.error(f"Error tracking post purchase: {result}")
+                raise Exception(f"Error tracking post purchase: {result}")
+        except Exception as e:
+            self.logger.error(f"Error tracking post purchase: {e}")
             raise e

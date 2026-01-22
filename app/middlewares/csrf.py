@@ -14,6 +14,7 @@ EXCLUDE_PATHS = {
     "/auth/password-reset/request", "/auth/password-reset/confirm", "/payments/credix/session",
     "/tracking/track-access",  "/admin/users/create-super-user", "/webhook/univa/payment",
     "/webhook/albatal/payment", "/webhook/albatal/payment/chip", "/tracking/profile-view-tracking", "/tracking/post-view-tracking",
+    "/tracking/post-purchase-tracking",
 }
 
 class CSRFMiddleware(BaseHTTPMiddleware):

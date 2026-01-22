@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from app.domain.tracking.tracking_domain import TrackingDomain
-from app.schemas.tracking import PostViewTrackingPayload, ProfileViewTrackingPayload
+from app.schemas.tracking import PostPurchaseTrackingPayload, PostViewTrackingPayload, ProfileViewTrackingPayload
 from app.models.user import Users
 
 @pytest.fixture
@@ -39,3 +39,15 @@ def test_track_post_view_without_user_and_watched_duration_sec(db_mock):
     tracking_domain = TrackingDomain(db=db_mock)
     tracking_domain.track_post_view(payload)
     assert True
+
+def test_track_post_purchase(db_mock):
+    payload = PostPurchaseTrackingPayload(post_id="123", user_id="123")
+    tracking_domain = TrackingDomain(db=db_mock)
+    tracking_domain.track_post_purchase(payload)
+    assert True
+
+def test_track_post_purchase_without_user(db_mock):
+    with pytest.raises(Exception):
+        payload = PostPurchaseTrackingPayload(post_id="123", user_id=None)
+        tracking_domain = TrackingDomain(db=db_mock)
+        tracking_domain.track_post_purchase(payload)

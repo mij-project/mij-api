@@ -9,3 +9,7 @@ class PostViewTrackingPayload(BaseModel):
     watched_duration_sec: Optional[float] = Field(None, description="視聴時間（秒）")
     video_duration_sec: Optional[float] = Field(None, description="動画時間（秒）")
     user_id: Optional[str] = Field(None, description="ユーザーID")
+
+class PostPurchaseTrackingPayload(BaseModel):
+    post_id: str = Field(..., description="投稿ID")
+    user_id: str = Field(..., description="ユーザーID")

@@ -84,3 +84,12 @@ class PostViewsTracking(Base):
     watched_duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     video_duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+class PostPurchasesTracking(Base):
+    """投稿購入履歴"""
+    __tablename__ = "post_purchases_tracking"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    post_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
