@@ -259,9 +259,9 @@ def _build_wpf_payload(
         "notification_url": notification_url,
         "remember_card": True,
         "return_success_url": base_url,
-        "return_failure_url": return_cancel_url,
+        "return_failure_url": base_url,
         "return_cancel_url": return_cancel_url,
-        "return_pending_url": return_cancel_url,
+        "return_pending_url": base_url,
         "transaction_type_name": "sale3d",
     }
     
