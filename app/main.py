@@ -41,6 +41,7 @@ origins = [
     "http://localhost:3003",
     "http://localhost:3005",   
     "http://192.168.1.6:3002",
+    "http://192.168.1.7:3002",
 
     # 事前登録サイト
     "https://campaign.mijfans.jp",

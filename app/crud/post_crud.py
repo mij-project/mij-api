@@ -1,10 +1,21 @@
 import math
 import os
-from operator import or_
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import cast, distinct, func, desc, and_, BigInteger, union_all, Text
+from sqlalchemy import (
+    cast,
+    distinct,
+    func,
+    desc,
+    and_,
+    BigInteger,
+    union_all,
+    Text,
+    or_,
+    case,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.sql.expression import or_ as sa_or, and_ as sa_and
 from app.crud.push_noti_crud import push_notification_to_user
 from app.crud.subscriptions_crud import check_viewing_rights
 from app.crud.time_sale_crud import (
@@ -23,6 +34,7 @@ from datetime import datetime, timezone, timedelta
 from app.constants.enums import (
     AccountType,
     PaymentStatus,
+    PaymentType,
     PostStatus,
     MediaAssetKind,
     MediaAssetStatus,
@@ -863,7 +875,9 @@ def get_bought_posts_by_user_id(db: Session, user_id: UUID) -> List[tuple]:
     # 有効なsubscriptionの条件
     valid_subscription_filter = and_(
         Subscriptions.user_id == user_id,
-        Subscriptions.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]),  # active
+        Subscriptions.status.in_(
+            [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELED]
+        ),  # active
         or_(Subscriptions.access_end.is_(None), Subscriptions.access_end > now),
     )
 
@@ -1017,6 +1031,7 @@ def get_recent_posts(db: Session, limit: int = 10):
     now = func.now()
 
     active_post_cond = and_(
+        Posts.post_type == PostType.VIDEO,
         Posts.status == PostStatus.APPROVED,
         Posts.deleted_at.is_(None),
         or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
@@ -1417,9 +1432,7 @@ def update_post_status(
 
 def _get_post_and_creator_info(db: Session, post_id: str) -> tuple:
     """投稿とクリエイター情報を取得"""
-    post = (
-        db.query(Posts).filter(Posts.id == post_id).first()
-    )
+    post = db.query(Posts).filter(Posts.id == post_id).first()
 
     if not post:
         return None, None, None
@@ -1694,7 +1707,7 @@ def get_post_detail_for_creator(
     """
     VideoAsset = aliased(MediaAssets)
     ThumbnailAsset = aliased(MediaAssets)
-    OGPAsset = aliased(MediaAssets)
+    # OGPAsset = aliased(MediaAssets)
 
     result = (
         db.query(
@@ -3510,6 +3523,7 @@ def get_ranking_posts_detail_overall_weekly(
         row.Posts.is_time_sale = bool(post_sale_map.get(row.Posts.id, False))
     return rows
 
+
 def get_ranking_posts_detail_overall_daily(
     db: Session, page: int = 1, limit: int = 500
 ):
@@ -3572,6 +3586,7 @@ def get_ranking_posts_detail_overall_daily(
     for row in rows:
         row.Posts.is_time_sale = bool(post_sale_map.get(row.Posts.id, False))
     return rows
+
 
 def add_notification_for_post(
     db: Session,
@@ -3957,3 +3972,766 @@ def mark_post_as_deleted(db: Session, post_id: str, user_id: str):
     post.deleted_at = datetime.now(timezone.utc)
     db.commit()
     return True
+
+
+def get_post_ranking_overall(
+    db: Session, limit: int = 20, period: str = "all_time", page: int = 1
+):
+    """
+    Phase1: best post per creator (unique creators)
+    Phase2: remaining posts by old logic (exclude post_ids from phase1)
+    Pagination applies to the combined list: [phase1 ...] + [phase2 ...]
+    """
+
+    # ---------- pagination
+    if page < 1:
+        page = 1
+    if limit < 1:
+        limit = 20
+    offset = (page - 1) * limit
+
+    # ---------- time + active post
+    now_sql = func.now()
+    now = datetime.now(timezone.utc)
+    active_post_cond = sa_and(
+        Posts.status == PostStatus.APPROVED,
+        Posts.deleted_at.is_(None),
+        sa_or(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now_sql),
+        sa_or(Posts.expiration_at.is_(None), Posts.expiration_at > now_sql),
+    )
+
+    PAYMENT_SUCCEEDED = PaymentStatus.SUCCEEDED
+    ORDER_TYPE_PLAN = PaymentType.PLAN
+    ORDER_TYPE_PRICE = PaymentType.SINGLE
+    MIN_PAYMENT_PRICE = 500
+
+    # ---------- period rolling window (UTC naive)
+    start_dt = None
+    if period == "daily":
+        start_dt = now - timedelta(days=1)
+    elif period == "weekly":
+        start_dt = now - timedelta(days=7)
+    elif period == "monthly":
+        start_dt = now - timedelta(days=30)
+    # all_time => None
+
+    # ---------- base payment condition (for counting)
+    base_payment_cond = sa_and(
+        Payments.status == PAYMENT_SUCCEEDED,
+        Payments.payment_price >= MIN_PAYMENT_PRICE,
+        Payments.paid_at.isnot(None),
+    )
+    if start_dt is not None:
+        base_payment_cond = sa_and(base_payment_cond, Payments.paid_at >= start_dt)
+
+    # ---------- purchase_count per post (price)
+    price_purchase_sq = (
+        db.query(
+            Prices.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PRICE,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(Prices.post_id)
+        .subquery()
+    )
+
+    # ---------- purchase_count per post (plan)
+    plan_purchase_sq = (
+        db.query(
+            PostPlans.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PLAN,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(PostPlans.post_id)
+        .subquery()
+    )
+
+    # ---------- merge purchases
+    union_sq = (
+        db.query(
+            price_purchase_sq.c.post_id.label("post_id"),
+            price_purchase_sq.c.purchase_count.label("purchase_count"),
+        )
+        .union_all(
+            db.query(
+                plan_purchase_sq.c.post_id.label("post_id"),
+                plan_purchase_sq.c.purchase_count.label("purchase_count"),
+            )
+        )
+        .subquery()
+    )
+
+    purchase_merged_sq = (
+        db.query(
+            union_sq.c.post_id.label("post_id"),
+            func.sum(union_sq.c.purchase_count).label("purchase_count"),
+        )
+        .group_by(union_sq.c.post_id)
+        .subquery()
+    )
+
+    # ---------- bookmark_count per post (within period if specified)
+    bookmark_q = db.query(
+        Bookmarks.post_id.label("post_id"),
+        func.count(func.distinct(Bookmarks.user_id)).label("bookmark_count"),
+    )
+    if start_dt is not None:
+        bookmark_q = bookmark_q.filter(Bookmarks.created_at >= start_dt)
+    bookmark_sq = bookmark_q.group_by(Bookmarks.post_id).subquery()
+
+    # ---------- activity OR filter (only for daily/weekly/monthly)
+    payment_activity_sq = None
+    bookmark_activity_sq = None
+    period_or_cond = None
+
+    if start_dt is not None:
+        price_paid_posts_sq = db.query(Prices.post_id.label("post_id")).join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PRICE,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id,
+                Payments.status == PAYMENT_SUCCEEDED,
+                Payments.paid_at.isnot(None),
+                Payments.paid_at >= start_dt,
+                Payments.payment_price >= MIN_PAYMENT_PRICE,
+            ),
+        )
+        plan_paid_posts_sq = db.query(PostPlans.post_id.label("post_id")).join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PLAN,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id,
+                Payments.status == PAYMENT_SUCCEEDED,
+                Payments.paid_at.isnot(None),
+                Payments.paid_at >= start_dt,
+                Payments.payment_price >= MIN_PAYMENT_PRICE,
+            ),
+        )
+        payment_activity_sq = price_paid_posts_sq.union(plan_paid_posts_sq).subquery()
+
+        bookmark_activity_sq = (
+            db.query(Bookmarks.post_id.label("post_id"))
+            .filter(Bookmarks.created_at >= start_dt)
+            .subquery()
+        )
+
+        period_or_cond = sa_or(
+            payment_activity_sq.c.post_id.isnot(None),
+            bookmark_activity_sq.c.post_id.isnot(None),
+            Posts.created_at >= start_dt,
+        )
+
+    # ---------- base dataset: 1 row / post
+    base_q = (
+        db.query(
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.created_at.label("created_at"),
+            func.coalesce(purchase_merged_sq.c.purchase_count, 0).label(
+                "purchase_count"
+            ),
+            func.coalesce(bookmark_sq.c.bookmark_count, 0).label("bookmark_count"),
+            Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
+        )
+        .select_from(Posts)
+        .join(Users, Posts.creator_user_id == Users.id)
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(purchase_merged_sq, purchase_merged_sq.c.post_id == Posts.id)
+        .outerjoin(bookmark_sq, bookmark_sq.c.post_id == Posts.id)
+        .outerjoin(
+            MediaAssets,
+            sa_and(
+                Posts.id == MediaAssets.post_id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            VideoAssets,
+            sa_and(
+                Posts.id == VideoAssets.post_id,
+                VideoAssets.kind == MediaAssetKind.MAIN_VIDEO,
+            ),
+        )
+        .filter(active_post_cond)
+    )
+
+    if period_or_cond is not None:
+        base_q = (
+            base_q.outerjoin(
+                payment_activity_sq, payment_activity_sq.c.post_id == Posts.id
+            )
+            .outerjoin(bookmark_activity_sq, bookmark_activity_sq.c.post_id == Posts.id)
+            .filter(period_or_cond)
+        )
+
+    base_sq = base_q.group_by(
+        Posts.id,
+        Posts.creator_user_id,
+        Posts.created_at,
+        Users.profile_name,
+        Users.offical_flg,
+        Profiles.username,
+        Profiles.avatar_url,
+        MediaAssets.storage_key,
+        VideoAssets.duration_sec,
+        purchase_merged_sq.c.purchase_count,
+        bookmark_sq.c.bookmark_count,
+    ).subquery("base_sq")
+
+    # ---------- phase1: best post / creator
+    creator_rank_sq = db.query(
+        base_sq,
+        func.row_number()
+        .over(
+            partition_by=base_sq.c.creator_user_id,
+            order_by=(
+                base_sq.c.purchase_count.desc(),
+                base_sq.c.bookmark_count.desc(),
+                base_sq.c.created_at.desc(),
+                base_sq.c.post_id.desc(),  # tie-break for stable paging
+            ),
+        )
+        .label("rn_creator"),
+    ).subquery("creator_rank_sq")
+
+    phase1_sq = (
+        db.query(creator_rank_sq)
+        .filter(creator_rank_sq.c.rn_creator == 1)
+        .subquery("phase1_sq")
+    )
+
+    phase1_total = db.query(func.count()).select_from(phase1_sq).scalar() or 0
+
+    # ---------- phase2: all posts excluding phase1 post_ids (no duplicate post_id)
+    phase2_sq = (
+        db.query(base_sq)
+        .filter(~base_sq.c.post_id.in_(db.query(phase1_sq.c.post_id)))
+        .subquery("phase2_sq")
+    )
+
+    rows = []
+
+    # ========== pagination across combined list ==========
+    if offset < phase1_total:
+        take1 = min(limit, phase1_total - offset)
+
+        part1 = (
+            db.query(
+                Posts,
+                phase1_sq.c.purchase_count.label("purchase_count"),
+                phase1_sq.c.bookmark_count.label("bookmark_count"),
+                phase1_sq.c.profile_name,
+                phase1_sq.c.offical_flg,
+                phase1_sq.c.username,
+                phase1_sq.c.avatar_url,
+                phase1_sq.c.thumbnail_key,
+                phase1_sq.c.duration_sec,
+            )
+            .join(phase1_sq, phase1_sq.c.post_id == Posts.id)
+            .order_by(
+                phase1_sq.c.purchase_count.desc(),
+                phase1_sq.c.bookmark_count.desc(),
+                phase1_sq.c.created_at.desc(),
+                phase1_sq.c.post_id.desc(),
+            )
+            .offset(offset)
+            .limit(take1)
+            .all()
+        )
+        rows.extend(part1)
+
+        take2 = limit - take1
+        if take2 > 0:
+            part2 = (
+                db.query(
+                    Posts,
+                    phase2_sq.c.purchase_count.label("purchase_count"),
+                    phase2_sq.c.bookmark_count.label("bookmark_count"),
+                    phase2_sq.c.profile_name,
+                    phase2_sq.c.offical_flg,
+                    phase2_sq.c.username,
+                    phase2_sq.c.avatar_url,
+                    phase2_sq.c.thumbnail_key,
+                    phase2_sq.c.duration_sec,
+                )
+                .join(phase2_sq, phase2_sq.c.post_id == Posts.id)
+                .order_by(
+                    phase2_sq.c.purchase_count.desc(),
+                    phase2_sq.c.bookmark_count.desc(),
+                    phase2_sq.c.created_at.desc(),
+                    phase2_sq.c.post_id.desc(),
+                )
+                .offset(0)
+                .limit(take2)
+                .all()
+            )
+            rows.extend(part2)
+    else:
+        phase2_offset = offset - phase1_total
+
+        rows = (
+            db.query(
+                Posts,
+                phase2_sq.c.purchase_count.label("purchase_count"),
+                phase2_sq.c.bookmark_count.label("bookmark_count"),
+                phase2_sq.c.profile_name,
+                phase2_sq.c.offical_flg,
+                phase2_sq.c.username,
+                phase2_sq.c.avatar_url,
+                phase2_sq.c.thumbnail_key,
+                phase2_sq.c.duration_sec,
+            )
+            .join(phase2_sq, phase2_sq.c.post_id == Posts.id)
+            .order_by(
+                phase2_sq.c.purchase_count.desc(),
+                phase2_sq.c.bookmark_count.desc(),
+                phase2_sq.c.created_at.desc(),
+                phase2_sq.c.post_id.desc(),
+            )
+            .offset(phase2_offset)
+            .limit(limit)
+            .all()
+        )
+
+    # ---------- time sale flag
+    post_ids = [row[0].id for row in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    for row in rows:
+        row[0].is_time_sale = bool(post_sale_map.get(row[0].id, False))
+
+    return rows
+
+
+def _build_category_base_sq(db: Session, period: str = "all_time"):
+    """
+    Return:
+      - base_sq: 1 row per (category_id, post_id) with score columns
+      - active_post_cond
+      - start_dt
+      - payment_activity_sq, bookmark_activity_sq, period_or_cond (for OR activity filter)
+    """
+    now_sql = func.now()
+    now = datetime.now(timezone.utc)
+    active_post_cond = sa_and(
+        Posts.status == PostStatus.APPROVED,
+        Posts.deleted_at.is_(None),
+        sa_or(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now_sql),
+        sa_or(Posts.expiration_at.is_(None), Posts.expiration_at > now_sql),
+    )
+
+    PAYMENT_SUCCEEDED = PaymentStatus.SUCCEEDED
+    ORDER_TYPE_PLAN = PaymentType.PLAN
+    ORDER_TYPE_PRICE = PaymentType.SINGLE
+    MIN_PAYMENT_PRICE = 500
+
+    # rolling window (UTC naive)
+    start_dt = None
+    if period == "daily":
+        start_dt = now - timedelta(days=1)
+    elif period == "weekly":
+        start_dt = now - timedelta(days=7)
+    elif period == "monthly":
+        start_dt = now - timedelta(days=30)
+
+    # payment cond for counting
+    base_payment_cond = sa_and(
+        Payments.status == PAYMENT_SUCCEEDED,
+        Payments.payment_price >= MIN_PAYMENT_PRICE,
+        Payments.paid_at.isnot(None),
+    )
+    if start_dt is not None:
+        base_payment_cond = sa_and(base_payment_cond, Payments.paid_at >= start_dt)
+
+    # purchase_count per post (price)
+    price_purchase_sq = (
+        db.query(
+            Prices.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PRICE,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(Prices.post_id)
+        .subquery()
+    )
+
+    # purchase_count per post (plan)
+    plan_purchase_sq = (
+        db.query(
+            PostPlans.post_id.label("post_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PLAN,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(PostPlans.post_id)
+        .subquery()
+    )
+
+    # merge purchases
+    union_sq = (
+        db.query(
+            price_purchase_sq.c.post_id.label("post_id"),
+            price_purchase_sq.c.purchase_count.label("purchase_count"),
+        )
+        .union_all(
+            db.query(
+                plan_purchase_sq.c.post_id.label("post_id"),
+                plan_purchase_sq.c.purchase_count.label("purchase_count"),
+            )
+        )
+        .subquery()
+    )
+
+    purchase_merged_sq = (
+        db.query(
+            union_sq.c.post_id.label("post_id"),
+            func.sum(union_sq.c.purchase_count).label("purchase_count"),
+        )
+        .group_by(union_sq.c.post_id)
+        .subquery()
+    )
+
+    # bookmark_count per post (within period if specified)
+    bookmark_q = db.query(
+        Bookmarks.post_id.label("post_id"),
+        func.count(func.distinct(Bookmarks.user_id)).label("bookmark_count"),
+    )
+    if start_dt is not None:
+        bookmark_q = bookmark_q.filter(Bookmarks.created_at >= start_dt)
+    bookmark_sq = bookmark_q.group_by(Bookmarks.post_id).subquery()
+
+    # activity OR filter
+    payment_activity_sq = None
+    bookmark_activity_sq = None
+    period_or_cond = None
+
+    if start_dt is not None:
+        price_paid_posts = db.query(Prices.post_id.label("post_id")).join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PRICE,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id,
+                Payments.status == PAYMENT_SUCCEEDED,
+                Payments.paid_at.isnot(None),
+                Payments.paid_at >= start_dt,
+                Payments.payment_price >= MIN_PAYMENT_PRICE,
+            ),
+        )
+        plan_paid_posts = db.query(PostPlans.post_id.label("post_id")).join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PLAN,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id,
+                Payments.status == PAYMENT_SUCCEEDED,
+                Payments.paid_at.isnot(None),
+                Payments.paid_at >= start_dt,
+                Payments.payment_price >= MIN_PAYMENT_PRICE,
+            ),
+        )
+        payment_activity_sq = price_paid_posts.union(plan_paid_posts).subquery()
+
+        bookmark_activity_sq = (
+            db.query(Bookmarks.post_id.label("post_id"))
+            .filter(Bookmarks.created_at >= start_dt)
+            .subquery()
+        )
+
+        period_or_cond = sa_or(
+            payment_activity_sq.c.post_id.isnot(None),
+            bookmark_activity_sq.c.post_id.isnot(None),
+            Posts.created_at >= start_dt,
+        )
+
+    # base dataset: 1 row per (category, post)
+    base_q = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+            Genres.id.label("genre_id"),
+            Genres.name.label("genre_name"),
+            Posts.id.label("post_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            Posts.post_type.label("post_type"),
+            Posts.description.label("description"),
+            Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            MediaAssets.storage_key.label("thumbnail_key"),
+            VideoAssets.duration_sec.label("duration_sec"),
+            func.coalesce(purchase_merged_sq.c.purchase_count, 0).label(
+                "purchase_count"
+            ),
+            func.coalesce(bookmark_sq.c.bookmark_count, 0).label("bookmark_count"),
+            Posts.created_at.label("created_at"),
+        )
+        .select_from(Categories)
+        .outerjoin(Genres, Categories.genre_id == Genres.id)
+        .outerjoin(PostCategories, PostCategories.category_id == Categories.id)
+        .outerjoin(Posts, sa_and(Posts.id == PostCategories.post_id, active_post_cond))
+        .outerjoin(Users, Users.id == Posts.creator_user_id)
+        .outerjoin(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            MediaAssets,
+            sa_and(
+                MediaAssets.post_id == Posts.id,
+                MediaAssets.kind == MediaAssetKind.THUMBNAIL,
+            ),
+        )
+        .outerjoin(
+            VideoAssets,
+            sa_and(
+                VideoAssets.post_id == Posts.id,
+                VideoAssets.kind == MediaAssetKind.MAIN_VIDEO,
+            ),
+        )
+        .outerjoin(purchase_merged_sq, purchase_merged_sq.c.post_id == Posts.id)
+        .outerjoin(bookmark_sq, bookmark_sq.c.post_id == Posts.id)
+    )
+
+    base_q = base_q.filter(Posts.id.isnot(None))
+
+    if period_or_cond is not None:
+        base_q = (
+            base_q.outerjoin(
+                payment_activity_sq, payment_activity_sq.c.post_id == Posts.id
+            )
+            .outerjoin(bookmark_activity_sq, bookmark_activity_sq.c.post_id == Posts.id)
+            .filter(period_or_cond)
+        )
+
+    base_sq = base_q.group_by(
+        Categories.id,
+        Categories.name,
+        Genres.id,
+        Genres.name,
+        Posts.id,
+        Posts.creator_user_id,
+        Posts.post_type,
+        Posts.description,
+        Posts.created_at,
+        Users.profile_name,
+        Users.offical_flg,
+        Profiles.username,
+        Profiles.avatar_url,
+        MediaAssets.storage_key,
+        VideoAssets.duration_sec,
+        purchase_merged_sq.c.purchase_count,
+        bookmark_sq.c.bookmark_count,
+    ).subquery("base_sq")
+
+    return base_sq
+
+
+def get_ranking_posts_categories_overall(
+    db: Session,
+    limit_per_category: int = 6,
+    period: str = "all_time",
+    top_n_categories: int = 10,
+):
+    base_sq = _build_category_base_sq(db, period=period)
+
+    # top categories by total purchases
+    top_categories_sq = (
+        db.query(
+            base_sq.c.category_id.label("category_id"),
+            func.coalesce(func.sum(base_sq.c.purchase_count), 0).label(
+                "total_purchases"
+            ),
+        )
+        .group_by(base_sq.c.category_id)
+        .order_by(desc("total_purchases"))
+        .limit(top_n_categories)
+        .subquery("top_categories")
+    )
+
+    # rn_creator: best post per creator within category
+    creator_rank_sq = (
+        db.query(
+            base_sq,
+            func.row_number()
+            .over(
+                partition_by=(base_sq.c.category_id, base_sq.c.creator_user_id),
+                order_by=(
+                    base_sq.c.purchase_count.desc(),
+                    base_sq.c.bookmark_count.desc(),
+                    base_sq.c.created_at.desc(),
+                    base_sq.c.post_id.desc(),
+                ),
+            )
+            .label("rn_creator"),
+        )
+        .join(
+            top_categories_sq, top_categories_sq.c.category_id == base_sq.c.category_id
+        )
+        .subquery("creator_rank_sq")
+    )
+
+    # order: phase1 first, then the rest
+    phase_key = case((creator_rank_sq.c.rn_creator == 1, 0), else_=1)
+
+    final_rank_sq = db.query(
+        creator_rank_sq,
+        func.row_number()
+        .over(
+            partition_by=creator_rank_sq.c.category_id,
+            order_by=(
+                phase_key.asc(),
+                creator_rank_sq.c.purchase_count.desc(),
+                creator_rank_sq.c.bookmark_count.desc(),
+                creator_rank_sq.c.created_at.desc(),
+                creator_rank_sq.c.post_id.desc(),
+            ),
+        )
+        .label("rn"),
+    ).subquery("final_rank_sq")
+
+    result = (
+        db.query(final_rank_sq)
+        .filter(final_rank_sq.c.rn <= limit_per_category)
+        .order_by(
+            final_rank_sq.c.category_name,
+            final_rank_sq.c.rn.asc(),
+        )
+        .all()
+    )
+    return result
+
+
+def get_ranking_posts_detail_overall(
+    db: Session, page: int = 1, limit: int = 20, period: str = "all_time"
+):
+    return get_post_ranking_overall(db, limit, period, page)
+
+
+def get_ranking_posts_detail_categories(
+    db: Session,
+    category: str,
+    page: int = 1,
+    limit: int = 20,
+    period: str = "all_time",
+):
+    base_sq = _build_category_base_sq(db, period=period)
+
+    offset = (page - 1) * limit
+    if offset < 0:
+        offset = 0
+
+    # scope to 1 category
+    cat_sq = (
+        db.query(base_sq).filter(base_sq.c.category_id == category).subquery("cat_sq")
+    )
+
+    # phase1: best post per creator in this category
+    creator_rank_sq = db.query(
+        cat_sq,
+        func.row_number()
+        .over(
+            partition_by=cat_sq.c.creator_user_id,
+            order_by=(
+                cat_sq.c.purchase_count.desc(),
+                cat_sq.c.bookmark_count.desc(),
+                cat_sq.c.created_at.desc(),
+                cat_sq.c.post_id.desc(),
+            ),
+        )
+        .label("rn_creator"),
+    ).subquery("creator_rank_sq")
+
+    phase1_sq = (
+        db.query(creator_rank_sq)
+        .filter(creator_rank_sq.c.rn_creator == 1)
+        .subquery("phase1_sq")
+    )
+
+    phase1_total = db.query(func.count()).select_from(phase1_sq).scalar() or 0
+
+    # phase2: all remaining posts (exclude phase1 post_ids)
+    phase2_sq = (
+        db.query(cat_sq)
+        .filter(~cat_sq.c.post_id.in_(db.query(phase1_sq.c.post_id)))
+        .subquery("phase2_sq")
+    )
+
+    rows = []
+
+    if offset < phase1_total:
+        take1 = min(limit, phase1_total - offset)
+
+        part1 = (
+            db.query(phase1_sq)
+            .order_by(
+                phase1_sq.c.purchase_count.desc(),
+                phase1_sq.c.bookmark_count.desc(),
+                phase1_sq.c.created_at.desc(),
+                phase1_sq.c.post_id.desc(),
+            )
+            .offset(offset)
+            .limit(take1)
+            .all()
+        )
+        rows.extend(part1)
+
+        take2 = limit - take1
+        if take2 > 0:
+            part2 = (
+                db.query(phase2_sq)
+                .order_by(
+                    phase2_sq.c.purchase_count.desc(),
+                    phase2_sq.c.bookmark_count.desc(),
+                    phase2_sq.c.created_at.desc(),
+                    phase2_sq.c.post_id.desc(),
+                )
+                .offset(0)
+                .limit(take2)
+                .all()
+            )
+            rows.extend(part2)
+    else:
+        phase2_offset = offset - phase1_total
+        rows = (
+            db.query(phase2_sq)
+            .order_by(
+                phase2_sq.c.purchase_count.desc(),
+                phase2_sq.c.bookmark_count.desc(),
+                phase2_sq.c.created_at.desc(),
+                phase2_sq.c.post_id.desc(),
+            )
+            .offset(phase2_offset)
+            .limit(limit)
+            .all()
+        )
+
+    post_ids = [r.post_id for r in rows]
+    post_sale_map = get_post_sale_flag_map(db, post_ids)
+    return rows, post_sale_map

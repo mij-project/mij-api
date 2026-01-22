@@ -2,12 +2,17 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 from pydantic import BaseModel
-
+from app.core.logger import Logger
 from app.db.base import get_db
 from app.crud import advertising_agencies_crud
+from app.deps.auth import get_current_user_optional
+from app.deps.initial_domain import initial_tracking_domain
+from app.domain.tracking.tracking_domain import TrackingDomain
+from app.models.user import Users
+from app.schemas.tracking import PostPurchaseTrackingPayload, PostViewTrackingPayload, ProfileViewTrackingPayload
+
 
 router = APIRouter()
-from app.core.logger import Logger
 
 logger = Logger.get_logger()
 
@@ -91,3 +96,28 @@ async def debug_session(request: Request):
         "referral_code": request.session.get("referral_code"),
         "session_id": request.session.get("session_id")
     }
+
+@router.post("/profile-view-tracking")
+async def profile_view_tracking(
+    payload: ProfileViewTrackingPayload,
+    current_user: Optional[Users] = Depends(get_current_user_optional),
+    tracking_domain: TrackingDomain = Depends(initial_tracking_domain),
+):
+    tracking_domain.track_profile_view(payload, current_user)
+    return {"message": "Done"}
+
+@router.post("/post-view-tracking")
+async def post_view_tracking(
+    payload: PostViewTrackingPayload,
+    tracking_domain: TrackingDomain = Depends(initial_tracking_domain),
+):
+    tracking_domain.track_post_view(payload)
+    return {"message": "Done"}
+
+@router.post("/post-purchase-tracking")
+async def post_purchase_tracking(
+    payload: PostPurchaseTrackingPayload,
+    tracking_domain: TrackingDomain = Depends(initial_tracking_domain),
+):
+    tracking_domain.track_post_purchase(payload)
+    return {"message": "Done"}
