@@ -14,3 +14,8 @@ class AlbatalRecurringInterval:
 
 class ChipPaymentFeePercent:
     DEFAULT = 10 # チップ決済の手数料(%)
+
+class AlbatalMonthlyFee:
+    DEFAULT = 11000 # 月額料金(円)
+
+    
