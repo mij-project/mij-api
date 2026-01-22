@@ -217,6 +217,42 @@ def update_subscription_status(db: Session, subscription_id: UUID, status: int):
     return subscription
 
 
+def update_subscription_status_by_payment_id(
+    db: Session,
+    payment_id: UUID,
+    status: int,
+    access_end: Optional[datetime] = None,
+    cansel_at_period_end: bool = False,
+    canceled_at: Optional[datetime] = None,
+    last_payment_failed_at: Optional[datetime] = None,
+):
+    subscription = (
+        db.query(Subscriptions)
+        .filter(Subscriptions.payment_id == payment_id)
+        .filter(Subscriptions.status == SubscriptionStatus.ACTIVE)
+        .first()
+    )
+    if not subscription:
+        raise HTTPException(status_code=404, detail=f"Subscription not found: {payment_id}")
+    subscription.status = status
+    subscription.updated_at = datetime.now(timezone.utc)
+
+    if access_end:
+        subscription.access_end = access_end
+
+    if cansel_at_period_end:
+        subscription.access_end = datetime.now(timezone.utc)
+    if canceled_at:
+        subscription.canceled_at = canceled_at
+
+    if last_payment_failed_at:
+        subscription.last_payment_failed_at = last_payment_failed_at
+
+    db.commit()
+    db.refresh(subscription)
+    return subscription
+
+
 def create_free_subscription(
     db: Session,
     access_type: int,  # 1=plan_subscription, 2=one_time_purchase

@@ -7,6 +7,7 @@ from app.models.user_providers import UserProviders
 from datetime import datetime
 from app.core.logger import Logger
 from typing import Optional
+from app.models.providers import Providers
 logger = Logger.get_logger()
 
 
@@ -30,6 +31,25 @@ def get_user_provider(
     return result
 
 
+def get_user_user_provider_by_card_info(
+    db: Session,
+    user_id: UUID,
+    provider_id: UUID,
+    cardbrand: str,
+    cardnumber: str,
+    yuko: str,
+) -> UserProviders | None:
+    """"""
+    result = db.query(UserProviders).filter(
+        UserProviders.user_id == user_id,
+        UserProviders.provider_id == provider_id,
+        UserProviders.is_valid == True,
+        UserProviders.cardbrand == cardbrand,
+        UserProviders.cardnumber == cardnumber,
+        UserProviders.yuko == yuko
+    ).first()
+    return result
+
 def create_user_provider(
     db: Session,
     user_id: UUID,
@@ -40,7 +60,7 @@ def create_user_provider(
     yuko: Optional[str],
     main_card: bool,
 ) -> UserProviders:
-    """ユーザープロバイダー情報作成"""
+    """CREDIXユーザープロバイダー情報作成"""
     user_provider = UserProviders(
         user_id=user_id,
         provider_id=provider_id,
@@ -57,6 +77,25 @@ def create_user_provider(
     db.refresh(user_provider)
     return user_provider
 
+
+def create_albatal_user_provider(
+    db: Session,
+    user_id: UUID,
+    provider_id: UUID,
+    provider_email: str,
+    is_valid: bool,
+) -> UserProviders:
+    """Albatalユーザープロバイダー情報作成"""
+    user_provider = UserProviders(
+        user_id=user_id,
+        provider_id=provider_id,
+        provider_email=provider_email,
+        is_valid=is_valid,
+    )
+    db.add(user_provider)
+    db.commit()
+    db.refresh(user_provider)
+    return user_provider
 
 def update_last_used_at(
     db: Session,
@@ -87,7 +126,8 @@ def get_user_providers_by_user_id(
     """
     result = db.query(UserProviders).filter(
         UserProviders.user_id == user_id,
-        UserProviders.is_valid == True
+        UserProviders.is_valid == True,
+        UserProviders.cardbrand.isnot(None),
     ).order_by(UserProviders.last_used_at.desc()).all()
     return result
 
@@ -151,3 +191,23 @@ def delete_user_provider(
 
     logger.info(f"Deleted user provider: user_id={user_id}, provider_id={provider_id}")
     return True
+
+def get_albatal_provider_email(db: Session, user_id: str) -> Optional[str]:
+    """
+    プロバイダーのメールアドレスを取得
+    """
+    try:
+        user_provider = (
+            db.query(UserProviders)
+            .join(Providers, Providers.id == UserProviders.provider_id)
+            .filter(
+                Providers.code == "albatal",
+                UserProviders.is_valid == True,
+                UserProviders.user_id == user_id,
+            ).first()
+            
+        )
+        return user_provider.provider_email if user_provider else None
+    except Exception as e:
+        logger.error(f"Get provider email error: {e}")
+        return None
