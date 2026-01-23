@@ -311,20 +311,6 @@ def _build_post_status_query(
         .group_by(Prices.post_id)
     ).subquery()
 
-    plan_purchase_sq = (
-        db.query(
-            PostPlans.post_id.label("post_id"),
-            func.count(func.distinct(Payments.id)).label("plan_purchase_count"),
-        )
-        .join(
-            Payments,
-            (Payments.order_type == 2)
-            & (cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id),
-        )
-        .filter(Payments.status == PaymentStatus.SUCCEEDED)
-        .group_by(PostPlans.post_id)
-    ).subquery()
-
     return (
         db.query(
             Posts,
@@ -332,7 +318,6 @@ def _build_post_status_query(
             func.count(func.distinct(Comments.id)).label("comments_count"),
             (
                 func.coalesce(price_purchase_sq.c.price_purchase_count, 0)
-                + func.coalesce(plan_purchase_sq.c.plan_purchase_count, 0)
             )
             .cast(BigInteger)
             .label("purchase_count"),
@@ -362,7 +347,6 @@ def _build_post_status_query(
         .outerjoin(Prices, Posts.id == Prices.post_id)
         .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
         .outerjoin(price_purchase_sq, price_purchase_sq.c.post_id == Posts.id)
-        .outerjoin(plan_purchase_sq, plan_purchase_sq.c.post_id == Posts.id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status.in_(post_statuses))
@@ -374,7 +358,6 @@ def _build_post_status_query(
             MediaAssets.storage_key,
             VideoAsset.duration_sec,
             price_purchase_sq.c.price_purchase_count,
-            plan_purchase_sq.c.plan_purchase_count,
         )
         .order_by(desc(Posts.created_at))
     )
