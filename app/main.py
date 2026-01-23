@@ -42,17 +42,21 @@ origins = [
     "http://localhost:3005",   
     "http://192.168.1.6:3002",
     "http://192.168.1.7:3002",
+    "http://192.168.1.12:3000",
+    
 
     # 事前登録サイト
     "https://campaign.mijfans.jp",
 
     # ステージング
     "https://stg.mijfans.jp",
+    "https://stg.mijfans.com",
     "https://stg-admin.mijfans.jp",
     "https://staging.d3gdh8lor8j9n7.amplifyapp.com",
 
     # 本番環境用
     "https://mijfans.jp",
+    "https://mijfans.com",
     "https://admin.mijfans.jp",
     "https://prd-admin.linkle.group",
     "https://production.d3gdh8lor8j9n7.amplifyapp.com"

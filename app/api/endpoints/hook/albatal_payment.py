@@ -1,6 +1,7 @@
 """
 Albatal決済Webhookエンドポイント
 """
+
 from fastapi import APIRouter, Depends, Form, Response
 from sqlalchemy.orm import Session
 from typing import Optional, Tuple
@@ -65,7 +66,9 @@ ALBATAL_APPROVED_STATUS = "approved"
 DEFAULT_AVATAR_URL = "https://logo.mijfans.jp/bimi/logo.svg"
 SUBSCRIPTION_DURATION_DAYS = 30
 JST_TIMEZONE = timezone(timedelta(hours=9))
-ALBATAL_API_WPF_URL = os.environ.get("ALBATAL_API_WPF_URL", "https://staging.console.albatal.ltd")
+ALBATAL_API_WPF_URL = os.environ.get(
+    "ALBATAL_API_WPF_URL", "https://staging.console.albatal.ltd"
+)
 ALBATAL_API_KEY = os.environ.get("ALBATAL_PAY_API_KEY", "")
 
 ########################################################
@@ -113,9 +116,11 @@ def _get_conversation_id_from_chip_message(
     if not chip_message_id:
         return None
     try:
-        chip_message = db.query(ConversationMessages).filter(
-            ConversationMessages.id == UUID(chip_message_id)
-        ).first()
+        chip_message = (
+            db.query(ConversationMessages)
+            .filter(ConversationMessages.id == UUID(chip_message_id))
+            .first()
+        )
         return chip_message.conversation_id if chip_message else None
     except (ValueError, AttributeError):
         return None
@@ -149,13 +154,16 @@ def _get_seller_info_by_transaction_type(
         )
     return None
 
+
 def _cancel_albatal_subscription(
     db: Session,
     transaction_id: Optional[str],
 ) -> None:
     try:
         """Albatalサブスクリプションをキャンセル"""
-        delete_url = f"{ALBATAL_API_WPF_URL}/api/wpf/managed_recurring/items/{transaction_id}"
+        delete_url = (
+            f"{ALBATAL_API_WPF_URL}/api/wpf/managed_recurring/items/{transaction_id}"
+        )
         with httpx.Client() as client:
             response = client.delete(
                 delete_url,
@@ -165,12 +173,17 @@ def _cancel_albatal_subscription(
                 },
             )
             if response.status_code == 200:
-                logger.info(f"Successfully cancelled Albatal managed recurring item for transaction {transaction_id}")
+                logger.info(
+                    f"Successfully cancelled Albatal managed recurring item for transaction {transaction_id}"
+                )
             else:
-                logger.error(f"Failed to cancel Albatal managed recurring item for transaction {transaction_id}")
+                logger.error(
+                    f"Failed to cancel Albatal managed recurring item for transaction {transaction_id}"
+                )
     except Exception as e:
         logger.error(f"Error cancelling Albatal subscription: {str(e)}")
     return None
+
 
 ########################################################
 # ログ関数
@@ -188,11 +201,14 @@ def _log_wpf_webhook_received(
     signature: Optional[str],
 ) -> None:
     """Albatalウェブフック通知受信ログを出力"""
-    logger.info(f"Albatal WPF決済完了通知受信: wpf_transaction_id={wpf_transaction_id}, "
-                f"wpf_status={wpf_status}, wpf_unique_id={wpf_unique_id}, "
-                f"payment_transaction_unique_id={payment_transaction_unique_id}, "
-                f"amount={payment_transaction_amount}, consumer_id={consumer_id}, "
-                f"notification_type={notification_type}, signature={signature}")
+    logger.info(
+        f"Albatal WPF決済完了通知受信: wpf_transaction_id={wpf_transaction_id}, "
+        f"wpf_status={wpf_status}, wpf_unique_id={wpf_unique_id}, "
+        f"payment_transaction_unique_id={payment_transaction_unique_id}, "
+        f"amount={payment_transaction_amount}, consumer_id={consumer_id}, "
+        f"notification_type={notification_type}, signature={signature}"
+    )
+
 
 def _log_recurring_webhook_received(
     transaction_id: Optional[str],
@@ -202,9 +218,11 @@ def _log_recurring_webhook_received(
     amount: Optional[str],
 ) -> None:
     """Albatal定期決済通知受信ログを出力"""
-    logger.info(f"Albatal定期決済通知受信: transaction_id={transaction_id}, "
-                f"unique_id={unique_id}, merchant_transaction_id={merchant_transaction_id}, "
-                f"status={status}, amount={amount}")
+    logger.info(
+        f"Albatal定期決済通知受信: transaction_id={transaction_id}, "
+        f"unique_id={unique_id}, merchant_transaction_id={merchant_transaction_id}, "
+        f"status={status}, amount={amount}"
+    )
 
 
 ########################################################
@@ -273,7 +291,7 @@ async def receive_albatal_payment_webhook(
                 apc_card_expiration_year,
                 apc_card_expiration_month,
             )
-        
+
         elif status:
             _log_recurring_webhook_received(
                 transaction_id,
@@ -282,7 +300,6 @@ async def receive_albatal_payment_webhook(
                 status,
                 amount,
             )
-
 
             _handle_recurring_payment(
                 db,
@@ -297,6 +314,7 @@ async def receive_albatal_payment_webhook(
         logger.error(f"Albatalウェブフック処理エラー: {str(e)}", exc_info=True)
         # Albatalへのエラー応答はHTTP 200で返す（再送信を避けるため）
         return Response(content=ALBATAL_SUCCESS_RESPONSE, status_code=200)
+
 
 @router.post("/payment/chip")
 async def receive_albatal_chip_payment_webhook(
@@ -339,17 +357,20 @@ async def receive_albatal_chip_payment_webhook(
             apc_card_expiration_year,
             apc_card_expiration_month,
         )
-      
-        
+
         return Response(content=ALBATAL_SUCCESS_RESPONSE, status_code=200)
     except Exception as e:
-        logger.error(f"Albatal投げ銭決済完了通知受信エンドポイントエラー: {str(e)}", exc_info=True)
+        logger.error(
+            f"Albatal投げ銭決済完了通知受信エンドポイントエラー: {str(e)}",
+            exc_info=True,
+        )
         return Response(content=ALBATAL_SUCCESS_RESPONSE, status_code=200)
 
 
 ########################################################
 # 決済処理関数
 ########################################################
+
 
 def _handle_wpf_payment(
     db: Session,
@@ -369,7 +390,9 @@ def _handle_wpf_payment(
     """
     Albatal初回決済完了通知の処理
     """
-    payment_transaction = payment_transactions_crud.get_transaction_by_id(db, wpf_transaction_id)
+    payment_transaction = payment_transactions_crud.get_transaction_by_id(
+        db, wpf_transaction_id
+    )
     if not payment_transaction:
         logger.error(f"Payment transaction not found: {payment_transaction_unique_id}")
         return
@@ -397,6 +420,7 @@ def _handle_wpf_payment(
             )
             _handle_payment_failure_notification(db, payment_transaction)
     return
+
 
 def _handle_wpf_payment_success(
     db: Session,
@@ -460,7 +484,9 @@ def _handle_wpf_payment_success(
 
     # サブスクリプションレコードを作成
     access_type = (
-        SubscriptionType.PLAN if payment_type == PaymentType.PLAN else SubscriptionType.SINGLE
+        SubscriptionType.PLAN
+        if payment_type == PaymentType.PLAN
+        else SubscriptionType.SINGLE
     )
     next_billing_date = (
         datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DURATION_DAYS)
@@ -491,10 +517,40 @@ def _handle_wpf_payment_success(
     )
 
     # ユーザープロバイダーを有効化
-    _handle_update_creator_user_provider(db, buyer_user_id, consumer_id, provider.id, apc_card_brand, apc_card_last_four_digits, apc_card_expiration_year, apc_card_expiration_month)
+    _handle_update_creator_user_provider(
+        db,
+        buyer_user_id,
+        consumer_id,
+        provider.id,
+        apc_card_brand,
+        apc_card_last_four_digits,
+        apc_card_expiration_year,
+        apc_card_expiration_month,
+    )
 
     logger.info(f"Payment transaction status updated: {payment_transaction.id}")
+
+    try:
+        # フォロー通知を送信
+        is_following = followes_crud.is_following(
+            db=db,
+            follower_user_id=buyer_user_id,
+            creator_user_id=seller_user_id,
+        )
+
+        # フォローしていない場合はフォローを作成
+        if not is_following:
+            followes_crud.create_follow(
+                db=db,
+                follower_user_id=buyer_user_id,
+                creator_user_id=seller_user_id,
+            )
+    except Exception as e:
+        logger.error(f"Failed to follow seller by buyer: {e}")
+        pass
+
     return payment
+
 
 def _handle_plan_payment_success(
     db: Session,
@@ -527,20 +583,20 @@ def _handle_plan_payment_success(
             body_text=plan.welcome_message,
         )
 
-        # フォロー通知を送信
-        is_following = followes_crud.is_following(
-            db=db,
-            follower_user_id=buyer_user_id,
-            creator_user_id=creator_user_id,
-        )
+        # # フォロー通知を送信
+        # is_following = followes_crud.is_following(
+        #     db=db,
+        #     follower_user_id=buyer_user_id,
+        #     creator_user_id=creator_user_id,
+        # )
 
-        # フォローしていない場合はフォローを作成
-        if not is_following:
-            followes_crud.create_follow(
-                db=db,
-                follower_user_id=buyer_user_id,
-                creator_user_id=creator_user_id,
-            )
+        # # フォローしていない場合はフォローを作成
+        # if not is_following:
+        #     followes_crud.create_follow(
+        #         db=db,
+        #         follower_user_id=buyer_user_id,
+        #         creator_user_id=creator_user_id,
+        #     )
 
         logger.info(
             f"Sent welcome message: {message.id} from creator={creator_user_id} "
@@ -549,7 +605,8 @@ def _handle_plan_payment_success(
     except Exception as e:
         logger.error(f"Failed to send DM notification: {e}", exc_info=True)
         # エラーが発生しても決済処理は継続するため、例外は握りつぶす
-    
+
+
 def _handle_wpf_payment_failure(
     db: Session,
     payment_transaction: Optional[PaymentTransactions],
@@ -565,9 +622,11 @@ def _handle_wpf_payment_failure(
     )
     return
 
+
 ########################################################
 # 投げ銭決済関連処理
 ########################################################
+
 
 def _handle_wpf_chip_payment(
     db: Session,
@@ -585,7 +644,9 @@ def _handle_wpf_chip_payment(
     """
     Albatal投げ銭決済完了通知の処理
     """
-    payment_transaction = payment_transactions_crud.get_transaction_by_id(db, wpf_transaction_id)
+    payment_transaction = payment_transactions_crud.get_transaction_by_id(
+        db, wpf_transaction_id
+    )
     if not payment_transaction:
         logger.error(f"Payment transaction not found: {payment_transaction_unique_id}")
         return
@@ -614,6 +675,7 @@ def _handle_wpf_chip_payment(
             )
             _handle_payment_failure_notification(db, payment_transaction)
     return
+
 
 def _handle_wpf_chip_payment_success(
     db: Session,
@@ -657,9 +719,11 @@ def _handle_wpf_chip_payment_success(
         return None
 
     # チップメッセージを更新
-    chip_message = db.query(ConversationMessages).filter(
-        ConversationMessages.id == UUID(chip_message_id)
-    ).first()
+    chip_message = (
+        db.query(ConversationMessages)
+        .filter(ConversationMessages.id == UUID(chip_message_id))
+        .first()
+    )
     if not chip_message:
         logger.error(f"Chip message not found: {chip_message_id}")
         return None
@@ -708,10 +772,20 @@ def _handle_wpf_chip_payment_success(
     )
 
     # ユーザープロバイダーを有効化
-    _handle_update_creator_user_provider(db, buyer_user_id, consumer_id, provider.id, apc_card_brand, apc_card_last_four_digits, apc_card_expiration_year, apc_card_expiration_month)
+    _handle_update_creator_user_provider(
+        db,
+        buyer_user_id,
+        consumer_id,
+        provider.id,
+        apc_card_brand,
+        apc_card_last_four_digits,
+        apc_card_expiration_year,
+        apc_card_expiration_month,
+    )
 
     logger.info(f"Payment transaction status updated: {payment_transaction.id}")
     return payment
+
 
 def _handle_wpf_chip_payment_failure(
     db: Session,
@@ -732,22 +806,30 @@ def _handle_wpf_chip_payment_failure(
     # メッセージを削除
     if chip_message_id:
         try:
-            chip_message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(chip_message_id)
-            ).first()
+            chip_message = (
+                db.query(ConversationMessages)
+                .filter(ConversationMessages.id == UUID(chip_message_id))
+                .first()
+            )
             if chip_message:
                 chip_message.deleted_at = datetime.now(timezone.utc)
                 db.commit()
-                logger.info(f"Marked chip payment message as deleted: {chip_message_id}")
+                logger.info(
+                    f"Marked chip payment message as deleted: {chip_message_id}"
+                )
             else:
-                logger.warning(f"Chip message not found for chip_message_id: {chip_message_id}")
+                logger.warning(
+                    f"Chip message not found for chip_message_id: {chip_message_id}"
+                )
         except Exception as e:
             logger.error(f"Failed to delete chip message {chip_message_id}: {e}")
     return
 
+
 ########################################################
 # 継続決済関連処理
 ########################################################
+
 
 def _handle_recurring_payment(
     db: Session,
@@ -781,7 +863,9 @@ def _handle_recurring_payment_success(
     amount: Optional[str],
 ) -> Optional[Payments]:
     """Albatal継続決済完了通知の処理"""
-    payment_transaction = payment_transactions_crud.get_transaction_by_id(db, transaction_id)
+    payment_transaction = payment_transactions_crud.get_transaction_by_id(
+        db, transaction_id
+    )
     if not payment_transaction:
         logger.error(f"Payment transaction not found: {transaction_id}")
         return
@@ -810,7 +894,9 @@ def _handle_recurring_payment_success(
         return
 
     # サブスクリプションレコードを作成
-    next_billing_date = datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DURATION_DAYS)
+    next_billing_date = datetime.now(timezone.utc) + timedelta(
+        days=SUBSCRIPTION_DURATION_DAYS
+    )
 
     # 決済レコードを作成
     new_payment = _create_payment_record(
@@ -847,12 +933,15 @@ def _handle_recurring_payment_success(
 
     return payment
 
+
 def _handle_recurring_payment_failure(
     db: Session,
     transaction_id: Optional[str],
 ) -> None:
     """Albatal継続決済失敗通知の処理"""
-    payment_transaction = payment_transactions_crud.get_transaction_by_id(db, transaction_id)
+    payment_transaction = payment_transactions_crud.get_transaction_by_id(
+        db, transaction_id
+    )
     if not payment_transaction:
         logger.error(f"Payment transaction not found: {transaction_id}")
         return
@@ -892,14 +981,16 @@ def _handle_recurring_payment_failure(
         return
 
     # 失敗トランザクションを作成
-    failed_payment_transaction = payment_transactions_crud.create_failed_payment_transaction(
-        db,
-        payment_transaction.user_id,
-        payment_transaction.provider_id,
-        payment_transaction.type,
-        payment_transaction.session_id,
-        payment_transaction.order_id,
-        PaymentTransactionStatus.FAILED,
+    failed_payment_transaction = (
+        payment_transactions_crud.create_failed_payment_transaction(
+            db,
+            payment_transaction.user_id,
+            payment_transaction.provider_id,
+            payment_transaction.type,
+            payment_transaction.session_id,
+            payment_transaction.order_id,
+            PaymentTransactionStatus.FAILED,
+        )
     )
 
     # paymentを失敗レコードを追加
@@ -925,7 +1016,7 @@ def _handle_recurring_payment_failure(
         db,
         transaction_id,
     )
-    
+
     slack_alert._alert_subscription_expired(
         buyer_user.id,
         buyer_user.profile_name,
@@ -943,9 +1034,11 @@ def _handle_recurring_payment_failure(
         )
     return
 
+
 ########################################################
 # ユーザープロバイダー関連処理
 ########################################################
+
 
 def _handle_update_creator_user_provider(
     db: Session,
@@ -959,7 +1052,9 @@ def _handle_update_creator_user_provider(
 ) -> None:
     """ユーザープロバイダーを作成または更新"""
 
-    card_brand = "V" if apc_card_brand == "visa" else "M" if apc_card_brand == "master" else None
+    card_brand = (
+        "V" if apc_card_brand == "visa" else "M" if apc_card_brand == "master" else None
+    )
     yuko = None
     if apc_card_expiration_year and apc_card_expiration_month:
         # 月を2桁に変換（"9" -> "09", "10" -> "10"）
@@ -977,7 +1072,9 @@ def _handle_update_creator_user_provider(
         yuko=yuko,
     )
     if not user_provider:
-        logger.info(f"Creating user provider: {buyer_user_id}, {provider_id}, {consumer_id}")
+        logger.info(
+            f"Creating user provider: {buyer_user_id}, {provider_id}, {consumer_id}"
+        )
         user_provider = user_providers_crud.create_user_provider(
             db=db,
             user_id=buyer_user_id,
@@ -994,9 +1091,11 @@ def _handle_update_creator_user_provider(
         db.refresh(user_provider)
     return
 
+
 ########################################################
 # 通知関連処理
 ########################################################
+
 
 def _send_chip_payment_success_notification(
     db: Session,
@@ -1026,6 +1125,7 @@ def _send_chip_payment_success_notification(
             db, buyer_user_id, recipient_user_id, payment
         )
 
+
 def _handle_buyer_chip_payment_success_notification(
     db: Session,
     buyer_user_id: Optional[UUID],
@@ -1052,10 +1152,14 @@ def _handle_buyer_chip_payment_success_notification(
     conversation_id = _get_conversation_id_from_chip_message(db, chip_message_id)
 
     notification_redirect_url = (
-        f"/message/conversation/{conversation_id}" if conversation_id else "/account/sale"
+        f"/message/conversation/{conversation_id}"
+        if conversation_id
+        else "/account/sale"
     )
     conversation_url = (
-        f"{FRONTEND_URL}/message/conversation/{conversation_id}" if conversation_id else ""
+        f"{FRONTEND_URL}/message/conversation/{conversation_id}"
+        if conversation_id
+        else ""
     )
 
     title = f"{recipient_name}にチップ送信が完了しました"
@@ -1092,6 +1196,7 @@ def _handle_buyer_chip_payment_success_notification(
         },
     )
 
+
 def _handle_seller_chip_payment_success_notification(
     db: Session,
     buyer_user_id: Optional[UUID],
@@ -1118,7 +1223,9 @@ def _handle_seller_chip_payment_success_notification(
         logger.error(f"Creator info not found: {recipient_user_id}")
         return
 
-    seller_amount = _calculate_seller_amount(chip_amount, creator_info.platform_fee_percent)
+    seller_amount = _calculate_seller_amount(
+        chip_amount, creator_info.platform_fee_percent
+    )
     payment_date = _convert_utc_to_jst(payment.paid_at)
     buyer_name = buyer_user.profile_name or "ユーザー"
 
@@ -1128,10 +1235,14 @@ def _handle_seller_chip_payment_success_notification(
     conversation_id = _get_conversation_id_from_chip_message(db, chip_message_id)
 
     notification_redirect_url = (
-        f"/message/conversation/{conversation_id}" if conversation_id else "/account/sale"
+        f"/message/conversation/{conversation_id}"
+        if conversation_id
+        else "/account/sale"
     )
     conversation_url = (
-        f"{FRONTEND_URL}/message/conversation/{conversation_id}" if conversation_id else ""
+        f"{FRONTEND_URL}/message/conversation/{conversation_id}"
+        if conversation_id
+        else ""
     )
     sales_url = f"{FRONTEND_URL}/account/sale"
 
@@ -1170,6 +1281,7 @@ def _handle_seller_chip_payment_success_notification(
         },
     )
 
+
 def _handle_payment_success_notification(
     db: Session,
     payment: Optional[Payments],
@@ -1198,19 +1310,22 @@ def _handle_payment_success_notification(
             db, buyer_user_id, recipient_user_id, payment
         )
 
+
 def _handle_payment_failure_notification(
     db: Session,
     payment_transaction: Optional[PaymentTransactions],
 ) -> None:
     """Albatal決済失敗通知を送信"""
 
-
     transaction_type = payment_transaction.type
     # 購入者への通知
     if CommonFunction.get_user_need_to_send_notification(
         db, payment_transaction.user_id, "userPayments"
     ):
-        if transaction_type in [PaymentTransactionType.SINGLE, PaymentTransactionType.SUBSCRIPTION]:
+        if transaction_type in [
+            PaymentTransactionType.SINGLE,
+            PaymentTransactionType.SUBSCRIPTION,
+        ]:
             _handle_buyer_payment_failure_notification(
                 db, payment_transaction.user_id, payment_transaction
             )
@@ -1238,6 +1353,7 @@ def _handle_buyer_payment_success_notification(
         )
     else:
         logger.error(f"Invalid transaction type: {transaction_type}")
+
 
 def _handle_buyer_single_payment_success_notification(
     db: Session,
@@ -1299,6 +1415,7 @@ def _handle_buyer_single_payment_success_notification(
         )
     except Exception as e:
         logger.error(f"Failed to send payment success email: {e}")
+
 
 def _handle_buyer_subscription_payment_success_notification(
     db: Session,
@@ -1362,6 +1479,7 @@ def _handle_buyer_subscription_payment_success_notification(
     except Exception as e:
         logger.error(f"Failed to send payment success email: {e}")
 
+
 def _handle_seller_single_payment_success_notification(
     db: Session,
     buyer_user_id: Optional[UUID],
@@ -1421,6 +1539,7 @@ def _handle_seller_single_payment_success_notification(
         )
     except Exception as e:
         logger.error(f"Failed to send payment success email: {e}")
+
 
 def _handle_seller_subscription_payment_success_notification(
     db: Session,
@@ -1482,6 +1601,7 @@ def _handle_seller_subscription_payment_success_notification(
     except Exception as e:
         logger.error(f"Failed to send payment success email: {e}")
 
+
 def _handle_seller_payment_success_notification(
     db: Session,
     buyer_user_id: Optional[UUID],
@@ -1501,6 +1621,7 @@ def _handle_seller_payment_success_notification(
     else:
         logger.error(f"Invalid transaction type: {transaction_type}")
 
+
 def _handle_buyer_payment_failure_notification(
     db: Session,
     buyer_user_id: Optional[UUID],
@@ -1508,7 +1629,9 @@ def _handle_buyer_payment_failure_notification(
 ) -> None:
     """Albatal決済失敗通知を送信（購入者向け）"""
     if not buyer_user_id or not payment_transaction:
-        logger.error(f"Buyer user id or payment transaction not found: {buyer_user_id} or {payment_transaction}")
+        logger.error(
+            f"Buyer user id or payment transaction not found: {buyer_user_id} or {payment_transaction}"
+        )
         return
 
     buyer_user = user_crud.get_user_by_id(db, buyer_user_id)
@@ -1525,7 +1648,8 @@ def _handle_buyer_payment_failure_notification(
         user_name=buyer_user.profile_name,
         user_email=buyer_user.email,
     )
-    return      
+    return
+
 
 def _handle_buyer_subscription_payment_failure_notification(
     db: Session,
@@ -1534,7 +1658,9 @@ def _handle_buyer_subscription_payment_failure_notification(
 ) -> None:
     """Albatal決済失敗通知を送信（購入者向け・サブスクリプション）"""
     if not buyer_user_id or not payment_transaction:
-        logger.error(f"Buyer user id or payment transaction not found: {buyer_user_id} or {payment_transaction}")
+        logger.error(
+            f"Buyer user id or payment transaction not found: {buyer_user_id} or {payment_transaction}"
+        )
         return
 
     buyer_user = user_crud.get_user_by_id(db, buyer_user_id)
@@ -1570,7 +1696,7 @@ def _handle_buyer_subscription_payment_failure_notification(
         plan_url=email_content_url,
     )
 
-     # プラン解約の通知
+    # プラン解約の通知
     notifications_crud.add_notification_for_cancel_subscription(
         db=db,
         notification={
@@ -1581,6 +1707,7 @@ def _handle_buyer_subscription_payment_failure_notification(
     )
     return
 
+
 def _handle_buyer_chip_payment_failure_notification(
     db: Session,
     buyer_user_id: Optional[UUID],
@@ -1589,7 +1716,9 @@ def _handle_buyer_chip_payment_failure_notification(
     """Albatal決済失敗通知を送信（購入者向け・投げ銭）"""
 
     if not buyer_user_id or not payment_transaction:
-        logger.error(f"Buyer user id or payment transaction not found: {buyer_user_id} or {payment_transaction}")
+        logger.error(
+            f"Buyer user id or payment transaction not found: {buyer_user_id} or {payment_transaction}"
+        )
         return
 
     buyer_user = user_crud.get_user_by_id(db, buyer_user_id)
@@ -1606,7 +1735,11 @@ def _handle_buyer_chip_payment_failure_notification(
 
     title = "チップの送信に失敗しました"
     subtitle = "チップの送信に失敗しました"
-    notification_redirect_url = f"/message/conversation/{conversation_id}" if conversation_id else "/account/sale"
+    notification_redirect_url = (
+        f"/message/conversation/{conversation_id}"
+        if conversation_id
+        else "/account/sale"
+    )
 
     # 失敗時のメール送信
     send_payment_faild_email(
@@ -1636,6 +1769,7 @@ def _handle_buyer_chip_payment_failure_notification(
     )
     return
 
+
 ########################################################
 # データ取得関連処理
 ########################################################
@@ -1650,6 +1784,7 @@ def _get_single_seller_info(
         return None, None, None
     return price, post, creator
 
+
 def _get_subscription_seller_info(
     db: Session,
     order_id: Optional[str],
@@ -1662,6 +1797,7 @@ def _get_subscription_seller_info(
         logger.error(f"Plan or creator not found: {order_id}")
         return None, None
     return plan, creator
+
 
 def _create_payment_record(
     db: Session,
@@ -1696,6 +1832,7 @@ def _create_payment_record(
         platform_fee=platform_fee,
         paid_at=paid_at,
     )
+
 
 def _create_subscription_record(
     db: Session,
