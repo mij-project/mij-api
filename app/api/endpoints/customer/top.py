@@ -6,8 +6,8 @@ from app.schemas.top import (
     RecentPostResponse, TopPageResponse
 )
 from app.crud.categories_crud import get_top_categories
-from app.crud.creator_crud import get_top_creators
-from app.crud.post_crud import get_ranking_posts, get_recent_posts
+from app.crud.creator_crud import get_ranking_creators_overall
+from app.crud.post_crud import get_post_ranking_overall, get_recent_posts
 from os import getenv
 from app.api.commons.utils import get_video_duration
 from app.constants.enums import PostType
@@ -29,10 +29,61 @@ def get_top_page_data(
     """
     try:
         top_categories = get_top_categories(db, limit=8)
-        ranking_posts = get_ranking_posts(db, limit=6)
+        # ranking_posts = get_post_ranking_overall(db, limit=6, period="daily")
+        # if not ranking_posts:
+        #     ranking_posts = get_post_ranking_overall(db, limit=6, period="weekly")
+        # if not ranking_posts:
+        #     ranking_posts = get_post_ranking_overall(db, limit=6, period="monthly")
+        # if not ranking_posts:
+        #     ranking_posts = get_post_ranking_overall(db, limit=6, period="all_time")
         recent_posts = get_recent_posts(db, limit=10)
-        top_creators = get_top_creators(db, limit=5, current_user=current_user)
+        top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="daily")
+        if not top_creators:
+            top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="weekly")
+        if not top_creators:
+            top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="monthly")
+        if not top_creators:
+            top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="all_time")
         # new_creators = get_new_creators(db, limit=5)
+        daily_ranking_posts = get_post_ranking_overall(db, limit=6, period="daily")
+        weekly_ranking_posts = get_post_ranking_overall(db, limit=6, period="weekly")
+        monthly_ranking_posts = get_post_ranking_overall(db, limit=6, period="monthly")
+        all_time_ranking_posts = get_post_ranking_overall(db, limit=6, period="all_time")
+        
+        ranking_posts = []
+        tracking_posts = []
+        for post in daily_ranking_posts:
+            if len(ranking_posts) < 6:
+                posts_id = str(post.Posts.id)
+                if posts_id in tracking_posts:
+                    continue
+                ranking_posts.append(post)
+            else:
+                break
+        for post in weekly_ranking_posts:
+            if len(ranking_posts) < 6:
+                posts_id = str(post.Posts.id)
+                if posts_id in tracking_posts:
+                    continue
+                ranking_posts.append(post)
+            else:
+                break
+        for post in monthly_ranking_posts:
+            if len(ranking_posts) < 6:
+                posts_id = str(post.Posts.id)
+                if posts_id in tracking_posts:
+                    continue
+                ranking_posts.append(post)
+            else:
+                break
+        for post in all_time_ranking_posts:
+            if len(ranking_posts) < 6:
+                posts_id = str(post.Posts.id)
+                if posts_id in tracking_posts:
+                    continue
+                ranking_posts.append(post)
+            else:
+                break
         
         return TopPageResponse(
             categories=[CategoryResponse(
@@ -47,7 +98,8 @@ def get_top_page_data(
                 post_type=p.Posts.post_type,
                 title=p.Posts.description,
                 thumbnail=f"{BASE_URL}/{p.thumbnail_key}" if p.thumbnail_key else None,
-                likes=p.likes_count,
+                # likes=p.likes_count,
+                likes=0,
                 duration=get_video_duration(p.duration_sec) if p.Posts.post_type == PostType.VIDEO and p.duration_sec else ("画像" if p.Posts.post_type == PostType.IMAGE else ""),
                 rank=idx + 1,
                 creator=PostCreatorResponse(

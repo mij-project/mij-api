@@ -45,9 +45,9 @@ class EndPreregistationEvent:
             end_date = None
             created_at = creator.created_at.replace(tzinfo=timezone.utc)
             if created_at < self.release_date:
-                end_date = self.release_date + timedelta(days=30)
+                end_date = self.release_date + timedelta(days=90)
             else:
-                end_date = created_at + timedelta(days=30)
+                end_date = created_at + timedelta(days=90)
             if end_date.date() > self.now.date():
                 self.logger.info(
                     f"Creator {creator.user_id} still in preregistration event"

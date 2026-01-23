@@ -29,6 +29,9 @@ class UserProviders(Base):
     cardnumber: Mapped[Optional[str]] = mapped_column(String(4), nullable=True, comment="カード番号")
     yuko: Mapped[Optional[str]] = mapped_column(String(4), nullable=True, comment="有効期限")
 
+    # provide_email
+    provider_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="プロバイダーのメールアドレス")
+
     # カード情報の有効性
     is_valid: Mapped[bool] = mapped_column(nullable=False, default=True, comment="カード情報が有効か")
 

@@ -79,7 +79,7 @@ class NewPostArrivalDomain:
             if should_send:
                 self._send_email_notification(follower)
                 self._insert_notification(follower)
-                self._send_push_notification(follower)
+                self._push_notification_to_user(follower)
         except Exception as e:
             self.logger.exception(
                 f"Error sending notification to follower {follower.follower_username}: {e}"

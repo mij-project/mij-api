@@ -8,3 +8,14 @@ class PlatformFeePercent:
 
 class PaymentPlanPlatformFeePercent:
     DEFAULT = 10 # デフォルトのプランフォーム手数料(%)
+
+class AlbatalRecurringInterval:
+    PERIOD_DAYS = 30 # 日数
+
+class ChipPaymentFeePercent:
+    DEFAULT = 10 # チップ決済の手数料(%)
+
+class AlbatalMonthlyFee:
+    DEFAULT = 11000 # 月額料金(円)
+
+    
