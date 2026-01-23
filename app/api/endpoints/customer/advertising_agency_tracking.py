@@ -9,7 +9,11 @@ from app.deps.auth import get_current_user_optional
 from app.deps.initial_domain import initial_tracking_domain
 from app.domain.tracking.tracking_domain import TrackingDomain
 from app.models.user import Users
-from app.schemas.tracking import PostPurchaseTrackingPayload, PostViewTrackingPayload, ProfileViewTrackingPayload
+from app.schemas.tracking import (
+    PostPurchaseTrackingPayload,
+    PostViewTrackingPayload,
+    ProfileViewTrackingPayload,
+)
 
 
 router = APIRouter()
@@ -19,15 +23,14 @@ logger = Logger.get_logger()
 
 class TrackAccessRequest(BaseModel):
     """アクセストラッキングリクエスト"""
+
     referral_code: str
     landing_page: Optional[str] = None
 
 
 @router.post("/track-access")
 async def track_access(
-    request: Request,
-    data: TrackAccessRequest,
-    db: Session = Depends(get_db)
+    request: Request, data: TrackAccessRequest, db: Session = Depends(get_db)
 ):
     """
     広告会社経由のアクセスを記録
@@ -36,7 +39,9 @@ async def track_access(
     - **landing_page**: アクセスしたページURL
     """
     # リファラルコードから広告会社を検索
-    agency = advertising_agencies_crud.get_advertising_agency_by_code(db, data.referral_code)
+    agency = advertising_agencies_crud.get_advertising_agency_by_code(
+        db, data.referral_code
+    )
 
     if not agency:
         # 広告会社が見つからない場合でもセッションには保存
@@ -48,6 +53,7 @@ async def track_access(
     session_id = request.session.get("session_id")
     if not session_id:
         import uuid
+
         session_id = str(uuid.uuid4())
         request.session["session_id"] = session_id
 
@@ -56,7 +62,9 @@ async def track_access(
     request.session["referral_code"] = data.referral_code
 
     # デバッグログ
-    logger.info(f"セッションにリファラルコードを保存: referral_code={data.referral_code}, session_id={session_id}")
+    logger.info(
+        f"セッションにリファラルコードを保存: referral_code={data.referral_code}, session_id={session_id}"
+    )
     logger.info(f"セッション内容確認: {dict(request.session)}")
 
     # IPアドレスとユーザーエージェントを取得
@@ -72,15 +80,23 @@ async def track_access(
             session_id=session_id,
             ip_address=ip_address,
             user_agent=user_agent,
-            landing_page=data.landing_page
+            landing_page=data.landing_page,
         )
         db.commit()
 
-        return {"success": True, "message": "Access tracked", "referral_code": data.referral_code}
+        return {
+            "success": True,
+            "message": "Access tracked",
+            "referral_code": data.referral_code,
+        }
     except Exception as e:
         db.rollback()
         # エラーが発生してもセッションは保存されているはず
-        return {"success": False, "message": str(e), "referral_code": data.referral_code}
+        return {
+            "success": False,
+            "message": str(e),
+            "referral_code": data.referral_code,
+        }
 
 
 @router.get("/debug-session")
@@ -94,8 +110,9 @@ async def debug_session(request: Request):
         "session": session_data,
         "has_referral_code": "referral_code" in request.session,
         "referral_code": request.session.get("referral_code"),
-        "session_id": request.session.get("session_id")
+        "session_id": request.session.get("session_id"),
     }
+
 
 @router.post("/profile-view-tracking")
 async def profile_view_tracking(
@@ -106,6 +123,7 @@ async def profile_view_tracking(
     tracking_domain.track_profile_view(payload, current_user)
     return {"message": "Done"}
 
+
 @router.post("/post-view-tracking")
 async def post_view_tracking(
     payload: PostViewTrackingPayload,
@@ -114,6 +132,7 @@ async def post_view_tracking(
     tracking_domain.track_post_view(payload)
     return {"message": "Done"}
 
+
 @router.post("/post-purchase-tracking")
 async def post_purchase_tracking(
     payload: PostPurchaseTrackingPayload,
@@ -121,3 +140,21 @@ async def post_purchase_tracking(
 ):
     tracking_domain.track_post_purchase(payload)
     return {"message": "Done"}
+
+
+@router.get("/geo")
+async def get_geo(
+    request: Request, tracking_domain: TrackingDomain = Depends(initial_tracking_domain)
+):
+    ip_address = __get_client_ip(request)
+    logger.info(f"IP Address: {ip_address}")
+    geo = tracking_domain.get_geo_by_ip(ip_address)
+    logger.info(f"Geo: {geo}")
+    return {"country_code": geo}
+
+
+def __get_client_ip(request: Request) -> str | None:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else None

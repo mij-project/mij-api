@@ -1,6 +1,8 @@
 from __future__ import annotations
+import maxminddb
 from logging import Logger
 from typing import Optional
+from pathlib import Path
 from sqlalchemy.orm import Session
 from app.core.logger import Logger as CoreLogger
 from app.crud.social_crud import SocialCrud
@@ -13,6 +15,7 @@ class TrackingDomain:
         self.db: Session = db
         self.logger: Logger = CoreLogger.get_logger()
         self.social_crud: SocialCrud = SocialCrud(db=self.db)
+        self.geo_reader = maxminddb.open_database(Path(__file__).parent.parent.parent / "assets" / "ipinfo_lite.mmdb")
 
     def track_profile_view(self, payload: ProfileViewTrackingPayload, user: Optional[Users] = None):
         try:
@@ -57,3 +60,13 @@ class TrackingDomain:
         except Exception as e:
             self.logger.error(f"Error tracking post purchase: {e}")
             raise e
+
+    def get_geo_by_ip(self, ip_address: str) -> str | None:
+        try:
+            geo = self.geo_reader.get(ip_address)
+            if geo:
+                return geo.get("country_code")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error getting geo by ip: {e}")
+            return None
