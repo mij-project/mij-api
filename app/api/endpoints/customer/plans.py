@@ -1,4 +1,7 @@
+import os
 import math
+import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.models.plans import PostPlans
@@ -39,8 +42,6 @@ from app.crud.post_crud import get_posts_by_plan_id
 from app.constants.enums import PostType
 from uuid import UUID
 from typing import Optional
-import os
-import time
 from app.core.logger import Logger
 from app.crud.time_sale_crud import (
     check_exists_plan_time_sale_in_period_by_plan_id,
@@ -48,7 +49,6 @@ from app.crud.time_sale_crud import (
     delete_plan_time_sale_by_id,
     get_plan_time_sale_by_plan_id,
     get_plan_time_sale_by_id,
-    get_price_time_sale_by_id,
     get_active_plan_timesale_map,
 )
 from app.schemas.post_plan_timesale import (
@@ -73,6 +73,19 @@ def create_user_plan(
     プランを作成
     """
     try:
+        if plan_data.type == PlanStatus.RECOMMENDED:
+            other_plans = (
+                db.query(Plans)
+                .filter(
+                    Plans.creator_user_id == current_user.id,
+                    Plans.deleted_at.is_(None)
+                )
+                .with_for_update()
+                .all()
+            )
+            for other_plan in other_plans:
+                other_plan.type = PlanStatus.NORMAL
+                other_plan.updated_at = datetime.now(timezone.utc)
         # プランを登録
         plan_create_data = {
             "creator_user_id": current_user.id,

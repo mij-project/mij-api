@@ -21,3 +21,4 @@ tenacity
 openpyxl
 slack_sdk
 pywebpush
+maxminddb

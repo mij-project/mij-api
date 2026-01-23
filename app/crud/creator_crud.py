@@ -1,10 +1,13 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import distinct, literal, or_, select, func, and_
+from sqlalchemy import distinct, literal, or_, select, func, and_, desc, cast
+from sqlalchemy.sql import and_ as sa_and, or_ as sa_or
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
-from app.models import Categories, PostCategories
+from app.models import Bookmarks, Categories, Payments, PostCategories, Prices
 from app.models.creators import Creators
+from app.models.plans import PostPlans
 from app.models.posts import Posts
 from app.models.user import Users
 from app.models.identity import IdentityVerifications, IdentityDocuments
@@ -18,9 +21,10 @@ from app.constants.enums import (
     PostStatus,
     VerificationStatus,
     AccountType,
+    PaymentStatus,
+    PaymentType,
 )
 from app.models.profiles import Profiles
-from sqlalchemy import desc
 from app.models.social import Follows, Likes
 
 
@@ -1340,59 +1344,167 @@ def get_ranking_creators_categories_detail(
     limit: int = 500,
     term: str = "all_time",
     current_user=None,
+    min_payment_price: int = 500,
 ):
     """
-    いいね数が多いCreator overalltime
+    Creator ranking in a category (detail list)
+    Ranking:
+      purchase_count DESC
+      bookmark_count DESC
+      followers_count DESC
+      Users.id DESC
+
+    Return shape compatible with old mapping:
+      Users, Users.profile_name, Profiles.username, Profiles.avatar_url, Profiles.cover_url,
+      followers_count, likes_count(=purchase_count), is_following
     """
-    if term == "all_time":
-        filter_date_condition = None
-    elif term == "monthly":
-        filter_date_condition = Likes.created_at >= datetime.now(
-            timezone.utc
-        ) - timedelta(days=30)
+
+    # ---------- period window
+    now = datetime.now(timezone.utc)
+    start_dt = None
+    if term == "daily":
+        start_dt = now - timedelta(days=1)
     elif term == "weekly":
-        filter_date_condition = Likes.created_at >= datetime.now(
-            timezone.utc
-        ) - timedelta(days=7)
-    elif term == "daily":
-        filter_date_condition = Likes.created_at >= datetime.now(
-            timezone.utc
-        ) - timedelta(days=1)
+        start_dt = now - timedelta(days=7)
+    elif term == "monthly":
+        start_dt = now - timedelta(days=30)
+    # all_time => None
 
     offset = (page - 1) * limit
+    if offset < 0:
+        offset = 0
 
-    now = func.now()
-    active_post_cond = and_(
+    # ---------- active post condition
+    now_sql = func.now()
+    active_post_cond = sa_and(
         Posts.status == PostStatus.APPROVED,
         Posts.deleted_at.is_(None),
-        or_(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now),
-        or_(Posts.expiration_at.is_(None), Posts.expiration_at > now),
+        sa_or(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now_sql),
+        sa_or(Posts.expiration_at.is_(None), Posts.expiration_at > now_sql),
     )
 
-    likes_join_cond = Likes.post_id == Posts.id
-    if filter_date_condition is not None:
-        likes_join_cond = and_(
-            likes_join_cond, Likes.created_at >= filter_date_condition
-        )
+    # ---------- constants
+    PAYMENT_SUCCEEDED = PaymentStatus.SUCCEEDED
+    ORDER_TYPE_PLAN = PaymentType.PLAN
+    ORDER_TYPE_PRICE = PaymentType.SINGLE
+    MIN_PAYMENT_PRICE = min_payment_price
 
-    likes_agg = (
+    # =====================================================
+    # A) purchase_count per creator in this category
+    # =====================================================
+    base_payment_cond = sa_and(
+        Payments.status == PAYMENT_SUCCEEDED,
+        Payments.payment_price >= MIN_PAYMENT_PRICE,
+        Payments.paid_at.isnot(None),
+    )
+    if start_dt is not None:
+        base_payment_cond = sa_and(base_payment_cond, Payments.paid_at >= start_dt)
+
+    # price payments -> creator (category-scoped)
+    price_purchase_creator_sq = (
         db.query(
             Posts.creator_user_id.label("creator_user_id"),
-            func.count(distinct(Likes.post_id)).label("likes_count"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
         )
-        .select_from(Posts)
+        .select_from(Prices)
+        .join(Posts, sa_and(Posts.id == Prices.post_id, active_post_cond))
         .join(
             PostCategories,
-            and_(
+            sa_and(
                 PostCategories.post_id == Posts.id,
                 PostCategories.category_id == category,
             ),
         )
-        .outerjoin(Likes, likes_join_cond)
-        .filter(active_post_cond)
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PRICE,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id,
+                base_payment_cond,
+            ),
+        )
         .group_by(Posts.creator_user_id)
-        .subquery("likes_agg")
+        .subquery("price_purchase_creator_sq")
     )
+
+    # plan payments -> creator (category-scoped)
+    plan_purchase_creator_sq = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .select_from(PostPlans)
+        .join(Posts, sa_and(Posts.id == PostPlans.post_id, active_post_cond))
+        .join(
+            PostCategories,
+            sa_and(
+                PostCategories.post_id == Posts.id,
+                PostCategories.category_id == category,
+            ),
+        )
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PLAN,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(Posts.creator_user_id)
+        .subquery("plan_purchase_creator_sq")
+    )
+
+    union_purchase_sq = (
+        db.query(
+            price_purchase_creator_sq.c.creator_user_id.label("creator_user_id"),
+            price_purchase_creator_sq.c.purchase_count.label("purchase_count"),
+        )
+        .union_all(
+            db.query(
+                plan_purchase_creator_sq.c.creator_user_id.label("creator_user_id"),
+                plan_purchase_creator_sq.c.purchase_count.label("purchase_count"),
+            )
+        )
+        .subquery("union_purchase_sq")
+    )
+
+    purchase_creator_sq = (
+        db.query(
+            union_purchase_sq.c.creator_user_id.label("creator_user_id"),
+            func.sum(union_purchase_sq.c.purchase_count).label("purchase_count"),
+        )
+        .group_by(union_purchase_sq.c.creator_user_id)
+        .subquery("purchase_creator_sq")
+    )
+
+    # =====================================================
+    # B) bookmark_count per creator in this category (period-scoped)
+    # =====================================================
+    bookmark_q = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Bookmarks.user_id)).label("bookmark_count"),
+        )
+        .select_from(Bookmarks)
+        .join(Posts, sa_and(Posts.id == Bookmarks.post_id, active_post_cond))
+        .join(
+            PostCategories,
+            sa_and(
+                PostCategories.post_id == Posts.id,
+                PostCategories.category_id == category,
+            ),
+        )
+    )
+    if start_dt is not None:
+        bookmark_q = bookmark_q.filter(Bookmarks.created_at >= start_dt)
+
+    bookmark_creator_sq = bookmark_q.group_by(Posts.creator_user_id).subquery(
+        "bookmark_creator_sq"
+    )
+
+    # =====================================================
+    # C) followers_count (all time)
+    # =====================================================
     followers_agg = (
         db.query(
             Follows.creator_user_id.label("creator_user_id"),
@@ -1401,6 +1513,10 @@ def get_ranking_creators_categories_detail(
         .group_by(Follows.creator_user_id)
         .subquery("followers_agg")
     )
+
+    # =====================================================
+    # D) viewer follow map
+    # =====================================================
     if current_user is not None:
         viewer_follow_map = (
             db.query(
@@ -1417,6 +1533,26 @@ def get_ranking_creators_categories_detail(
         viewer_follow_map = None
         is_following_col = literal(False).label("is_following")
 
+    # =====================================================
+    # E) restrict creators to those who actually have posts in this category
+    # (prevents unrelated creators from appearing with all zeros)
+    # =====================================================
+    creators_in_category_sq = (
+        db.query(Posts.creator_user_id.label("creator_user_id"))
+        .select_from(Posts)
+        .join(
+            PostCategories,
+            sa_and(
+                PostCategories.post_id == Posts.id,
+                PostCategories.category_id == category,
+            ),
+        )
+        .filter(active_post_cond)
+        .distinct()
+        .subquery("creators_in_category_sq")
+    )
+
+    # ---------- main query (return old shape)
     q = (
         db.query(
             Users,
@@ -1425,25 +1561,50 @@ def get_ranking_creators_categories_detail(
             Profiles.avatar_url,
             Profiles.cover_url,
             func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
-            func.coalesce(likes_agg.c.likes_count, 0).label("likes_count"),
+            # compatibility: keep likes_count key => purchase_count
+            func.coalesce(purchase_creator_sq.c.purchase_count, 0).label("likes_count"),
             is_following_col,
         )
         .select_from(Users)
         .join(Profiles, Users.id == Profiles.user_id)
+        .join(
+            creators_in_category_sq,
+            creators_in_category_sq.c.creator_user_id == Users.id,
+        )
         .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
-        .outerjoin(likes_agg, likes_agg.c.creator_user_id == Users.id)
+        .outerjoin(
+            purchase_creator_sq, purchase_creator_sq.c.creator_user_id == Users.id
+        )
+        .outerjoin(
+            bookmark_creator_sq, bookmark_creator_sq.c.creator_user_id == Users.id
+        )
         .filter(Users.role == AccountType.CREATOR)
     )
+
     if viewer_follow_map is not None:
         q = q.outerjoin(
             viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
         )
 
-    q = q.filter(likes_agg.c.creator_user_id.isnot(None))
-    if filter_date_condition is not None:
-        q = q.filter(func.coalesce(likes_agg.c.likes_count, 0) > 0)
+    # if start_dt is not None:
+    #     q = q.filter(
+    #         sa_or(
+    #             func.coalesce(purchase_creator_sq.c.purchase_count, 0) > 0,
+    #             func.coalesce(bookmark_creator_sq.c.bookmark_count, 0) > 0,
+    #         )
+    #     )
 
-    return q.order_by(desc("likes_count")).offset(offset).limit(limit).all()
+    return (
+        q.order_by(
+            func.coalesce(purchase_creator_sq.c.purchase_count, 0).desc(),
+            func.coalesce(bookmark_creator_sq.c.bookmark_count, 0).desc(),
+            func.coalesce(followers_agg.c.followers_count, 0).desc(),
+            Users.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
 
 def update_creator_platform_fee_by_admin(
@@ -1459,3 +1620,537 @@ def update_creator_platform_fee_by_admin(
     db.commit()
     db.refresh(creator)
     return creator
+
+
+def get_ranking_creators_overall(
+    db: Session,
+    page: int = 1,
+    limit: int = 20,
+    period: str = "all_time",
+    current_user=None,
+    min_payment_price: int = 500,
+):
+    """
+    Return rows shaped like old code:
+      (Users, Users.profile_name, Profiles.username, Profiles.avatar_url, Profiles.cover_url,
+       followers_count, likes_count, is_following)
+
+    New ranking logic (creator):
+      purchase_count DESC  (returned as likes_count for compatibility)
+      bookmark_count DESC  (not returned, only used for ordering)
+      followers_count DESC
+      Users.id DESC
+    """
+
+    now_sql = func.now()
+    now = datetime.now(timezone.utc)
+
+    # -------- rolling window
+    start_dt = None
+    if period == "daily":
+        start_dt = now - timedelta(days=1)
+    elif period == "weekly":
+        start_dt = now - timedelta(days=7)
+    elif period == "monthly":
+        start_dt = now - timedelta(days=30)
+
+    # -------- active post condition
+    active_post_cond = sa_and(
+        Posts.status == PostStatus.APPROVED,
+        Posts.deleted_at.is_(None),
+        sa_or(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now_sql),
+        sa_or(Posts.expiration_at.is_(None), Posts.expiration_at > now_sql),
+    )
+
+    PAYMENT_SUCCEEDED = PaymentStatus.SUCCEEDED
+    ORDER_TYPE_PLAN = PaymentType.PLAN
+    ORDER_TYPE_PRICE = PaymentType.SINGLE
+    MIN_PAYMENT_PRICE = min_payment_price
+
+    # =====================================================
+    # purchase_count per creator (price + plan)
+    # =====================================================
+    base_payment_cond = sa_and(
+        Payments.status == PAYMENT_SUCCEEDED,
+        Payments.payment_price >= MIN_PAYMENT_PRICE,
+        Payments.paid_at.isnot(None),
+    )
+    if start_dt is not None:
+        base_payment_cond = sa_and(base_payment_cond, Payments.paid_at >= start_dt)
+
+    price_purchase_creator_sq = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .select_from(Prices)
+        .join(Posts, sa_and(Posts.id == Prices.post_id, active_post_cond))
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PRICE,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(Posts.creator_user_id)
+        .subquery("price_purchase_creator_sq")
+    )
+
+    plan_purchase_creator_sq = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .select_from(PostPlans)
+        .join(Posts, sa_and(Posts.id == PostPlans.post_id, active_post_cond))
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PLAN,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(Posts.creator_user_id)
+        .subquery("plan_purchase_creator_sq")
+    )
+
+    union_purchase_sq = (
+        db.query(
+            price_purchase_creator_sq.c.creator_user_id.label("creator_user_id"),
+            price_purchase_creator_sq.c.purchase_count.label("purchase_count"),
+        )
+        .union_all(
+            db.query(
+                plan_purchase_creator_sq.c.creator_user_id.label("creator_user_id"),
+                plan_purchase_creator_sq.c.purchase_count.label("purchase_count"),
+            )
+        )
+        .subquery("union_purchase_sq")
+    )
+
+    purchase_creator_sq = (
+        db.query(
+            union_purchase_sq.c.creator_user_id.label("creator_user_id"),
+            func.sum(union_purchase_sq.c.purchase_count).label("purchase_count"),
+        )
+        .group_by(union_purchase_sq.c.creator_user_id)
+        .subquery("purchase_creator_sq")
+    )
+
+    # =====================================================
+    # bookmark_count per creator (for ordering)
+    # =====================================================
+    bookmark_q = (
+        db.query(
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Bookmarks.user_id)).label("bookmark_count"),
+        )
+        .select_from(Bookmarks)
+        .join(Posts, sa_and(Posts.id == Bookmarks.post_id, active_post_cond))
+    )
+    if start_dt is not None:
+        bookmark_q = bookmark_q.filter(Bookmarks.created_at >= start_dt)
+
+    bookmark_creator_sq = bookmark_q.group_by(Posts.creator_user_id).subquery(
+        "bookmark_creator_sq"
+    )
+
+    # =====================================================
+    # followers_count (all time)
+    # =====================================================
+    followers_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_agg")
+    )
+
+    # =====================================================
+    # viewer follow map
+    # =====================================================
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    # -------- pagination
+    offset = (page - 1) * limit
+    if offset < 0:
+        offset = 0
+
+    q = (
+        db.query(
+            Users,
+            Users.profile_name,
+            Profiles.username,
+            Profiles.avatar_url,
+            Profiles.cover_url,
+            func.coalesce(followers_agg.c.followers_count, 0).label("followers_count"),
+            # compatibility: expose purchase as likes_count so your mapping stays the same
+            func.coalesce(purchase_creator_sq.c.purchase_count, 0).label("likes_count"),
+            is_following_col,
+        )
+        .join(Profiles, Users.id == Profiles.user_id)
+        .outerjoin(followers_agg, followers_agg.c.creator_user_id == Users.id)
+        .outerjoin(
+            purchase_creator_sq, purchase_creator_sq.c.creator_user_id == Users.id
+        )
+        .outerjoin(
+            bookmark_creator_sq, bookmark_creator_sq.c.creator_user_id == Users.id
+        )
+        .filter(Users.role == AccountType.CREATOR)
+    )
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map, viewer_follow_map.c.creator_user_id == Users.id
+        )
+
+    rows = (
+        q.order_by(
+            func.coalesce(purchase_creator_sq.c.purchase_count, 0).desc(),
+            func.coalesce(bookmark_creator_sq.c.bookmark_count, 0).desc(),
+            func.coalesce(followers_agg.c.followers_count, 0).desc(),
+            Users.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return rows
+
+
+def get_ranking_creators_categories_overall(
+    db: Session,
+    limit_per_category: int = 6,
+    period: str = "all_time",
+    top_n_categories: int = 10,
+    current_user=None,
+    min_payment_price: int = 500,
+):
+    """
+    Creator ranking by category (overall UI)
+    Ranking per category:
+      purchase_count DESC
+      bookmark_count DESC
+      followers_count DESC
+      Users.id DESC
+
+    Return shape compatible with old output:
+      category_id, category_name, creator_user_id,
+      profile_name, offical_flg, username, avatar_url, cover_url,
+      likes_count (=purchase_count), followers_count, is_following, rn
+    """
+
+    # ---------- period window
+    now = datetime.now(timezone.utc)
+    start_dt = None
+    if period == "daily":
+        start_dt = now - timedelta(days=1)
+    elif period == "weekly":
+        start_dt = now - timedelta(days=7)
+    elif period == "monthly":
+        start_dt = now - timedelta(days=30)
+
+    # ---------- active post condition
+    now_sql = func.now()
+    active_post_cond = sa_and(
+        Posts.status == PostStatus.APPROVED,
+        Posts.deleted_at.is_(None),
+        sa_or(Posts.scheduled_at.is_(None), Posts.scheduled_at <= now_sql),
+        sa_or(Posts.expiration_at.is_(None), Posts.expiration_at > now_sql),
+    )
+
+    PAYMENT_SUCCEEDED = PaymentStatus.SUCCEEDED
+    ORDER_TYPE_PLAN = PaymentType.PLAN
+    ORDER_TYPE_PRICE = PaymentType.SINGLE
+    MIN_PAYMENT_PRICE = min_payment_price
+
+    # ---------- base payment condition
+    base_payment_cond = sa_and(
+        Payments.status == PAYMENT_SUCCEEDED,
+        Payments.payment_price >= MIN_PAYMENT_PRICE,
+        Payments.paid_at.isnot(None),
+    )
+    if start_dt is not None:
+        base_payment_cond = sa_and(base_payment_cond, Payments.paid_at >= start_dt)
+
+    # =====================================================
+    # A) purchase_count per (category, creator)
+    # =====================================================
+
+    # price payments -> (category, creator)
+    price_purchase_cat_creator_sq = (
+        db.query(
+            PostCategories.category_id.label("category_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .select_from(Prices)
+        .join(Posts, sa_and(Posts.id == Prices.post_id, active_post_cond))
+        .join(PostCategories, PostCategories.post_id == Posts.id)
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PRICE,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == Prices.id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(PostCategories.category_id, Posts.creator_user_id)
+        .subquery("price_purchase_cat_creator_sq")
+    )
+
+    # plan payments -> (category, creator)
+    plan_purchase_cat_creator_sq = (
+        db.query(
+            PostCategories.category_id.label("category_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Payments.id)).label("purchase_count"),
+        )
+        .select_from(PostPlans)
+        .join(Posts, sa_and(Posts.id == PostPlans.post_id, active_post_cond))
+        .join(PostCategories, PostCategories.post_id == Posts.id)
+        .join(
+            Payments,
+            sa_and(
+                Payments.order_type == ORDER_TYPE_PLAN,
+                cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id,
+                base_payment_cond,
+            ),
+        )
+        .group_by(PostCategories.category_id, Posts.creator_user_id)
+        .subquery("plan_purchase_cat_creator_sq")
+    )
+
+    union_purchase_sq = (
+        db.query(
+            price_purchase_cat_creator_sq.c.category_id.label("category_id"),
+            price_purchase_cat_creator_sq.c.creator_user_id.label("creator_user_id"),
+            price_purchase_cat_creator_sq.c.purchase_count.label("purchase_count"),
+        )
+        .union_all(
+            db.query(
+                plan_purchase_cat_creator_sq.c.category_id.label("category_id"),
+                plan_purchase_cat_creator_sq.c.creator_user_id.label("creator_user_id"),
+                plan_purchase_cat_creator_sq.c.purchase_count.label("purchase_count"),
+            )
+        )
+        .subquery("union_purchase_sq")
+    )
+
+    purchase_cat_creator_sq = (
+        db.query(
+            union_purchase_sq.c.category_id.label("category_id"),
+            union_purchase_sq.c.creator_user_id.label("creator_user_id"),
+            func.sum(union_purchase_sq.c.purchase_count).label("purchase_count"),
+        )
+        .group_by(union_purchase_sq.c.category_id, union_purchase_sq.c.creator_user_id)
+        .subquery("purchase_cat_creator_sq")
+    )
+
+    # =====================================================
+    # B) bookmark_count per (category, creator)
+    # =====================================================
+    bookmark_q = (
+        db.query(
+            PostCategories.category_id.label("category_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+            func.count(func.distinct(Bookmarks.user_id)).label("bookmark_count"),
+        )
+        .select_from(Bookmarks)
+        .join(Posts, sa_and(Posts.id == Bookmarks.post_id, active_post_cond))
+        .join(PostCategories, PostCategories.post_id == Posts.id)
+    )
+    if start_dt is not None:
+        bookmark_q = bookmark_q.filter(Bookmarks.created_at >= start_dt)
+
+    bookmark_cat_creator_sq = bookmark_q.group_by(
+        PostCategories.category_id, Posts.creator_user_id
+    ).subquery("bookmark_cat_creator_sq")
+
+    # =====================================================
+    # C) top categories by total purchases (fallback: total bookmarks)
+    # =====================================================
+    # category_total_purchases
+    cat_total_sq = (
+        db.query(
+            Categories.id.label("category_id"),
+            Categories.name.label("category_name"),
+            func.coalesce(
+                func.sum(func.coalesce(purchase_cat_creator_sq.c.purchase_count, 0)), 0
+            ).label("category_total_purchases"),
+            func.coalesce(
+                func.sum(func.coalesce(bookmark_cat_creator_sq.c.bookmark_count, 0)), 0
+            ).label("category_total_bookmarks"),
+        )
+        .select_from(Categories)
+        .outerjoin(
+            purchase_cat_creator_sq,
+            purchase_cat_creator_sq.c.category_id == Categories.id,
+        )
+        .outerjoin(
+            bookmark_cat_creator_sq,
+            bookmark_cat_creator_sq.c.category_id == Categories.id,
+        )
+        .group_by(Categories.id, Categories.name)
+        .order_by(
+            desc("category_total_purchases"),
+            desc("category_total_bookmarks"),
+            Categories.id.desc(),
+        )
+        .limit(top_n_categories)
+        .subquery("top_categories_sq")
+    )
+
+    # =====================================================
+    # D) followers_count + viewer follow map
+    # =====================================================
+    followers_count_agg = (
+        db.query(
+            Follows.creator_user_id.label("creator_user_id"),
+            func.count(distinct(Follows.follower_user_id)).label("followers_count"),
+        )
+        .group_by(Follows.creator_user_id)
+        .subquery("followers_count_agg")
+    )
+
+    if current_user is not None:
+        viewer_follow_map = (
+            db.query(
+                Follows.creator_user_id.label("creator_user_id"),
+                literal(True).label("is_following"),
+            )
+            .filter(Follows.follower_user_id == str(current_user.id))
+            .subquery("viewer_follow_map")
+        )
+        is_following_col = func.coalesce(viewer_follow_map.c.is_following, False).label(
+            "is_following"
+        )
+    else:
+        viewer_follow_map = None
+        is_following_col = literal(False).label("is_following")
+
+    # =====================================================
+    # E) eligible creators in category (must have at least 1 active post in that category)
+    # =====================================================
+    eligible_creator_sq = (
+        db.query(
+            PostCategories.category_id.label("category_id"),
+            Posts.creator_user_id.label("creator_user_id"),
+        )
+        .select_from(PostCategories)
+        .join(Posts, sa_and(Posts.id == PostCategories.post_id, active_post_cond))
+        .distinct()
+        .subquery("eligible_creator_sq")
+    )
+
+    # =====================================================
+    # F) build ranking rows (row_number per category)
+    # =====================================================
+    q = (
+        db.query(
+            cat_total_sq.c.category_id,
+            cat_total_sq.c.category_name,
+            eligible_creator_sq.c.creator_user_id,
+            Users.profile_name.label("profile_name"),
+            Users.offical_flg.label("offical_flg"),
+            Profiles.username.label("username"),
+            Profiles.avatar_url.label("avatar_url"),
+            Profiles.cover_url.label("cover_url"),
+            # keep key name "likes_count" for compatibility => purchase_count
+            func.coalesce(purchase_cat_creator_sq.c.purchase_count, 0).label(
+                "likes_count"
+            ),
+            func.coalesce(followers_count_agg.c.followers_count, 0).label(
+                "followers_count"
+            ),
+            is_following_col,
+            func.row_number()
+            .over(
+                partition_by=cat_total_sq.c.category_id,
+                order_by=(
+                    func.coalesce(purchase_cat_creator_sq.c.purchase_count, 0).desc(),
+                    func.coalesce(bookmark_cat_creator_sq.c.bookmark_count, 0).desc(),
+                    func.coalesce(followers_count_agg.c.followers_count, 0).desc(),
+                    Users.created_at.desc(),
+                    Users.id.desc(),
+                ),
+            )
+            .label("rn"),
+        )
+        .select_from(cat_total_sq)
+        .join(
+            eligible_creator_sq,
+            eligible_creator_sq.c.category_id == cat_total_sq.c.category_id,
+        )
+        .join(Users, Users.id == eligible_creator_sq.c.creator_user_id)
+        .join(Profiles, Profiles.user_id == Users.id)
+        .outerjoin(
+            purchase_cat_creator_sq,
+            sa_and(
+                purchase_cat_creator_sq.c.category_id == cat_total_sq.c.category_id,
+                purchase_cat_creator_sq.c.creator_user_id
+                == eligible_creator_sq.c.creator_user_id,
+            ),
+        )
+        .outerjoin(
+            bookmark_cat_creator_sq,
+            sa_and(
+                bookmark_cat_creator_sq.c.category_id == cat_total_sq.c.category_id,
+                bookmark_cat_creator_sq.c.creator_user_id
+                == eligible_creator_sq.c.creator_user_id,
+            ),
+        )
+        .outerjoin(
+            followers_count_agg,
+            followers_count_agg.c.creator_user_id
+            == eligible_creator_sq.c.creator_user_id,
+        )
+        .filter(Users.role == AccountType.CREATOR)
+    )
+
+    if viewer_follow_map is not None:
+        q = q.outerjoin(
+            viewer_follow_map,
+            viewer_follow_map.c.creator_user_id
+            == eligible_creator_sq.c.creator_user_id,
+        )
+
+    # if start_dt is not None:
+    #     q = q.filter(
+    #         sa_or(
+    #             func.coalesce(purchase_cat_creator_sq.c.purchase_count, 0) > 0,
+    #             func.coalesce(bookmark_cat_creator_sq.c.bookmark_count, 0) > 0,
+    #         )
+    #     )
+
+    ranked_sq = q.subquery("ranked_creators")
+
+    result = (
+        db.query(ranked_sq)
+        .filter(ranked_sq.c.rn <= limit_per_category)
+        .order_by(
+            ranked_sq.c.category_name,
+            ranked_sq.c.rn.asc(),
+        )
+        .all()
+    )
+
+    return result

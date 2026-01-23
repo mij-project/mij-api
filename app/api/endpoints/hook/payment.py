@@ -14,6 +14,7 @@ from app.schemas.user_settings import UserSettingsType
 from app.core.logger import Logger
 from app.db.base import get_db
 from app.crud import (
+    followes_crud,
     payment_transactions_crud,
     user_providers_crud,
     payments_crud,
@@ -50,9 +51,11 @@ from app.services.email.send_email import (
 from app.models.payment_transactions import PaymentTransactions
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
+
 # from app.models.conversations import Conversations
 # from app.models.conversation_participants import ConversationParticipants
 from app.models.conversation_messages import ConversationMessages
+
 # from datetime import datetime, timezone
 import os
 
@@ -412,6 +415,15 @@ def _handle_successful_payment(
             status=PaymentStatus.SUCCEEDED,
         )
         logger.info(f"Free payment created: {payment.id}")
+        try:
+            __follow_seller_by_buyer(
+                db,
+                buyer_user_id=payment.buyer_user_id,
+                seller_user_id=payment.seller_user_id,
+            )
+        except Exception as e:
+            logger.error(f"Failed to follow seller by buyer: {e}")
+            pass
 
     else:
         # 注文情報を取得
@@ -445,7 +457,15 @@ def _handle_successful_payment(
 
         logger.info(f"Payment created: {payment.id}")
         logger.info(f"Subscription created: {subscription.id}")
-
+        try:
+            __follow_seller_by_buyer(
+                db,
+                buyer_user_id=payment.buyer_user_id,
+                seller_user_id=payment.seller_user_id,
+            )
+        except Exception as e:
+            logger.error(f"Failed to follow seller by buyer: {e}")
+            pass
     # ユーザープロバイダー情報を更新または作成
     main_card = (
         True if transaction_origin == TransactionType.PAYMENT_ORIGIN_FREE else False
@@ -855,9 +875,11 @@ def _send_chip_payment_notifications_for_buyer(
 
     if chip_message_id:
         try:
-            chip_message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(chip_message_id)
-            ).first()
+            chip_message = (
+                db.query(ConversationMessages)
+                .filter(ConversationMessages.id == UUID(chip_message_id))
+                .first()
+            )
             if chip_message:
                 conversation_id = chip_message.conversation_id
         except Exception as e:
@@ -882,7 +904,11 @@ def _send_chip_payment_notifications_for_buyer(
         title = "チップの送信に失敗しました"
         subtitle = "チップの送信に失敗しました"
 
-    notification_redirect_url = f"/message/conversation/{conversation_id}" if conversation_id else "/account/sale"
+    notification_redirect_url = (
+        f"/message/conversation/{conversation_id}"
+        if conversation_id
+        else "/account/sale"
+    )
 
     # メール送信
     try:
@@ -890,7 +916,11 @@ def _send_chip_payment_notifications_for_buyer(
 
         if result == RESULT_OK:
             # 成功時のメール送信
-            conversation_url = f"{frontend_url}/message/conversation/{conversation_id}" if conversation_id else ""
+            conversation_url = (
+                f"{frontend_url}/message/conversation/{conversation_id}"
+                if conversation_id
+                else ""
+            )
 
             send_chip_payment_buyer_success_email(
                 to=email,
@@ -977,9 +1007,11 @@ def _send_chip_payment_notifications_for_seller(
 
     if chip_message_id:
         try:
-            chip_message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(chip_message_id)
-            ).first()
+            chip_message = (
+                db.query(ConversationMessages)
+                .filter(ConversationMessages.id == UUID(chip_message_id))
+                .first()
+            )
             if chip_message:
                 conversation_id = chip_message.conversation_id
         except Exception as e:
@@ -992,11 +1024,12 @@ def _send_chip_payment_notifications_for_seller(
 
     # プラットフォーム手数料取得
     from app.crud import creator_crud
+
     creator_info = creator_crud.get_creator_by_user_id(db, UUID(recipient_user_id))
     if not creator_info:
         logger.error(f"Creator info not found: {recipient_user_id}")
         return
-    
+
     # 手数料計算も整数演算で正確に計算
     fee_per_payment = (chip_amount * creator_info.platform_fee_percent) // 100
     # chip_amountから手数料を引いて売上金額を計算
@@ -1027,7 +1060,11 @@ def _send_chip_payment_notifications_for_seller(
     # メール送信
     try:
         frontend_url = os.environ.get("FRONTEND_URL", "https://mijfans.jp")
-        conversation_url = f"{frontend_url}/message/conversation/{conversation_id}" if conversation_id else ""
+        conversation_url = (
+            f"{frontend_url}/message/conversation/{conversation_id}"
+            if conversation_id
+            else ""
+        )
 
         sales_url = f"{frontend_url}/account/sale"
         send_chip_payment_seller_success_email(
@@ -1148,9 +1185,11 @@ def _handle_chip_payment_success(
     # chip_message_idがある場合、メッセージを有効化
     if chip_message_id:
         try:
-            chip_message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(chip_message_id)
-            ).first()
+            chip_message = (
+                db.query(ConversationMessages)
+                .filter(ConversationMessages.id == UUID(chip_message_id))
+                .first()
+            )
 
             if chip_message:
                 payment_completion_time = datetime.now(timezone.utc)
@@ -1167,7 +1206,9 @@ def _handle_chip_payment_success(
 
                 logger.info(f"Activated chip payment message: {chip_message_id}")
             else:
-                logger.warning(f"Chip message not found for chip_message_id: {chip_message_id}")
+                logger.warning(
+                    f"Chip message not found for chip_message_id: {chip_message_id}"
+                )
         except Exception as e:
             logger.error(f"Failed to activate chip message {chip_message_id}: {e}")
 
@@ -1222,6 +1263,7 @@ def _handle_chip_payment_failure(
     )
 
     from app.crud import creator_crud
+
     creator_info = creator_crud.get_creator_by_user_id(db, recipient_user_id)
     if not creator_info:
         logger.error(f"Creator user not found: {recipient_user_id}")
@@ -1232,29 +1274,39 @@ def _handle_chip_payment_failure(
     # chip_message_idがある場合、メッセージを削除
     if chip_message_id:
         try:
-            chip_message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(chip_message_id)
-            ).first()
+            chip_message = (
+                db.query(ConversationMessages)
+                .filter(ConversationMessages.id == UUID(chip_message_id))
+                .first()
+            )
 
             if chip_message:
                 from datetime import datetime, timezone
+
                 chip_message.deleted_at = datetime.now(timezone.utc)
                 db.commit()
-                logger.info(f"Marked chip payment message as deleted: {chip_message_id}")
+                logger.info(
+                    f"Marked chip payment message as deleted: {chip_message_id}"
+                )
             else:
-                logger.warning(f"Chip message not found for chip_message_id: {chip_message_id}")
+                logger.warning(
+                    f"Chip message not found for chip_message_id: {chip_message_id}"
+                )
         except Exception as e:
             logger.error(f"Failed to delete chip message {chip_message_id}: {e}")
 
     # メッセージIDがある場合、メッセージを削除
     if message_id:
         try:
-            message = db.query(ConversationMessages).filter(
-                ConversationMessages.id == UUID(message_id)
-            ).first()
+            message = (
+                db.query(ConversationMessages)
+                .filter(ConversationMessages.id == UUID(message_id))
+                .first()
+            )
 
             if message:
                 from datetime import datetime, timezone
+
                 message.deleted_at = datetime.now(timezone.utc)
                 db.commit()
                 logger.info(f"Marked chip payment message as deleted: {message_id}")
@@ -1262,7 +1314,6 @@ def _handle_chip_payment_failure(
                 logger.warning(f"Message not found for message_id: {message_id}")
         except Exception as e:
             logger.error(f"Failed to delete message {message_id}: {e}")
-
 
     payment = payments_crud.create_payment(
         db=db,
@@ -1397,9 +1448,8 @@ async def payment_webhook(
                     db=db,
                     transaction=transaction,
                     payment_amount=payment_amount,
-                    transaction_origin=transaction_origin
+                    transaction_origin=transaction_origin,
                 )
-
 
         # チップ決済の場合は専用の通知関数を呼び出す
         if is_chip_payment:
@@ -1508,3 +1558,15 @@ def _get_buyer_and_seller_need_to_send_notification(
             send_notification_seller = False
 
     return send_notification_buyer, send_notification_seller
+
+
+def __follow_seller_by_buyer(
+    db: Session,
+    buyer_user_id: UUID,
+    seller_user_id: UUID,
+) -> None:
+    """バイヤーがセラーをフォローする"""
+    is_following = followes_crud.is_following(db, buyer_user_id, seller_user_id)
+    if not is_following:
+        followes_crud.create_follow(db, buyer_user_id, seller_user_id)
+    pass
