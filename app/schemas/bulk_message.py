@@ -9,6 +9,7 @@ class BulkMessageRecipientsResponse(BaseModel):
     """一斉送信の送信先リストレスポンス"""
     chip_senders_count: int = Field(..., description="チップを送ってくれたユーザー数")
     single_purchasers_count: int = Field(..., description="単品販売購入ユーザー数")
+    follower_users_count: int = Field(..., description="フォロワーユーザー数")
     plan_subscribers: List[dict] = Field(..., description="プラン別加入者情報 [{'plan_id': UUID, 'plan_name': str, 'subscribers_count': int}]")
 
     class Config:
@@ -39,6 +40,7 @@ class BulkMessageSendRequest(BaseModel):
     # 送信先選択
     send_to_chip_senders: bool = Field(False, description="チップを送ってくれたユーザーに送信")
     send_to_single_purchasers: bool = Field(False, description="単品販売購入ユーザーに送信")
+    send_to_follower_users: bool = Field(False, description="フォロワーユーザーに送信")
     send_to_plan_subscribers: List[UUID] = Field(default_factory=list, description="送信対象プランIDリスト")
 
     # 予約送信

@@ -11,6 +11,7 @@ from app.constants.enums import ConversationMessageStatus
 from app.models.payments import Payments
 from app.models.subscriptions import Subscriptions
 from app.models.plans import Plans
+from app.models.social import Follows
 from app.constants.enums import (
     PaymentType,
     PaymentStatus,
@@ -61,6 +62,15 @@ def get_bulk_message_recipients(db: Session, creator_user_id: UUID) -> Dict:
         .scalar() or 0
     )
 
+    # 3 フォロワーユーザー数（重複なし）
+    follower_users_count = (
+        db.query(func.count(distinct(Follows.follower_user_id)))
+        .filter(
+            Follows.creator_user_id == creator_user_id
+        )
+        .scalar() or 0
+    )
+
     # 3. プラン別加入者情報
     # subscriptions テーブルで order_type = ItemType.PLAN のユーザーを集計
     # order_id を文字列として plans テーブルと結合
@@ -92,7 +102,8 @@ def get_bulk_message_recipients(db: Session, creator_user_id: UUID) -> Dict:
     return {
         'chip_senders_count': chip_senders_count,
         'single_purchasers_count': single_purchasers_count,
-        'plan_subscribers': plan_subscribers_list
+        'plan_subscribers': plan_subscribers_list,
+        'follower_users_count': follower_users_count
     }
 
 
@@ -101,6 +112,7 @@ def get_target_user_ids(
     creator_user_id: UUID,
     send_to_chip_senders: bool,
     send_to_single_purchasers: bool,
+    send_to_follower_users: bool,
     send_to_plan_subscribers: List[UUID]
 ) -> List[UUID]:
     """
@@ -111,6 +123,7 @@ def get_target_user_ids(
         creator_user_id: クリエイターのユーザーID
         send_to_chip_senders: チップ送信者に送るか
         send_to_single_purchasers: 単品購入者に送るか
+        send_to_follower_users: フォロワーユーザーに送るか
         send_to_plan_subscribers: 送信対象プランIDリスト
 
     Returns:
@@ -144,7 +157,18 @@ def get_target_user_ids(
         )
         target_user_ids.update([row[0] for row in single_purchasers])
 
-    # 3. プラン加入者
+    # 3. フォロワーユーザー
+    if send_to_follower_users:
+        follower_users = (
+            db.query(distinct(Follows.follower_user_id))
+            .filter(
+                Follows.creator_user_id == creator_user_id
+            )
+            .all()
+        )
+        target_user_ids.update([row[0] for row in follower_users])
+
+    # 4. プラン加入者
     if send_to_plan_subscribers:
         # プランIDリストを文字列に変換
         plan_id_strings = [str(plan_id) for plan_id in send_to_plan_subscribers]
