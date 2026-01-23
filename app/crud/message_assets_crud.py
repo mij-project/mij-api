@@ -873,8 +873,11 @@ def get_user_message_assets_counts(
     )
 
     # 予約中のgroup_byを取得（審査中・拒否されたアセットを持つものを除外）
+    # 予約日時が過ぎているものは除外
+    # アセット付きメッセージもカウントする（LEFT JOINを使用）
     reserved_subquery = (
         db.query(ConversationMessages.group_by)
+        .outerjoin(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
         .filter(
             ConversationMessages.sender_user_id == user_id,
             ConversationMessages.status == ConversationMessageStatus.PENDING,
@@ -884,7 +887,10 @@ def get_user_message_assets_counts(
             # 審査中・拒否されたアセットを持つgroup_byを除外
             ~ConversationMessages.group_by.in_(
                 db.query(group_by_with_pending_or_rejected_assets.c.group_by)
-            )
+            ),
+            # 予約日時が設定されており、現在時刻より後のもののみ（scheduled_atがNULLの場合は除外）
+            ConversationMessages.scheduled_at.isnot(None),
+            ConversationMessages.scheduled_at > func.now()
         )
         .distinct()
         .subquery()
@@ -919,8 +925,31 @@ def get_reserved_bulk_messages(
     """
     from sqlalchemy import func
 
+    # 審査中・拒否されたアセットを持つgroup_byを取得（別タブに表示されるため除外）
+    group_by_with_pending_or_rejected_assets = (
+        db.query(ConversationMessages.group_by)
+        .join(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
+        .filter(
+            ConversationMessages.sender_user_id == user_id,
+            ConversationMessages.status == ConversationMessageStatus.PENDING,
+            ConversationMessages.type == ConversationMessageType.BULK,
+            ConversationMessages.deleted_at.is_(None),
+            ConversationMessages.group_by.isnot(None),
+            # 審査中・再申請中・拒否されたアセットを持つものを除外
+            MessageAssets.status.in_([
+                MessageAssetStatus.PENDING,
+                MessageAssetStatus.RESUBMIT,
+                MessageAssetStatus.REJECTED
+            ])
+        )
+        .distinct()
+        .subquery()
+    )
+
     # Step 1: conversation_messages.group_byでグループ化して、各グループの代表メッセージと送信先数を取得
     # まず、group_byごとに最も古いメッセージIDを取得
+    # 予約日時が過ぎているものは除外
+    # アセット付きメッセージも含める（LEFT JOINを使用）
     subquery = (
         db.query(
             ConversationMessages.id,
@@ -931,12 +960,20 @@ def get_reserved_bulk_messages(
             )
             .label("row_num")
         )
+        .outerjoin(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
         .filter(
             ConversationMessages.sender_user_id == user_id,
             ConversationMessages.status == ConversationMessageStatus.PENDING,
             ConversationMessages.type == ConversationMessageType.BULK,
             ConversationMessages.deleted_at.is_(None),
-            ConversationMessages.group_by.isnot(None)  # group_byがNULLでないもののみ
+            ConversationMessages.group_by.isnot(None),  # group_byがNULLでないもののみ
+            # 審査中・拒否されたアセットを持つgroup_byを除外
+            ~ConversationMessages.group_by.in_(
+                db.query(group_by_with_pending_or_rejected_assets.c.group_by)
+            ),
+            # 予約日時が設定されており、現在時刻より後のもののみ（scheduled_atがNULLの場合は除外）
+            ConversationMessages.scheduled_at.isnot(None),
+            ConversationMessages.scheduled_at > func.now()
         )
         .subquery()
     )
@@ -948,32 +985,11 @@ def get_reserved_bulk_messages(
     )
 
     # 代表メッセージを取得
-    # 審査中・拒否されたアセットを持つメッセージは除外（それらは別タブに表示）
-    messages_with_pending_or_rejected_assets_subquery = (
-        db.query(ConversationMessages.id)
-        .join(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
-        .filter(
-            ConversationMessages.sender_user_id == user_id,
-            ConversationMessages.status == ConversationMessageStatus.PENDING,
-            # 審査中・再申請中・拒否されたアセットを除外
-            MessageAssets.status.in_([
-                MessageAssetStatus.PENDING,
-                MessageAssetStatus.RESUBMIT,
-                MessageAssetStatus.REJECTED
-            ])
-        )
-        .distinct()
-        .subquery()
-    )
-
+    # 審査中・拒否されたアセットを持つメッセージは既にsubqueryで除外済み
     messages = (
         db.query(ConversationMessages)
         .filter(
-            ConversationMessages.id.in_(representative_message_ids_query),
-            # 審査中・拒否されたアセットを持つメッセージは除外
-            ~ConversationMessages.id.in_(
-                db.query(messages_with_pending_or_rejected_assets_subquery.c.id)
-            )
+            ConversationMessages.id.in_(representative_message_ids_query)
         )
         .order_by(ConversationMessages.scheduled_at.desc())
         .offset(skip)
@@ -988,17 +1004,27 @@ def get_reserved_bulk_messages(
     group_bys = [msg.group_by for msg in messages if msg.group_by]
 
     # 各group_byの送信先数をカウント
+    # 予約日時が過ぎているものは除外
+    # アセット付きメッセージも含める（LEFT JOINを使用）
     recipient_counts = (
         db.query(
             ConversationMessages.group_by,
             func.count(ConversationMessages.id).label("count")
         )
+        .outerjoin(MessageAssets, MessageAssets.message_id == ConversationMessages.id)
         .filter(
             ConversationMessages.group_by.in_(group_bys),
             ConversationMessages.sender_user_id == user_id,
             ConversationMessages.status == ConversationMessageStatus.PENDING,
             ConversationMessages.type == ConversationMessageType.BULK,
-            ConversationMessages.deleted_at.is_(None)
+            ConversationMessages.deleted_at.is_(None),
+            # 審査中・拒否されたアセットを持つgroup_byを除外
+            ~ConversationMessages.group_by.in_(
+                db.query(group_by_with_pending_or_rejected_assets.c.group_by)
+            ),
+            # 予約日時が設定されており、現在時刻より後のもののみ（scheduled_atがNULLの場合は除外）
+            ConversationMessages.scheduled_at.isnot(None),
+            ConversationMessages.scheduled_at > func.now()
         )
         .group_by(ConversationMessages.group_by)
         .all()
