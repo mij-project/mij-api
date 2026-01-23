@@ -76,6 +76,61 @@ def _get_ranking_posts_overall(db: Session) -> RankingOverallResponse:
     # ranking_posts_daily = get_ranking_posts_overall_daily(db, limit=6)
     ranking_posts_daily = get_post_ranking_overall(db, limit=6, period="daily")
 
+    tracking_daily = [str(post.Posts.id) for post in ranking_posts_daily]
+    if len(ranking_posts_daily) < 6:
+        for post in ranking_posts_weekly:
+            if str(post.Posts.id) in tracking_daily:
+                continue
+            if len(ranking_posts_daily) < 6:
+                ranking_posts_daily.append(post)
+                tracking_daily.append(str(post.Posts.id))
+            else:
+                break
+        for post in ranking_posts_monthly:
+            if str(post.Posts.id) in tracking_daily:
+                continue
+            if len(ranking_posts_daily) < 6:
+                ranking_posts_daily.append(post)
+                tracking_daily.append(str(post.Posts.id))
+            else:
+                break
+        for post in ranking_posts_all_time:
+            if str(post.Posts.id) in tracking_daily:
+                continue
+            if len(ranking_posts_daily) < 6:
+                ranking_posts_daily.append(post)
+                tracking_daily.append(str(post.Posts.id))
+            else:
+                break
+    tracking_weekly = [str(post.Posts.id) for post in ranking_posts_weekly]
+    if len(ranking_posts_weekly) < 6:
+        for post in ranking_posts_monthly:
+            if str(post.Posts.id) in tracking_weekly:
+                continue
+            if len(ranking_posts_weekly) < 6:
+                ranking_posts_weekly.append(post)
+                tracking_weekly.append(str(post.Posts.id))
+            else:
+                break
+        for post in ranking_posts_all_time:
+            if str(post.Posts.id) in tracking_weekly:
+                continue
+            if len(ranking_posts_weekly) < 6:
+                ranking_posts_weekly.append(post)
+                tracking_weekly.append(str(post.Posts.id))
+            else:
+                break
+    tracking_monthly = [str(post.Posts.id) for post in ranking_posts_monthly]
+    if len(ranking_posts_monthly) < 6:
+        for post in ranking_posts_all_time:
+            if str(post.Posts.id) in tracking_monthly:
+                continue
+            if len(ranking_posts_monthly) < 6:
+                ranking_posts_monthly.append(post)
+                tracking_monthly.append(str(post.Posts.id))
+            else:
+                break
+
     return RankingOverallResponse(
         all_time=[
             RankingPostsAllTimeResponse(
@@ -198,15 +253,17 @@ def _get_ranking_posts_categories(db: Session) -> RankingCategoriesResponse:
     )
 
     response = {
-        "all_time": __arrange_ranking_posts_categories(
-            db, ranking_posts_categories_all_time
+        "daily": __arrange_ranking_posts_categories(
+            db, ranking_posts_categories_daily, "daily"
         ),
-        "daily": __arrange_ranking_posts_categories(db, ranking_posts_categories_daily),
         "weekly": __arrange_ranking_posts_categories(
-            db, ranking_posts_categories_weekly
+            db, ranking_posts_categories_weekly, "weekly"
         ),
         "monthly": __arrange_ranking_posts_categories(
-            db, ranking_posts_categories_monthly
+            db, ranking_posts_categories_monthly, "monthly"
+        ),
+        "all_time": __arrange_ranking_posts_categories(
+            db, ranking_posts_categories_all_time, "all_time"
         ),
     }
     return RankingCategoriesResponse(
@@ -218,7 +275,7 @@ def _get_ranking_posts_categories(db: Session) -> RankingCategoriesResponse:
 
 
 def __arrange_ranking_posts_categories(
-    db: Session, ranking_posts_categories: list
+    db: Session, ranking_posts_categories: list, period: str
 ) -> dict:
     grouped: dict[str, RankingPostsCategoriesResponse] = {}
     post_ids = [
@@ -248,7 +305,7 @@ def __arrange_ranking_posts_categories(
                 if row.thumbnail_key
                 else None,
                 # likes_count=row.likes_count,
-                likes_count=0,
+                likes_count=row.purchase_count,
                 creator_name=row.profile_name,
                 official=row.offical_flg if hasattr(row, "offical_flg") else False,
                 username=row.username,
@@ -265,13 +322,271 @@ def __arrange_ranking_posts_categories(
 
     # sort + set rank
     categories = list[RankingPostsCategoriesResponse](grouped.values())
-    for category in categories:
-        category.posts = sorted(
-            category.posts, key=lambda x: x.likes_count or 0, reverse=True
-        )
-        for idx, post in enumerate(category.posts):
-            post.rank = idx + 1
-    return categories
+
+    if period == "all_time":
+        for category in categories:
+            category.posts = sorted(
+                category.posts, key=lambda x: x.likes_count or 0, reverse=True
+            )
+            for idx, post in enumerate(category.posts):
+                post.rank = idx + 1
+        return categories
+
+    if period == "monthly":
+        for category in categories:
+            tracking = [str(x.id) for x in category.posts]
+            if len(category.posts) < 6:
+                rows_all_time, sale_map_all_time = get_ranking_posts_detail_categories(
+                    db, category.category_id, 1, 100, period="all_time"
+                )
+                idx = 0
+
+                for row in rows_all_time:
+                    if str(row.post_id) in tracking:
+                        continue
+                    if len(category.posts) < 6:
+                        post = RankingPostsCategoriesDetailResponse(
+                            id=str(row.post_id),
+                            description=row.description,
+                            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                            if row.thumbnail_key
+                            else None,
+                            # likes_count=row.likes_count,
+                            likes_count=idx - 1,
+                            creator_name=row.profile_name,
+                            official=row.offical_flg
+                            if hasattr(row, "offical_flg")
+                            else False,
+                            username=row.username,
+                            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                            if row.avatar_url
+                            else None,
+                            rank=0,
+                            duration=get_video_duration(row.duration_sec)
+                            if row.post_type == PostType.VIDEO and row.duration_sec
+                            else ("画像" if row.post_type == PostType.IMAGE else ""),
+                            is_time_sale=bool(
+                                sale_map_all_time.get(row.post_id, False)
+                            ),
+                        )
+                        category.posts.append(post)
+                        tracking.append(str(row.post_id))
+                        idx = idx - 1
+                    else:
+                        break
+
+        for category in categories:
+            category.posts = sorted(
+                category.posts, key=lambda x: x.likes_count or 0, reverse=True
+            )
+            for idx, post in enumerate(category.posts):
+                post.rank = idx + 1
+        return categories
+
+    if period == "weekly":
+        for category in categories:
+            tracking = [str(x.id) for x in category.posts]
+            if len(category.posts) < 6:
+                rows_all_time, sale_map_all_time = get_ranking_posts_detail_categories(
+                    db, category.category_id, 1, 100, period="all_time"
+                )
+                rows_monthly, sale_map_monthly = get_ranking_posts_detail_categories(
+                    db, category.category_id, 1, 100, period="monthly"
+                )
+                idx = 0
+                for row in rows_monthly:
+                    if str(row.post_id) in tracking:
+                        continue
+                    if len(category.posts) < 6:
+                        post = RankingPostsCategoriesDetailResponse(
+                            id=str(row.post_id),
+                            description=row.description,
+                            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                            if row.thumbnail_key
+                            else None,
+                            # likes_count=row.likes_count,
+                            likes_count=idx - 1,
+                            creator_name=row.profile_name,
+                            official=row.offical_flg
+                            if hasattr(row, "offical_flg")
+                            else False,
+                            username=row.username,
+                            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                            if row.avatar_url
+                            else None,
+                            rank=0,
+                            duration=get_video_duration(row.duration_sec)
+                            if row.post_type == PostType.VIDEO and row.duration_sec
+                            else ("画像" if row.post_type == PostType.IMAGE else ""),
+                            is_time_sale=bool(sale_map_monthly.get(row.post_id, False)),
+                        )
+                        category.posts.append(post)
+                        tracking.append(str(row.post_id))
+                        idx = idx - 1
+                    else:
+                        break
+
+                for row in rows_all_time:
+                    if str(row.post_id) in tracking:
+                        continue
+                    if len(category.posts) < 6:
+                        post = RankingPostsCategoriesDetailResponse(
+                            id=str(row.post_id),
+                            description=row.description,
+                            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                            if row.thumbnail_key
+                            else None,
+                            # likes_count=row.likes_count,
+                            likes_count=idx - 1,
+                            creator_name=row.profile_name,
+                            official=row.offical_flg
+                            if hasattr(row, "offical_flg")
+                            else False,
+                            username=row.username,
+                            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                            if row.avatar_url
+                            else None,
+                            rank=0,
+                            duration=get_video_duration(row.duration_sec)
+                            if row.post_type == PostType.VIDEO and row.duration_sec
+                            else ("画像" if row.post_type == PostType.IMAGE else ""),
+                            is_time_sale=bool(
+                                sale_map_all_time.get(row.post_id, False)
+                            ),
+                        )
+                        category.posts.append(post)
+                        tracking.append(str(row.post_id))
+                        idx = idx - 1
+                    else:
+                        break
+
+        for category in categories:
+            category.posts = sorted(
+                category.posts, key=lambda x: x.likes_count or 0, reverse=True
+            )
+            for idx, post in enumerate(category.posts):
+                post.rank = idx + 1
+        return categories
+
+    if period == "daily":
+        for category in categories:
+            tracking = [str(x.id) for x in category.posts]
+            if len(category.posts) < 6:
+                rows_all_time, sale_map_all_time = get_ranking_posts_detail_categories(
+                    db, category.category_id, 1, 100, period="all_time"
+                )
+                rows_monthly, sale_map_monthly = get_ranking_posts_detail_categories(
+                    db, category.category_id, 1, 100, period="monthly"
+                )
+                rows_weekly, sale_map_weekly = get_ranking_posts_detail_categories(
+                    db, category.category_id, 1, 100, period="weekly"
+                )
+                idx = 0
+                for row in rows_weekly:
+                    if str(row.post_id) in tracking:
+                        continue
+                    if len(category.posts) < 6:
+                        post = RankingPostsCategoriesDetailResponse(
+                            id=str(row.post_id),
+                            description=row.description,
+                            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                            if row.thumbnail_key
+                            else None,
+                            # likes_count=row.likes_count,
+                            likes_count=idx - 1,
+                            creator_name=row.profile_name,
+                            official=row.offical_flg
+                            if hasattr(row, "offical_flg")
+                            else False,
+                            username=row.username,
+                            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                            if row.avatar_url
+                            else None,
+                            rank=0,
+                            duration=get_video_duration(row.duration_sec)
+                            if row.post_type == PostType.VIDEO and row.duration_sec
+                            else ("画像" if row.post_type == PostType.IMAGE else ""),
+                            is_time_sale=bool(sale_map_weekly.get(row.post_id, False)),
+                        )
+                        category.posts.append(post)
+                        tracking.append(str(row.post_id))
+                        idx = idx - 1
+                    else:
+                        break
+
+                for row in rows_monthly:
+                    if str(row.post_id) in tracking:
+                        continue
+                    if len(category.posts) < 6:
+                        post = RankingPostsCategoriesDetailResponse(
+                            id=str(row.post_id),
+                            description=row.description,
+                            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                            if row.thumbnail_key
+                            else None,
+                            # likes_count=row.likes_count,
+                            likes_count=idx - 1,
+                            creator_name=row.profile_name,
+                            official=row.offical_flg
+                            if hasattr(row, "offical_flg")
+                            else False,
+                            username=row.username,
+                            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                            if row.avatar_url
+                            else None,
+                            rank=0,
+                            duration=get_video_duration(row.duration_sec)
+                            if row.post_type == PostType.VIDEO and row.duration_sec
+                            else ("画像" if row.post_type == PostType.IMAGE else ""),
+                            is_time_sale=bool(sale_map_monthly.get(row.post_id, False)),
+                        )
+                        category.posts.append(post)
+                        tracking.append(str(row.post_id))
+                        idx = idx - 1
+                    else:
+                        break
+
+                for row in rows_all_time:
+                    if str(row.post_id) in tracking:
+                        continue
+                    if len(category.posts) < 6:
+                        post = RankingPostsCategoriesDetailResponse(
+                            id=str(row.post_id),
+                            description=row.description,
+                            thumbnail_url=f"{BASE_URL}/{row.thumbnail_key}"
+                            if row.thumbnail_key
+                            else None,
+                            # likes_count=row.likes_count,
+                            likes_count=idx - 1,
+                            creator_name=row.profile_name,
+                            official=row.offical_flg
+                            if hasattr(row, "offical_flg")
+                            else False,
+                            username=row.username,
+                            creator_avatar_url=f"{BASE_URL}/{row.avatar_url}"
+                            if row.avatar_url
+                            else None,
+                            rank=0,
+                            duration=get_video_duration(row.duration_sec)
+                            if row.post_type == PostType.VIDEO and row.duration_sec
+                            else ("画像" if row.post_type == PostType.IMAGE else ""),
+                            is_time_sale=bool(
+                                sale_map_all_time.get(row.post_id, False)
+                            ),
+                        )
+                        category.posts.append(post)
+                        tracking.append(str(row.post_id))
+                        idx = idx - 1
+                    else:
+                        break
+
+        for category in categories:
+            category.posts = sorted(
+                category.posts, key=lambda x: x.likes_count or 0, reverse=True
+            )
+            for idx, post in enumerate(category.posts):
+                post.rank = idx + 1
+        return categories
 
 
 @router.get("/posts/detail")
@@ -426,7 +741,7 @@ def _get_ranking_posts_categories_detail(
                 if row.thumbnail_key
                 else None,
                 # likes_count=row.likes_count,
-                likes_count=0,
+                likes_count=row.purchase_count,
                 creator_name=row.profile_name,
                 official=row.offical_flg if hasattr(row, "offical_flg") else False,
                 username=row.username,
