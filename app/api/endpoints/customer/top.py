@@ -29,9 +29,21 @@ def get_top_page_data(
     """
     try:
         top_categories = get_top_categories(db, limit=8)
-        ranking_posts = get_post_ranking_overall(db, limit=6, period="all_time")
+        ranking_posts = get_post_ranking_overall(db, limit=6, period="daily")
+        if not ranking_posts:
+            ranking_posts = get_post_ranking_overall(db, limit=6, period="weekly")
+        if not ranking_posts:
+            ranking_posts = get_post_ranking_overall(db, limit=6, period="monthly")
+        if not ranking_posts:
+            ranking_posts = get_post_ranking_overall(db, limit=6, period="all_time")
         recent_posts = get_recent_posts(db, limit=10)
-        top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user)
+        top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="daily")
+        if not top_creators:
+            top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="weekly")
+        if not top_creators:
+            top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="monthly")
+        if not top_creators:
+            top_creators = get_ranking_creators_overall(db, limit=5, current_user=current_user, period="all_time")
         # new_creators = get_new_creators(db, limit=5)
         
         return TopPageResponse(
