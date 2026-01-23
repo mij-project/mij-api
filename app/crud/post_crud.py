@@ -311,20 +311,6 @@ def _build_post_status_query(
         .group_by(Prices.post_id)
     ).subquery()
 
-    plan_purchase_sq = (
-        db.query(
-            PostPlans.post_id.label("post_id"),
-            func.count(func.distinct(Payments.id)).label("plan_purchase_count"),
-        )
-        .join(
-            Payments,
-            (Payments.order_type == 2)
-            & (cast(Payments.order_id, PG_UUID(as_uuid=True)) == PostPlans.plan_id),
-        )
-        .filter(Payments.status == PaymentStatus.SUCCEEDED)
-        .group_by(PostPlans.post_id)
-    ).subquery()
-
     return (
         db.query(
             Posts,
@@ -332,7 +318,6 @@ def _build_post_status_query(
             func.count(func.distinct(Comments.id)).label("comments_count"),
             (
                 func.coalesce(price_purchase_sq.c.price_purchase_count, 0)
-                + func.coalesce(plan_purchase_sq.c.plan_purchase_count, 0)
             )
             .cast(BigInteger)
             .label("purchase_count"),
@@ -362,7 +347,6 @@ def _build_post_status_query(
         .outerjoin(Prices, Posts.id == Prices.post_id)
         .outerjoin(PostPlans, Posts.id == PostPlans.post_id)
         .outerjoin(price_purchase_sq, price_purchase_sq.c.post_id == Posts.id)
-        .outerjoin(plan_purchase_sq, plan_purchase_sq.c.post_id == Posts.id)
         .filter(Posts.creator_user_id == user_id)
         .filter(Posts.deleted_at.is_(None))
         .filter(Posts.status.in_(post_statuses))
@@ -374,7 +358,6 @@ def _build_post_status_query(
             MediaAssets.storage_key,
             VideoAsset.duration_sec,
             price_purchase_sq.c.price_purchase_count,
-            plan_purchase_sq.c.plan_purchase_count,
         )
         .order_by(desc(Posts.created_at))
     )
@@ -4561,7 +4544,16 @@ def get_ranking_posts_categories_overall(
 ):
     base_sq = _build_category_base_sq(db, period=period)
 
-    # top categories by total purchases
+    eligible_categories_sq = (
+        db.query(
+            base_sq.c.category_id.label("category_id"),
+            func.count(func.distinct(base_sq.c.creator_user_id)).label("creator_count"),
+        )
+        .group_by(base_sq.c.category_id)
+        .having(func.count(func.distinct(base_sq.c.creator_user_id)) >= 2)
+        .subquery("eligible_categories")
+    )
+
     top_categories_sq = (
         db.query(
             base_sq.c.category_id.label("category_id"),
@@ -4569,13 +4561,16 @@ def get_ranking_posts_categories_overall(
                 "total_purchases"
             ),
         )
+        .join(
+            eligible_categories_sq,
+            eligible_categories_sq.c.category_id == base_sq.c.category_id,
+        )
         .group_by(base_sq.c.category_id)
         .order_by(desc("total_purchases"))
         .limit(top_n_categories)
         .subquery("top_categories")
     )
 
-    # rn_creator: best post per creator within category
     creator_rank_sq = (
         db.query(
             base_sq,
@@ -4597,20 +4592,22 @@ def get_ranking_posts_categories_overall(
         .subquery("creator_rank_sq")
     )
 
-    # order: phase1 first, then the rest
-    phase_key = case((creator_rank_sq.c.rn_creator == 1, 0), else_=1)
+    creator_dedup_sq = (
+        db.query(creator_rank_sq)
+        .filter(creator_rank_sq.c.rn_creator == 1)
+        .subquery("creator_dedup_sq")
+    )
 
     final_rank_sq = db.query(
-        creator_rank_sq,
+        creator_dedup_sq,
         func.row_number()
         .over(
-            partition_by=creator_rank_sq.c.category_id,
+            partition_by=creator_dedup_sq.c.category_id,
             order_by=(
-                phase_key.asc(),
-                creator_rank_sq.c.purchase_count.desc(),
-                creator_rank_sq.c.bookmark_count.desc(),
-                creator_rank_sq.c.created_at.desc(),
-                creator_rank_sq.c.post_id.desc(),
+                creator_dedup_sq.c.purchase_count.desc(),
+                creator_dedup_sq.c.bookmark_count.desc(),
+                creator_dedup_sq.c.created_at.desc(),
+                creator_dedup_sq.c.post_id.desc(),
             ),
         )
         .label("rn"),
@@ -4619,10 +4616,7 @@ def get_ranking_posts_categories_overall(
     result = (
         db.query(final_rank_sq)
         .filter(final_rank_sq.c.rn <= limit_per_category)
-        .order_by(
-            final_rank_sq.c.category_name,
-            final_rank_sq.c.rn.asc(),
-        )
+        .order_by(final_rank_sq.c.category_name, final_rank_sq.c.rn.asc())
         .all()
     )
     return result
