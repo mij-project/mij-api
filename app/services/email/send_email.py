@@ -512,19 +512,21 @@ def send_cancel_subscription_email(
 def send_buyer_cancel_subscription_email(
     to: str,
     user_name: str | None = None,
-    creator_user_name: str | None = None,
-    plan_name: str | None = None,
-    plan_url: str | None = None,
+    user_email: str | None = None,
+    sendid: str | None = None,
+    failure_date: str | None = None,
+    transaction_id: str | None = None,
 ) -> None:
     """プラン解約通知メール（購入者向け）"""
     if not getattr(settings, "EMAIL_ENABLED", True):
         return
-    subject = f"【mijfans】プラン解約のご連絡"
+    subject = f"【mijfans】決済失敗のご連絡"
     ctx = {
         "user_name": user_name,
-        "creator_user_name": creator_user_name,
-        "plan_name": plan_name,
-        "plan_url": plan_url,
+        "user_email": user_email,
+        "sendid": sendid,
+        "failure_date": failure_date,
+        "transaction_id": transaction_id,
     }
     send_templated_email(
         to=to,
