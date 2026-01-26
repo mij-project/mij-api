@@ -1,0 +1,19 @@
+from __future__ import annotations
+from uuid import UUID
+from datetime import datetime
+
+from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from common.db_session import Base
+
+
+class PostCategories(Base):
+    """投稿カテゴリ"""
+    __tablename__ = "post_categories"
+
+    post_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, index=True)
+    category_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
