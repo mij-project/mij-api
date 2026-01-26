@@ -583,20 +583,20 @@ def _handle_plan_payment_success(
             body_text=plan.welcome_message,
         )
 
-        # # フォロー通知を送信
-        # is_following = followes_crud.is_following(
-        #     db=db,
-        #     follower_user_id=buyer_user_id,
-        #     creator_user_id=creator_user_id,
-        # )
+        # フォロー状況を取得
+        is_following = followes_crud.is_following(
+            db=db,
+            follower_user_id=buyer_user_id,
+            creator_user_id=creator_user_id,
+        )
 
-        # # フォローしていない場合はフォローを作成
-        # if not is_following:
-        #     followes_crud.create_follow(
-        #         db=db,
-        #         follower_user_id=buyer_user_id,
-        #         creator_user_id=creator_user_id,
-        #     )
+        # フォローしていない場合はフォローを作成
+        if not is_following:
+            followes_crud.create_follow(
+                db=db,
+                follower_user_id=buyer_user_id,
+                creator_user_id=creator_user_id,
+            )
 
         logger.info(
             f"Sent welcome message: {message.id} from creator={creator_user_id} "
@@ -1691,9 +1691,10 @@ def _handle_buyer_subscription_payment_failure_notification(
     send_buyer_cancel_subscription_email(
         to=buyer_user.email,
         user_name=buyer_user.profile_name,
-        creator_user_name=creator_info.profile_name,
-        plan_name=contents_name,
-        plan_url=email_content_url,
+        user_email=buyer_user.email,
+        sendid=payment_transaction.id,
+        failure_date=_convert_utc_to_jst(payment_transaction.updated_at),
+        transaction_id=str(payment_transaction.id),
     )
 
     # プラン解約の通知
