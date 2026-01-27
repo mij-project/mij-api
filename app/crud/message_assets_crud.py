@@ -872,7 +872,18 @@ def get_user_message_assets_counts(
         .subquery()
     )
 
-    # 予約中のgroup_byを取得（審査中・拒否されたアセットを持つものを除外）
+    # status=1のメッセージを持つgroup_byを取得（未送信のメッセージのみを対象）
+    group_by_with_active_messages = (
+        db.query(ConversationMessages.group_by)
+        .filter(
+            ConversationMessages.group_by.isnot(None),
+            ConversationMessages.status == 1
+        )
+        .distinct()
+        .subquery()
+    )
+
+    # 予約中のgroup_byを取得（審査中・拒否されたアセットを持つものを除外、status=1のメッセージを持つものを除外）
     # 予約日時が過ぎているものは除外
     # アセット付きメッセージもカウントする（LEFT JOINを使用）
     reserved_subquery = (
@@ -887,6 +898,10 @@ def get_user_message_assets_counts(
             # 審査中・拒否されたアセットを持つgroup_byを除外
             ~ConversationMessages.group_by.in_(
                 db.query(group_by_with_pending_or_rejected_assets.c.group_by)
+            ),
+            # status=1のメッセージを持つgroup_byを除外（未送信のメッセージのみ）
+            ~ConversationMessages.group_by.in_(
+                db.query(group_by_with_active_messages.c.group_by)
             ),
             # 予約日時が設定されており、現在時刻より後のもののみ（scheduled_atがNULLの場合は除外）
             ConversationMessages.scheduled_at.isnot(None),

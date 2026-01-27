@@ -19,6 +19,7 @@ from app.api.commons.function import CommonFunction
 from app.models.profiles import Profiles
 import os
 import json
+import time
 from datetime import timezone, timedelta
 from app.core.logger import Logger as CoreLogger
 
@@ -61,10 +62,10 @@ class BulkMessageDomain:
             return result
         except Exception as e:
             self.logger.error(f"一斉送信用Presigned URL取得エラー: {e}")
-            raise Exception(status_code=500, detail=str(e))
+            raise Exception(str(e))
 
 
-    def send_bulk_message(self, request: BulkMessageSendRequest, current_user: Users):
+    async def send_bulk_message(self, request: BulkMessageSendRequest, current_user: Users):
         """
         一斉送信の処理
         - スケジュールを定義する前に、送信先とアセットのチェックを行う
@@ -80,13 +81,13 @@ class BulkMessageDomain:
             # スケジュールを定義する前に、送信先とアセットのチェックを行う
             self.__check_schedule_name(request)
 
-            sent_count, message_ids, group_by, target_user_ids = self._handle_message_sending(request, current_user)
+            sent_count, message_ids, group_by, target_user_ids = await self._handle_message_sending(request, current_user)
 
             # スケジュール送信または即時送信の処理
             if request.scheduled_at:
-                self._handle_scheduled_message(group_by, request.scheduled_at, current_user.id)
+                await self._handle_scheduled_message(group_by, request.scheduled_at, current_user.id)
             else:
-                self._handle_immediate_message(request, target_user_ids, current_user.id)
+                await self._handle_immediate_message(request, target_user_ids, current_user.id)
 
 
             return {
@@ -98,12 +99,12 @@ class BulkMessageDomain:
         except Exception as e:
             self.db.rollback()
             self.logger.error(f"一斉送信エラー: {e}")
-            raise Exception(status_code=500, detail=str(e))
+            raise Exception(str(e))
      
     ########################################################
     # メイン処理
     ########################################################
-    def _handle_message_sending(self, request: BulkMessageSendRequest, current_user: Users):
+    async def _handle_message_sending(self, request: BulkMessageSendRequest, current_user: Users):
         """
         メッセージ送信の処理（クラス内完結）
         受信者へのメッセージ送信を制御
@@ -126,7 +127,7 @@ class BulkMessageDomain:
         )
 
         if not target_user_ids:
-            raise Exception(status_code=400, detail="送信対象のユーザーが見つかりません")
+            raise Exception("送信対象のユーザーが見つかりません")
 
         # メッセージ送信（DB接続）
         sent_count, message_ids, group_by = bulk_message_crud.send_bulk_messages(
@@ -141,7 +142,7 @@ class BulkMessageDomain:
 
         return sent_count, message_ids, group_by, target_user_ids
 
-    def _handle_scheduled_message(self, group_by: str, scheduled_at: datetime, sender_user_id: UUID):
+    async def _handle_scheduled_message(self, group_by: str, scheduled_at: datetime, sender_user_id: UUID):
         """
         スケジュール送信の処理（クラス内完結）
         - ECSタスクのスケジュールを定義
@@ -156,20 +157,21 @@ class BulkMessageDomain:
             Exception: ECSタスクのスケジュール定義に失敗した場合
         """
         # 外部サービス（ECS）への接続
-        result = self.__set_ecs_scheduler(group_by, scheduled_at, sender_user_id)
+        result = await self.__set_ecs_scheduler(group_by, scheduled_at, sender_user_id)
         if not result["result"]:
             self.db.rollback()
-            raise Exception(status_code=500, detail="ECSタスクのスケジュールを定義できませんでした")
+            error_detail = result.get("error", "不明なエラー")
+            raise Exception(f"ECSタスクのスケジュールを定義できませんでした: {error_detail}")
         
         # クラス内完結処理：予約メッセージオブジェクトの作成
-        reservation_message_obj = self.__create_reservation_message_object(
+        reservation_message_obj = await self.__create_reservation_message_object(
             result["schedule_name"], group_by, scheduled_at
         )
         
         # DB接続：予約メッセージの保存
         self.__reservation_message(reservation_message_obj)
 
-    def _handle_immediate_message(self, request: BulkMessageSendRequest, target_user_ids: List[UUID], sender_user_id: UUID):
+    async def _handle_immediate_message(self, request: BulkMessageSendRequest, target_user_ids: List[UUID], sender_user_id: UUID):
         """
         即時送信の処理（クラス内完結）
         - 受信者に通知とメールを送信（ベストエフォート）
@@ -207,7 +209,7 @@ class BulkMessageDomain:
             reservation_message=reservation_message_obj
         )
 
-    def __set_ecs_scheduler(
+    async def __set_ecs_scheduler(
         self,
         group_by: str,
         scheduled_at: datetime,
@@ -225,11 +227,24 @@ class BulkMessageDomain:
         Returns:
             dict: スケジュール情報
         """
+        schedule_name = None
         try:
             scheduler = scheduler_client()
 
-            # (A) スケジュール名（ユニークに）
-            schedule_name = f"send-resv-msg-{sender_user_id}-{int(scheduled_at.timestamp())}"
+            # (A) スケジュール名（ユニークに - 64文字制限を考慮して短縮）
+            # UUIDのハイフンを削除して短縮し、ユニークIDも短縮
+            sender_id_short = str(sender_user_id).replace("-", "")[:12]  # UUIDのハイフンを削除して最初の12文字
+            timestamp = int(scheduled_at.timestamp())
+            unique_id = str(uuid.uuid4()).replace("-", "")[:6]  # UUIDのハイフンを削除して最初の6文字
+            schedule_name = f"bulk-{sender_id_short}-{timestamp}-{unique_id}"
+            
+            # スケジュール名の長さを確認（デバッグ用）
+            if len(schedule_name) > 64:
+                self.logger.warning(f"Schedule name too long: {len(schedule_name)} chars: {schedule_name}")
+                # さらに短縮
+                sender_id_short = str(sender_user_id).replace("-", "")[:8]
+                unique_id = str(uuid.uuid4()).replace("-", "")[:4]
+                schedule_name = f"bulk-{sender_id_short}-{timestamp}-{unique_id}"
 
             # (B) 単発 at() 形式（秒まで）
             # scheduled_at は UTC で受け取るため、JST (UTC+9) に変換
@@ -276,36 +291,81 @@ class BulkMessageDomain:
                 ]
             }
 
-            scheduler.create_schedule(
-                Name=schedule_name,
-                ScheduleExpression=schedule_expression,
-                ScheduleExpressionTimezone="Asia/Tokyo",
-                FlexibleTimeWindow={"Mode": "OFF"},
-                State="ENABLED",
-                ActionAfterCompletion="DELETE",
-                Target={
-                    # ECS RunTask ターゲット
-                    "Arn": os.environ["ECS_SEND_RESERVATION_MESSAGE_CLUSTER_ARN"],      # ※クラスターARNを入れる
-                    "RoleArn": os.environ["SCHEDULER_ROLE_ARN"],           # SchedulerがRunTaskできるロール
-                    "EcsParameters": {
-                        "TaskDefinitionArn": task_definition,              # ARN推奨（名前だけだと環境でズレることがある）
-                        "LaunchType": "FARGATE",
-                        "NetworkConfiguration": network_configuration,
-                        # 必要なら PlatformVersion / CapacityProviderStrategy など
+            try:
+                scheduler.create_schedule(
+                    Name=schedule_name,
+                    ScheduleExpression=schedule_expression,
+                    ScheduleExpressionTimezone="Asia/Tokyo",
+                    FlexibleTimeWindow={"Mode": "OFF"},
+                    State="ENABLED",
+                    ActionAfterCompletion="DELETE",
+                    Target={
+                        # ECS RunTask ターゲット
+                        "Arn": os.environ["ECS_SEND_RESERVATION_MESSAGE_CLUSTER_ARN"],      # ※クラスターARNを入れる
+                        "RoleArn": os.environ["SCHEDULER_ROLE_ARN"],           # SchedulerがRunTaskできるロール
+                        "EcsParameters": {
+                            "TaskDefinitionArn": task_definition,              # ARN推奨（名前だけだと環境でズレることがある）
+                            "LaunchType": "FARGATE",
+                            "NetworkConfiguration": network_configuration,
+                            # 必要なら PlatformVersion / CapacityProviderStrategy など
+                        },
+                        "Input": json.dumps(overrides),
                     },
-                    "Input": json.dumps(overrides),
-                },
-                # 可能なら実行後削除（ActionAfterCompletion はSDK/バージョンで差分が出ることがあるので注意）
-            )
+                    # 可能なら実行後削除（ActionAfterCompletion はSDK/バージョンで差分が出ることがあるので注意）
+                )
+            except Exception as create_error:
+                # ConflictExceptionの場合、既存のスケジュールを削除してから再作成を試みる
+                error_str = str(create_error)
+                if "ConflictException" in error_str or "already exists" in error_str:
+                    self.logger.warning(f"Schedule {schedule_name} already exists, attempting to delete and recreate")
+                    try:
+                        # 既存のスケジュールを削除
+                        scheduler.delete_schedule(Name=schedule_name)
+                        self.logger.info(f"Deleted existing schedule: {schedule_name}")
+                        
+                        # 少し待ってから再作成
+                        time.sleep(0.5)
+                        
+                        # 再作成
+                        scheduler.create_schedule(
+                            Name=schedule_name,
+                            ScheduleExpression=schedule_expression,
+                            ScheduleExpressionTimezone="Asia/Tokyo",
+                            FlexibleTimeWindow={"Mode": "OFF"},
+                            State="ENABLED",
+                            ActionAfterCompletion="DELETE",
+                            Target={
+                                "Arn": os.environ["ECS_SEND_RESERVATION_MESSAGE_CLUSTER_ARN"],
+                                "RoleArn": os.environ["SCHEDULER_ROLE_ARN"],
+                                "EcsParameters": {
+                                    "TaskDefinitionArn": task_definition,
+                                    "LaunchType": "FARGATE",
+                                    "NetworkConfiguration": network_configuration,
+                                },
+                                "Input": json.dumps(overrides),
+                            },
+                        )
+                        self.logger.info(f"Successfully recreated schedule: {schedule_name}")
+                    except Exception as retry_error:
+                        # 再作成も失敗した場合はエラーを返す
+                        error_message = f"Failed to recreate schedule after deletion: {str(retry_error)}"
+                        self.logger.error(error_message, exc_info=True)
+                        raise Exception(error_message)
+                else:
+                    # ConflictException以外のエラーはそのまま再発生
+                    raise
+            
             return {
                 "schedule_name": schedule_name,
                 "result": True,
             }
         except Exception as e:
-            self.logger.error(f"Failed to define ECS task schedule: {e}")
+            error_message = str(e)
+            self.logger.error(f"Failed to define ECS task schedule: {error_message}", exc_info=True)
             return {
                 "schedule_name": schedule_name,
                 "result": False,
+                "error": error_message,
             }
 
     def __notification_service(
@@ -380,7 +440,7 @@ class BulkMessageDomain:
     ########################################################
     # クラス内完結処理
     ########################################################
-    def __create_reservation_message_object(
+    async def __create_reservation_message_object(
         self, 
         event_bridge_name: str, 
         group_by: str, 
@@ -420,12 +480,12 @@ class BulkMessageDomain:
 
         if request.asset_type == MessageAssetType.IMAGE:
             if request.content_type not in allowed_image_types:
-                raise Exception(status_code=400, detail=f"Invalid image content type. Allowed: {', '.join(allowed_image_types)}")
+                raise Exception(f"Invalid image content type. Allowed: {', '.join(allowed_image_types)}")
         elif request.asset_type == MessageAssetType.VIDEO:
             if request.content_type not in allowed_video_types:
-                raise Exception(status_code=400, detail=f"Invalid video content type. Allowed: {', '.join(allowed_video_types)}")
+                raise Exception(f"Invalid video content type. Allowed: {', '.join(allowed_video_types)}")
         else:
-            raise Exception(status_code=400, detail="Invalid asset type")
+            raise Exception("Invalid asset type")
 
     @staticmethod
     def __check_file_extension(request: PresignedUrlRequest):
@@ -443,7 +503,7 @@ class BulkMessageDomain:
         }
 
         if request.file_extension.lower() not in allowed_extensions[request.asset_type]:
-            raise Exception(status_code=400, detail=f"Invalid file extension for asset type. Allowed: {', '.join(allowed_extensions[request.asset_type])}")
+            raise Exception(f"Invalid file extension for asset type. Allowed: {', '.join(allowed_extensions[request.asset_type])}")
 
     @staticmethod
     def __get_presigned_url(request: PresignedUrlRequest, current_user: Users):
@@ -480,8 +540,8 @@ class BulkMessageDomain:
         """
         # 送信先が1つも選択されていない場合はエラー
         if not request.send_to_chip_senders and not request.send_to_single_purchasers and not request.send_to_plan_subscribers and not request.send_to_follower_users:
-            raise Exception(status_code=400, detail="送信先を選択してください")
+            raise Exception("送信先を選択してください")
 
         # アセットがある場合はasset_typeも必要
         if request.asset_storage_key and not request.asset_type:
-            raise Exception(status_code=400, detail="asset_typeが必要です")
+            raise Exception("asset_typeが必要です")

@@ -234,31 +234,6 @@ def get_my_message_assets(
                     partner_avatar=partner_avatar,
                 )
             )
-        # 承認済み（APPROVED）で予約送信が設定されている場合は「予約中」タブに表示
-        elif is_approved_asset and is_scheduled:
-            reserved_responses.append(
-                UserMessageAssetResponse(
-                    id=asset.id,
-                    message_id=asset.message_id,
-                    type=message.type,
-                    group_by=message.group_by if message.group_by else str(message.id),
-                    conversation_id=message.conversation_id,
-                    asset_type=asset.asset_type,
-                    storage_key=asset.storage_key,
-                    cdn_url=cdn_url,
-                    reject_comments=asset.reject_comments,
-                    created_at=asset.created_at,
-                    updated_at=asset.updated_at,
-                    message_text=message.body_text,
-                    scheduled_at=message.scheduled_at,
-                    partner_user_id=partner_user_id,
-                    partner_username=partner_username,
-                    partner_profile_name=partner_profile_name,
-                    partner_avatar=partner_avatar,
-                )
-            )
-            processed_reserved_group_bys.add(message.group_by if message.group_by else str(message.id))
-        # 拒否（REJECTED）の場合は「拒否」タブに表示
         elif is_rejected_asset:
             reject_responses.append(
                 UserMessageAssetResponse(
@@ -294,9 +269,21 @@ def get_my_message_assets(
         if not message or message.deleted_at is not None:
             continue
 
-        # assetがある場合、既に処理済みならスキップ
+        # メッセージのgroup_byを取得
         message_group_by = message.group_by if message.group_by else str(message.id)
-        if asset and message_group_by in processed_reserved_group_bys:
+
+        # 同じgroup_byを持つconversation_messagesでstatus=1のものが存在するかチェック
+        # 存在する場合は、予約中タブに表示しない
+        active_message_count = (
+            db.query(ConversationMessages)
+            .filter(
+                ConversationMessages.group_by == message_group_by,
+                ConversationMessages.status == 1
+            )
+            .count()
+        )
+
+        if active_message_count > 0:
             continue
 
         # assetがない場合のgroup_by

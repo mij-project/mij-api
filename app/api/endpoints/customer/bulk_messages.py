@@ -79,7 +79,7 @@ def get_bulk_message_upload_url(
 
 
 @router.post("/", response_model=BulkMessageSendResponse)
-def send_bulk_message(
+async def send_bulk_message(
     request: BulkMessageSendRequest,
     current_user: Users = Depends(get_current_user),
     initial_bulk_message_domain: BulkMessageDomain = Depends(initial_bulk_message_domain),
@@ -92,7 +92,7 @@ def send_bulk_message(
     - 予約送信にも対応
     """
     try:
-        result = initial_bulk_message_domain.send_bulk_message(request, current_user)
+        result = await initial_bulk_message_domain.send_bulk_message(request, current_user)
         return BulkMessageSendResponse(
             message=result["message"],
             sent_count=result["sent_count"],
