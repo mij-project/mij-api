@@ -660,16 +660,13 @@ def _send_payment_notifications_for_buyer(
                 # クリエイター情報を取得
                 plan = plan_crud.get_plan_by_id(db, transaction.order_id)
                 if plan:
-                    creator_user = user_crud.get_user_by_id(db, plan.creator_user_id)
-                    creator_user_name = (
-                        creator_user.profile_name if creator_user else None
-                    )
                     send_buyer_cancel_subscription_email(
                         to=user_email,
                         user_name=user_name,
-                        creator_user_name=creator_user_name,
-                        plan_name=contents_name,
-                        plan_url=email_content_url,
+                        user_email=user_email,
+                        sendid=sendid,
+                        failure_date=payment_date,
+                        transaction_id=transaction_id,
                     )
                 else:
                     # プラン情報が取得できない場合は通常の決済失敗メールを送信
