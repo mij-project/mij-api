@@ -42,6 +42,7 @@ from app.api.endpoints.customer import (
     time_sale,
     push_noti,
     transaction,
+    shorts,
 )
 
 # Admin routes
@@ -168,7 +169,7 @@ api_router.include_router(
 api_router.include_router(time_sale.router, prefix="/time-sale", tags=["Time Sale"])
 api_router.include_router(transaction.router, prefix="/transaction", tags=["Transaction"])
 api_router.include_router(push_noti.router, prefix="/push", tags=["Push Notification"])
-
+api_router.include_router(shorts.router, prefix="/shorts", tags=["Shorts"])
 
 # Payment routes
 api_router.include_router(credix.router, prefix="/payments", tags=["Payments"])

@@ -68,9 +68,7 @@ class CreatorsCategoriesRecommend:
     def __init__(self, logger: Logger):
         self.db: Session = next(get_db())
         self.logger = logger
-        self.MASK_FOLLOW_FOR_NEW_CREATOR = (
-            os.environ.get("MASK_FOLLOW_FOR_NEW_CREATOR", "1") == "1"
-        )
+        self.MASK_FOLLOW_FOR_NEW_CREATOR = os.environ.get("MASK_FOLLOW_FOR_NEW_CREATOR", "1") == "1"
 
     def exec(self):
         creator_ds, category_ds, seen_creator, seen_category = self._build_data()
@@ -93,12 +91,8 @@ class CreatorsCategoriesRecommend:
             top_k=CreatorsCategoriesRecommend.TOP_K,
         )
 
-        top_new_creators_payload = self._build_payload_df(
-            top_new_creators, "creator_id", CreatorsCategoriesRecommend.TYPE_CREATOR
-        )
-        top_new_categories_payload = self._build_payload_df(
-            top_new_categories, "category_id", CreatorsCategoriesRecommend.TYPE_CATEGORY
-        )
+        top_new_creators_payload = self._build_payload_df(top_new_creators, "creator_id", CreatorsCategoriesRecommend.TYPE_CREATOR)
+        top_new_categories_payload = self._build_payload_df(top_new_categories, "category_id", CreatorsCategoriesRecommend.TYPE_CATEGORY)
 
         self._upsert_user_recommendations(top_new_creators_payload)
         self._upsert_user_recommendations(top_new_categories_payload)
@@ -113,9 +107,7 @@ class CreatorsCategoriesRecommend:
         )
         follows_df = pd.read_sql(follows_stmt, self.db.bind)
         follows_df["w"] = BaseW.FOLLOW.value
-        follows_df_uc = follows_df.groupby(["user_id", "creator_id"], as_index=False)[
-            "w"
-        ].sum()
+        follows_df_uc = follows_df.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         # Likes -> user x creator
         likes_stmt_uc = (
@@ -129,9 +121,7 @@ class CreatorsCategoriesRecommend:
         )
         likes_df_uc = pd.read_sql(likes_stmt_uc, self.db.bind)
         likes_df_uc["w"] = BaseW.LIKE_CREATOR_W.value
-        likes_df_uc_cat = likes_df_uc.groupby(
-            ["user_id", "creator_id"], as_index=False
-        )["w"].sum()
+        likes_df_uc_cat = likes_df_uc.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         # Likes -> user x category
         likes_stmt_cat = (
@@ -156,18 +146,12 @@ class CreatorsCategoriesRecommend:
         likes_df_cat = likes_df_cat.merge(df_cat_count, on="post_id", how="left")
         likes_df_cat["n_cat"] = likes_df_cat["n_cat"].fillna(1).astype(int)
 
-        likes_df_cat["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(likes_df_cat["ts"])
-        ).dt.total_seconds() / 86400.0
-        likes_df_cat["w_raw"] = BaseW.LIKE_CATEGORY_W.value * np.exp(
-            -likes_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS
-        )
+        likes_df_cat["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(likes_df_cat["ts"])).dt.total_seconds() / 86400.0
+        likes_df_cat["w_raw"] = BaseW.LIKE_CATEGORY_W.value * np.exp(-likes_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS)
 
         likes_df_cat["w"] = likes_df_cat["w_raw"] / likes_df_cat["n_cat"]
 
-        likes_df_cat = likes_df_cat.groupby(["user_id", "category_id"], as_index=False)[
-            "w"
-        ].sum()
+        likes_df_cat = likes_df_cat.groupby(["user_id", "category_id"], as_index=False)["w"].sum()
 
         # Bookmarks -> user x creator
         bookmark_stmt_uc = (
@@ -182,17 +166,10 @@ class CreatorsCategoriesRecommend:
 
         bookmark_df_uc = pd.read_sql(bookmark_stmt_uc, self.db.bind)
 
-        bookmark_df_uc["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None))
-            - pd.to_datetime(bookmark_df_uc["ts"])
-        ).dt.total_seconds() / 86400.0
-        bookmark_df_uc["w"] = BaseW.BOOKMARK_CREATOR_W.value * np.exp(
-            -bookmark_df_uc["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS
-        )
+        bookmark_df_uc["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(bookmark_df_uc["ts"])).dt.total_seconds() / 86400.0
+        bookmark_df_uc["w"] = BaseW.BOOKMARK_CREATOR_W.value * np.exp(-bookmark_df_uc["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS)
 
-        bookmark_df_uc = bookmark_df_uc.groupby(
-            ["user_id", "creator_id"], as_index=False
-        )["w"].sum()
+        bookmark_df_uc = bookmark_df_uc.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         # Bookmarks -> user x category
         bookmark_stmt_cat = (
@@ -211,19 +188,12 @@ class CreatorsCategoriesRecommend:
         bookmark_df_cat = bookmark_df_cat.merge(df_cat_count, on="post_id", how="left")
         bookmark_df_cat["n_cat"] = bookmark_df_cat["n_cat"].fillna(1).astype(int)
 
-        bookmark_df_cat["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None))
-            - pd.to_datetime(bookmark_df_cat["ts"])
-        ).dt.total_seconds() / 86400.0
-        bookmark_df_cat["w_raw"] = BaseW.BOOKMARK_CATEGORY_W.value * np.exp(
-            -bookmark_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS
-        )
+        bookmark_df_cat["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(bookmark_df_cat["ts"])).dt.total_seconds() / 86400.0
+        bookmark_df_cat["w_raw"] = BaseW.BOOKMARK_CATEGORY_W.value * np.exp(-bookmark_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS)
 
         bookmark_df_cat["w"] = bookmark_df_cat["w_raw"] / bookmark_df_cat["n_cat"]
 
-        bookmark_df_cat = bookmark_df_cat.groupby(
-            ["user_id", "category_id"], as_index=False
-        )["w"].sum()
+        bookmark_df_cat = bookmark_df_cat.groupby(["user_id", "category_id"], as_index=False)["w"].sum()
 
         # PostViewsTracking -> user x creator
         pv_stmt_uc = (
@@ -241,16 +211,12 @@ class CreatorsCategoriesRecommend:
 
         pv_df_uc = pd.read_sql(pv_stmt_uc, self.db.bind)
 
-        pv_df_uc["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pv_df_uc["ts"])
-        ).dt.total_seconds() / 86400.0
+        pv_df_uc["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pv_df_uc["ts"])).dt.total_seconds() / 86400.0
         pv_df_uc["decay"] = np.exp(-pv_df_uc["age_days"] / self.TAU_DAYS)
 
         if "watched_time" in pv_df_uc.columns and "total_time" in pv_df_uc.columns:
             denom = pv_df_uc["total_time"].replace(0, np.nan)
-            pv_df_uc["watched_ratio"] = (
-                (pv_df_uc["watched_time"] / denom).fillna(0.0).clip(0, 1)
-            )
+            pv_df_uc["watched_ratio"] = (pv_df_uc["watched_time"] / denom).fillna(0.0).clip(0, 1)
 
             pv_df_uc["q"] = 0.0
             pv_df_uc.loc[pv_df_uc["watched_ratio"] >= 0.10, "q"] = 0.5
@@ -259,18 +225,14 @@ class CreatorsCategoriesRecommend:
         else:
             pv_df_uc["q"] = 1.0
 
-        pv_df_uc["w"] = (
-            BaseW.VIEW_POST_CREATOR_W.value * pv_df_uc["decay"] * pv_df_uc["q"]
-        )
+        pv_df_uc["w"] = BaseW.VIEW_POST_CREATOR_W.value * pv_df_uc["decay"] * pv_df_uc["q"]
 
         pv_df_uc["day"] = pd.to_datetime(pv_df_uc["ts"]).dt.date
-        pv_df_uc = pv_df_uc.sort_values(
-            ["user_id", "post_id", "day", "w"], ascending=[True, True, True, False]
-        ).drop_duplicates(subset=["user_id", "post_id", "day"], keep="first")
+        pv_df_uc = pv_df_uc.sort_values(["user_id", "post_id", "day", "w"], ascending=[True, True, True, False]).drop_duplicates(
+            subset=["user_id", "post_id", "day"], keep="first"
+        )
 
-        pv_df_uc = pv_df_uc.groupby(["user_id", "creator_id"], as_index=False)[
-            "w"
-        ].sum()
+        pv_df_uc = pv_df_uc.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         # PostViewsTracking -> user x category
         pv_stmt_cat = (
@@ -291,16 +253,12 @@ class CreatorsCategoriesRecommend:
         pv_df_cat = pv_df_cat.merge(df_cat_count, on="post_id", how="left")
         pv_df_cat["n_cat"] = pv_df_cat["n_cat"].fillna(1).astype(int)
 
-        pv_df_cat["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pv_df_cat["ts"])
-        ).dt.total_seconds() / 86400.0
+        pv_df_cat["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pv_df_cat["ts"])).dt.total_seconds() / 86400.0
         pv_df_cat["decay"] = np.exp(-pv_df_cat["age_days"] / self.TAU_DAYS)
 
         if "watched_time" in pv_df_cat.columns and "total_time" in pv_df_cat.columns:
             denom = pv_df_cat["total_time"].replace(0, np.nan)
-            pv_df_cat["watched_ratio"] = (
-                (pv_df_cat["watched_time"] / denom).fillna(0.0).clip(0, 1)
-            )
+            pv_df_cat["watched_ratio"] = (pv_df_cat["watched_time"] / denom).fillna(0.0).clip(0, 1)
 
             pv_df_cat["q"] = 0.0
             pv_df_cat.loc[pv_df_cat["watched_ratio"] >= 0.10, "q"] = 0.5
@@ -309,19 +267,15 @@ class CreatorsCategoriesRecommend:
         else:
             pv_df_cat["q"] = 1.0
 
-        pv_df_cat["w_raw"] = (
-            BaseW.VIEW_POST_CATEGORY_W.value * pv_df_cat["decay"] * pv_df_cat["q"]
-        )
+        pv_df_cat["w_raw"] = BaseW.VIEW_POST_CATEGORY_W.value * pv_df_cat["decay"] * pv_df_cat["q"]
         pv_df_cat["w"] = pv_df_cat["w_raw"] / pv_df_cat["n_cat"]
 
         pv_df_cat["day"] = pd.to_datetime(pv_df_cat["ts"]).dt.date
-        pv_df_cat = pv_df_cat.sort_values(
-            ["user_id", "post_id", "day", "w"], ascending=[True, True, True, False]
-        ).drop_duplicates(subset=["user_id", "post_id", "day"], keep="first")
+        pv_df_cat = pv_df_cat.sort_values(["user_id", "post_id", "day", "w"], ascending=[True, True, True, False]).drop_duplicates(
+            subset=["user_id", "post_id", "day"], keep="first"
+        )
 
-        pv_df_cat = pv_df_cat.groupby(["user_id", "category_id"], as_index=False)[
-            "w"
-        ].sum()
+        pv_df_cat = pv_df_cat.groupby(["user_id", "category_id"], as_index=False)["w"].sum()
 
         # ProfileViewsTracking -> user x creator
         prof_stmt = select(
@@ -332,21 +286,15 @@ class CreatorsCategoriesRecommend:
 
         prof_df = pd.read_sql(prof_stmt, self.db.bind)
 
-        prof_df["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(prof_df["ts"])
-        ).dt.total_seconds() / 86400.0
-        prof_df["w"] = BaseW.VIEW_PROFILE_CREATOR_W.value * np.exp(
-            -prof_df["age_days"] / self.TAU_DAYS
-        )
+        prof_df["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(prof_df["ts"])).dt.total_seconds() / 86400.0
+        prof_df["w"] = BaseW.VIEW_PROFILE_CREATOR_W.value * np.exp(-prof_df["age_days"] / self.TAU_DAYS)
 
         prof_df["day"] = pd.to_datetime(prof_df["ts"]).dt.date
-        prof_df = prof_df.sort_values(
-            ["user_id", "creator_id", "day", "w"], ascending=[True, True, True, False]
-        ).drop_duplicates(subset=["user_id", "creator_id", "day"], keep="first")
+        prof_df = prof_df.sort_values(["user_id", "creator_id", "day", "w"], ascending=[True, True, True, False]).drop_duplicates(
+            subset=["user_id", "creator_id", "day"], keep="first"
+        )
 
-        prof_df_uc = prof_df.groupby(["user_id", "creator_id"], as_index=False)[
-            "w"
-        ].sum()
+        prof_df_uc = prof_df.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         # --- Payment single/price -> user x creator ---
         pay_price_stmt_uc = (
@@ -364,17 +312,10 @@ class CreatorsCategoriesRecommend:
 
         pay_price_df_uc = pd.read_sql(pay_price_stmt_uc, self.db.bind)
 
-        pay_price_df_uc["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None))
-            - pd.to_datetime(pay_price_df_uc["ts"])
-        ).dt.total_seconds() / 86400.0
-        pay_price_df_uc["w"] = BaseW.PAY_SINGLE_CREATOR_W.value * np.exp(
-            -pay_price_df_uc["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS
-        )
+        pay_price_df_uc["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pay_price_df_uc["ts"])).dt.total_seconds() / 86400.0
+        pay_price_df_uc["w"] = BaseW.PAY_SINGLE_CREATOR_W.value * np.exp(-pay_price_df_uc["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS)
 
-        pay_price_df_uc = pay_price_df_uc.groupby(
-            ["user_id", "creator_id"], as_index=False
-        )["w"].sum()
+        pay_price_df_uc = pay_price_df_uc.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         # --- Payment single/price -> user x category ---
         pay_price_stmt_cat = (
@@ -393,23 +334,14 @@ class CreatorsCategoriesRecommend:
 
         pay_price_df_cat = pd.read_sql(pay_price_stmt_cat, self.db.bind)
 
-        pay_price_df_cat = pay_price_df_cat.merge(
-            df_cat_count, on="post_id", how="left"
-        )
+        pay_price_df_cat = pay_price_df_cat.merge(df_cat_count, on="post_id", how="left")
         pay_price_df_cat["n_cat"] = pay_price_df_cat["n_cat"].fillna(1).astype(int)
 
-        pay_price_df_cat["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None))
-            - pd.to_datetime(pay_price_df_cat["ts"])
-        ).dt.total_seconds() / 86400.0
-        pay_price_df_cat["w_raw"] = BaseW.PAY_SINGLE_CATEGORY_W.value * np.exp(
-            -pay_price_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS
-        )
+        pay_price_df_cat["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pay_price_df_cat["ts"])).dt.total_seconds() / 86400.0
+        pay_price_df_cat["w_raw"] = BaseW.PAY_SINGLE_CATEGORY_W.value * np.exp(-pay_price_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS)
         pay_price_df_cat["w"] = pay_price_df_cat["w_raw"] / pay_price_df_cat["n_cat"]
 
-        pay_price_df_cat = pay_price_df_cat.groupby(
-            ["user_id", "category_id"], as_index=False
-        )["w"].sum()
+        pay_price_df_cat = pay_price_df_cat.groupby(["user_id", "category_id"], as_index=False)["w"].sum()
 
         # --- Payment plan -> user x creator ---
         pay_plan_stmt_uc = (
@@ -426,17 +358,10 @@ class CreatorsCategoriesRecommend:
 
         pay_plan_df_uc = pd.read_sql(pay_plan_stmt_uc, self.db.bind)
 
-        pay_plan_df_uc["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None))
-            - pd.to_datetime(pay_plan_df_uc["ts"])
-        ).dt.total_seconds() / 86400.0
-        pay_plan_df_uc["w"] = BaseW.PAY_PLAN_CREATOR_W.value * np.exp(
-            -pay_plan_df_uc["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS
-        )
+        pay_plan_df_uc["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pay_plan_df_uc["ts"])).dt.total_seconds() / 86400.0
+        pay_plan_df_uc["w"] = BaseW.PAY_PLAN_CREATOR_W.value * np.exp(-pay_plan_df_uc["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS)
 
-        pay_plan_df_uc = pay_plan_df_uc.groupby(
-            ["user_id", "creator_id"], as_index=False
-        )["w"].sum()
+        pay_plan_df_uc = pay_plan_df_uc.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         # --- Payment plan -> user x category (dilute) ---
         pay_plan_stmt_cat = (
@@ -458,41 +383,24 @@ class CreatorsCategoriesRecommend:
 
         pay_plan_df_cat = pd.read_sql(pay_plan_stmt_cat, self.db.bind)
 
-        pay_plan_df_cat = pay_plan_df_cat.drop_duplicates(
-            subset=["user_id", "plan_id", "category_id", "ts"]
-        )
+        pay_plan_df_cat = pay_plan_df_cat.drop_duplicates(subset=["user_id", "plan_id", "category_id", "ts"])
 
         plan_cat_cnt = (
-            pay_plan_df_cat.groupby(["user_id", "plan_id", "ts"], as_index=False)[
-                "category_id"
-            ]
+            pay_plan_df_cat.groupby(["user_id", "plan_id", "ts"], as_index=False)["category_id"]
             .nunique()
             .rename(columns={"category_id": "n_cat_in_plan"})
         )
 
-        pay_plan_df_cat = pay_plan_df_cat.merge(
-            plan_cat_cnt, on=["user_id", "plan_id", "ts"], how="left"
-        )
-        pay_plan_df_cat["n_cat_in_plan"] = (
-            pay_plan_df_cat["n_cat_in_plan"].fillna(1).astype(int)
-        )
+        pay_plan_df_cat = pay_plan_df_cat.merge(plan_cat_cnt, on=["user_id", "plan_id", "ts"], how="left")
+        pay_plan_df_cat["n_cat_in_plan"] = pay_plan_df_cat["n_cat_in_plan"].fillna(1).astype(int)
 
-        pay_plan_df_cat["age_days"] = (
-            pd.Timestamp(now.replace(tzinfo=None))
-            - pd.to_datetime(pay_plan_df_cat["ts"])
-        ).dt.total_seconds() / 86400.0
+        pay_plan_df_cat["age_days"] = (pd.Timestamp(now.replace(tzinfo=None)) - pd.to_datetime(pay_plan_df_cat["ts"])).dt.total_seconds() / 86400.0
 
-        pay_plan_df_cat["w_raw"] = BaseW.PAY_PLAN_CATEGORY_W.value * np.exp(
-            -pay_plan_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS
-        )
+        pay_plan_df_cat["w_raw"] = BaseW.PAY_PLAN_CATEGORY_W.value * np.exp(-pay_plan_df_cat["age_days"] / CreatorsCategoriesRecommend.TAU_DAYS)
 
-        pay_plan_df_cat["w"] = (
-            pay_plan_df_cat["w_raw"] / pay_plan_df_cat["n_cat_in_plan"]
-        )
+        pay_plan_df_cat["w"] = pay_plan_df_cat["w_raw"] / pay_plan_df_cat["n_cat_in_plan"]
 
-        pay_plan_df_cat = pay_plan_df_cat.groupby(
-            ["user_id", "category_id"], as_index=False
-        )["w"].sum()
+        pay_plan_df_cat = pay_plan_df_cat.groupby(["user_id", "category_id"], as_index=False)["w"].sum()
 
         creator_train = pd.concat(
             [
@@ -507,9 +415,7 @@ class CreatorsCategoriesRecommend:
             ignore_index=True,
         )
 
-        creator_train = creator_train.groupby(
-            ["user_id", "creator_id"], as_index=False
-        )["w"].sum()
+        creator_train = creator_train.groupby(["user_id", "creator_id"], as_index=False)["w"].sum()
 
         creator_train = (
             pd.concat(
@@ -574,12 +480,7 @@ class CreatorsCategoriesRecommend:
         if self.MASK_FOLLOW_FOR_NEW_CREATOR:
             creator_seen_parts.append(follows_df_uc)
 
-        seen_creator = (
-            pd.concat(creator_seen_parts, ignore_index=True)
-            .groupby("user_id")["creator_id"]
-            .apply(set)
-            .to_dict()
-        )
+        seen_creator = pd.concat(creator_seen_parts, ignore_index=True).groupby("user_id")["creator_id"].apply(set).to_dict()
 
         return creator_train, category_train, seen_creator, seen_category
 
@@ -612,9 +513,7 @@ class CreatorsCategoriesRecommend:
 
         X = csr_matrix((data, (rows, cols)), shape=(len(users), len(ents)))
 
-        tfidf = TfidfTransformer(
-            norm=None, use_idf=True, smooth_idf=True, sublinear_tf=True
-        )
+        tfidf = TfidfTransformer(norm=None, use_idf=True, smooth_idf=True, sublinear_tf=True)
         X_t = tfidf.fit_transform(X)
 
         min_dim = min(X_t.shape)
@@ -675,9 +574,7 @@ class CreatorsCategoriesRecommend:
             "k": k,
         }
 
-    def _build_payload_df(
-        self, df: pd.DataFrame, id_col: str, reco_type: int
-    ) -> pd.DataFrame:
+    def _build_payload_df(self, df: pd.DataFrame, id_col: str, reco_type: int) -> pd.DataFrame:
         if df.empty:
             return pd.DataFrame(columns=["user_id", "type", "payload"])
 
@@ -723,6 +620,7 @@ class CreatorsCategoriesRecommend:
                 index_elements=["user_id", "type"],
                 set_={
                     "payload": stmt.excluded.payload,
+                    "updated_at": datetime.now(timezone.utc),
                 },
             )
 

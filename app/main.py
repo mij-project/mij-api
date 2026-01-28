@@ -67,6 +67,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,       # allow_credentials=True の場合 * は不可
     allow_credentials=True,      # フロントのCookie/Authorization送信に必要
+    allow_origin_regex=r"^http://192\.168\.1\.\d{1,3}:(3000|3001|3002|3003|3005)$",
     allow_methods=["*"],
     allow_headers=["*"],         # 'authorization', 'x-csrf-token' 等も通る
 )
